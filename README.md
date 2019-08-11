@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/jaxnet.svg)](https://pypi.python.org/pypi/jaxnet/#history)
 
-JAXnet is a neural net library for JAX. 
+JAXnet is a neural net library for [JAX](https://github.com/google/jax).
 Other than popular neural net libraries, it is completely functional:
 - No mutable weights in modules
 - No global compute graph
@@ -33,7 +33,7 @@ To initialize parameter values for a network, call `init_params` on any module (
 
 ```python
 batch = np.zeros((3, 2))
-params = net.init_params(batch, random.PRNGKey(0))
+params = net.init_params(random.PRNGKey(0), batch)
 ```
 
 It initializes and returns all parameters, accessible via attributes:
@@ -126,3 +126,5 @@ The main motivation over stax is to simplify nesting modules:
  - Automating `init_params`: delegation to submodules, `output_shape` inference, `rng` passing
  - Seamless use of parameter-free functions as modules
  - Allowing streamlined module/parameter-sharing
+
+Alternative design ideas are discussed [here](DESIGN.md).
