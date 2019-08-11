@@ -14,7 +14,7 @@ Install with
 pip install git+git@github.com:JuliusKunze/jaxnet.git
 ```
 
-# Overview
+## Overview
 
 Defining networks will look similar to the [TensorFlow2 / Keras functional API](https://www.tensorflow.org/beta/guide/keras/functional):
 
@@ -50,9 +50,9 @@ For acceleration use `jit`:
 output = jit(net)(params, batch)
 ```
 
-Training works with JAX' built-in optimizers ([example](https://github.com/google/jax/blob/master/examples/mnist_classifier.py)).
+Here is a [full example](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E) for training an `RNN` model for an OCR task.
 
-# Defining modules
+## Defining modules
 
 Modules are functions decorated with `@parameterized`, with parameters defined through default values:
 
@@ -70,7 +70,7 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
 `Param` specifies parameter shape and initialization function. 
 `@parameterized` transforms this function to allow usage as above.
 
-# Nesting modules
+## Nesting modules
 
 Modules can be used in other modules through default arguments:
 
@@ -118,7 +118,7 @@ def shared_net(input, layer=layer):
     return layer(layer(input))
 ```
 
-# What about [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
+## What about [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
 JAXnet is independent of stax.
 The main motivation over stax is to simplify nesting modules:
  - Automating `init_params`: delegation to submodules, `output_shape` inference, `rng` passing
