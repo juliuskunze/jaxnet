@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/jaxnet.svg)](https://pypi.python.org/pypi/jaxnet/#history)
 
 JAXnet is a neural net library for [JAX](https://github.com/google/jax).
-Other than popular neural net libraries, it is completely functional:
+Different from popular neural net libraries, it is completely functional:
 - No mutable weights in modules
 - No global compute graph
 - No global random key
