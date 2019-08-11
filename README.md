@@ -16,7 +16,7 @@ pip install git+git@github.com:JuliusKunze/jaxnet.git
 
 ## Overview
 
-Defining networks will look similar to the [TensorFlow2 / Keras functional API](https://www.tensorflow.org/beta/guide/keras/functional):
+Defining networks looks similar to the [TensorFlow2 / Keras functional API](https://www.tensorflow.org/beta/guide/keras/functional):
 
 ```python
 from jax import numpy as np, random, jit
@@ -50,7 +50,7 @@ For acceleration use `jit`:
 output = jit(net)(params, batch)
 ```
 
-Here is a [full example](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E) for training an `RNN` model for an OCR task.
+A working demo for training an `RNN` for OCR is [here](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E).
 
 ## Defining modules
 
