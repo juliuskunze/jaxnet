@@ -8,6 +8,12 @@ Other than popular neural net libraries, it is completely functional:
 
 This is an early version. Expect bugs, sharp edges and breaking changes!
 
+Install with
+
+```
+pip install git+git@github.com:JuliusKunze/jaxnet.git
+```
+
 # Overview
 
 Defining networks will look similar to the [TensorFlow2 / Keras functional API](https://www.tensorflow.org/beta/guide/keras/functional):
@@ -19,7 +25,7 @@ from jaxnet import *
 net = Sequential([Dense(10), relu, Dense(4)])
 ```
 
-`Sequential`, `Dense`, `Conv` and `RNN` (with GRUCell) are already supported.
+`Sequential`, `Dense`, `Conv` and `RNN` (with `GRUCell`) are already supported.
 
 To initialize parameter values for a network, call `init_params` on any module (with example inputs and a random key):
 
@@ -33,7 +39,7 @@ It initializes and returns all parameters, accessible via attributes:
 print(params.layers[0].bias) # [0.00212132 0.01169001 0.00331698 0.00460713]
 ```
 
-To invoke the network with these `params`:
+Invoke the network with:
 ```python
 output = net(params, batch)
 ```

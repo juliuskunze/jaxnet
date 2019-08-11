@@ -8,7 +8,7 @@ from jax import numpy as np, random, partial
 from jax.lax import lax, scan
 from jax.scipy.special import logsumexp
 
-from tools import nested_zip, nested_map, nested_enumerate, set_nested_element, \
+from jaxnet.tools import nested_zip, nested_map, nested_enumerate, set_nested_element, \
     nested_any, IndexedValue, ZippedValue
 
 Param = namedtuple('Param', ['get_shape', 'init'])

@@ -1,7 +1,7 @@
 from jax import numpy as np, random, jit
 
-from jaxnet import Dense, Sequential, relu, parameterized, Conv, flatten, MaxPool, zeros, GRUCell, \
-    Rnn, softmax
+from jaxnet import Dense, Sequential, relu, parameterized, Conv, flatten, MaxPool, zeros, \
+    GRUCell, Rnn, softmax
 
 
 def test_params():

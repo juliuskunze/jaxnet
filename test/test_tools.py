@@ -1,5 +1,5 @@
-from tools import nested_map, nested_enumerate, nested_zip, get_nested_element, set_nested_element, \
-    nested_any
+from jaxnet.tools import nested_map, nested_enumerate, nested_zip, get_nested_element, \
+    set_nested_element, nested_any
 
 
 def test_nested_map():
