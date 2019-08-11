@@ -13,7 +13,10 @@ This is an early version. Expect bugs, sharp edges and breaking changes!
 Defining networks will look similar to the [TensorFlow2 / Keras functional API](https://www.tensorflow.org/beta/guide/keras/functional):
 
 ```python
-net = Sequential([Dense(10), relu, Dense(10)])
+from jax import numpy as np, random, jit
+from jaxnet import *
+
+net = Sequential([Dense(10), relu, Dense(4)])
 ```
 
 `Dense` and `Conv` and `Sequential` are already supported.
@@ -46,9 +49,6 @@ output = jit(net)(params, batch)
 Modules are functions decorated with `@parameterized`, with parameters defined through default values:
 
 ```python
-from jax import random, numpy as np
-from jaxnet import parameterized, Param, glorot, randn
-
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parameterized
     def dense(inputs,

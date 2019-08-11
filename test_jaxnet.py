@@ -138,6 +138,7 @@ def test_conv_max_pool():
     output = pooled({'layers': [params, ()]}, inputs)
     assert np.array_equal(output, np.zeros((1, 3, 3, 2)))
 
+
 def test_example():
     net = Sequential([Dense(2), relu, Dense(4)])
     batch = np.zeros((3, 2))
