@@ -10,7 +10,7 @@ This is an early version. Expect bugs, sharp edges and breaking changes!
 
 # Overview
 
-Defining networks will look similar to [tensorflow2/keras API](https://www.tensorflow.org/beta/guide/keras/functional):
+Defining networks will look similar to the [TensorFlow2 / Keras functional API](https://www.tensorflow.org/beta/guide/keras/functional):
 
 ```python
 net = Sequential([Dense(10), relu, Dense(10)])
