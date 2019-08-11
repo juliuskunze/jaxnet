@@ -11,7 +11,7 @@ This is an early version. Expect bugs, sharp edges and breaking changes!
 Install with
 
 ```
-pip install git+git@github.com:JuliusKunze/jaxnet.git
+pip install jaxnet
 ```
 
 ## Overview
