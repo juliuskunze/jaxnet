@@ -44,6 +44,8 @@ For acceleration use `jit`:
 output = jit(net)(params, batch)
 ```
 
+Training works with JAX' built-in optimizers ([example](https://github.com/google/jax/blob/master/examples/mnist_classifier.py)).
+
 # Defining modules
 
 Modules are functions decorated with `@parameterized`, with parameters defined through default values:
@@ -111,8 +113,6 @@ shared_net=Sequential([layer, layer])
 def shared_net(input, layer=layer):
     return layer(layer(input))
 ```
-
-For training, you can use JAX' optimizers ([example usage](https://github.com/google/jax/blob/master/examples/mnist_classifier.py)).
 
 # What about [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
 JAXnet is independent of stax.
