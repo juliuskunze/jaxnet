@@ -41,7 +41,7 @@ For acceleration use `jit`:
 output = jit(net)(params, batch)
 ```
 
-#Defining modules
+# Defining modules
 
 Modules are functions decorated with `@parameterized`, with parameters defined through default values:
 
