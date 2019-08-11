@@ -12,7 +12,7 @@ This is an early version. Expect bugs, sharp edges and breaking changes!
 
 Defining networks will look similar to [tensorflow2/keras API](https://www.tensorflow.org/beta/guide/keras/functional):
 
-```
+```python
 net = Sequential([Dense(10), relu, Dense(10)])
 ```
 
@@ -20,24 +20,24 @@ net = Sequential([Dense(10), relu, Dense(10)])
 
 To initialize parameter values for a network, call `init_params` on any module (with example inputs and a random key):
 
-```
+```python
 batch = np.zeros((3, 2))
 params = net.init_params(batch, random.PRNGKey(0))
 ```
 
 It initializes and returns all parameters, accessible via attributes:
-```
+```python
 print(params.layer.layers[0].bias) # [0.00212132 0.01169001 0.00331698 0.00460713]
 ```
 
 To invoke the network with these `params`:
-```
+```python
 output = net(params, batch)
 ```
 
 For acceleration use `jit`:
 
-```
+```python
 output = jit(net)(params, batch)
 ```
 
@@ -45,7 +45,7 @@ output = jit(net)(params, batch)
 
 Modules are functions decorated with `@parameterized`, with parameters defined through default values:
 
-```
+```python
 from jax import random, numpy as np
 from jaxnet import parameterized, Param, glorot, randn
 
@@ -66,7 +66,7 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
 
 Modules can be used in other modules through default arguments:
 
-```
+```python
 @parameterized
 def net(inputs, layer1=Dense(10), layer2=Dense(20))
     inputs = layer1(inputs)
@@ -75,7 +75,7 @@ def net(inputs, layer1=Dense(10), layer2=Dense(20))
 
 Submodules can also be passed in through collections:
 
-```
+```python
 def Sequential(layers):
     @parameterized
     def sequential(inputs, layers=layers):
@@ -89,7 +89,7 @@ def Sequential(layers):
 Arbitrarily nested `tuples`/`list`/`dicts` of modules work. (The same is true for `Param`s.)
 Use of parameter-free functions is seamless:
 
-```
+```python
 def relu(input):
     return np.maximum(input, 0)
 
@@ -100,13 +100,13 @@ layer = Sequential([Dense(10), relu])
 
 Parameter sharing will be done by using module or parameter objects multiple times (not yet implemented):
 
-```
+```python
 shared_net=Sequential([layer, layer])
 ```
 
 (As a workaround, internal parameter sharing already works:)
 
-```
+```python
 @parameterized
 def shared_net(input, layer=layer):
     return layer(layer(input))
