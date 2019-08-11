@@ -19,7 +19,7 @@ from jaxnet import *
 net = Sequential([Dense(10), relu, Dense(4)])
 ```
 
-`Dense` and `Conv` and `Sequential` are already supported.
+`Sequential`, `Dense`, `Conv` and `RNN` (with GRUCell) are already supported.
 
 To initialize parameter values for a network, call `init_params` on any module (with example inputs and a random key):
 

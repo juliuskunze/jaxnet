@@ -5,7 +5,7 @@ from inspect import signature
 
 import numpy as onp
 from jax import numpy as np, random, partial
-from jax.lax import lax
+from jax.lax import lax, scan
 from jax.scipy.special import logsumexp
 
 from tools import nested_zip, nested_map, nested_enumerate, set_nested_element, \
@@ -34,37 +34,41 @@ def parameterized(fun):
 
     Parameters = namedtuple(fun.__name__, parameters.keys())
 
-    def apply(param_values, inputs, sublayer_wrapper=lambda index_path, apply: apply):
-        def resolve_parameters(index_path, param, param_values):
-            if _is_parameter(param):
-                return param_values
+    def apply_fun(sublayer_wrapper=lambda index_path, apply: apply):
+        def apply(param_values, *inputs):
+            def resolve_parameters(index_path, param, param_values):
+                if _is_parameter(param):
+                    return param_values
 
-            if _is_parameterized_fun(param):
-                apply = sublayer_wrapper(index_path, param)
-                return partial(apply, param_values)
+                if _is_parameterized_fun(param):
+                    apply = sublayer_wrapper(index_path, param)
+                    return partial(apply, param_values)
 
-            return param
+                return param
 
-        param_values = param_values._asdict() if isinstance(param_values, tuple) else param_values
-        pairs = nested_zip(parameters, param_values, element_types=(Param,))
-        indexed_pairs = nested_enumerate(pairs, element_types=(ZippedValue, Param))
-        resolved_params = nested_map(lambda pair: resolve_parameters(pair[0], *pair[1]),
-                                     indexed_pairs, element_types=(IndexedValue, Param))
-        return fun(inputs, **resolved_params)
+            param_values = param_values._asdict() if isinstance(param_values,
+                                                                tuple) else param_values
+            pairs = nested_zip(parameters, param_values, element_types=(Param,))
+            indexed_pairs = nested_enumerate(pairs, element_types=(ZippedValue, Param))
+            resolved_params = nested_map(lambda pair: resolve_parameters(pair[0], *pair[1]),
+                                         indexed_pairs, element_types=(IndexedValue, Param))
+            return fun(*inputs, **resolved_params)
 
-    def init_params(example_inputs, rng):
-        def init_param(sub_example_input, param):
+        return apply
+
+    def init_params(rng, *example_inputs):
+        def init_param(param, *sub_example_input):
             if _is_parameterized(param):
                 nonlocal rng
                 rng, rng_param = random.split(rng)
 
                 if _is_parameter(param):
-                    return param.init(rng, param.get_shape(example_inputs))
+                    return param.init(rng, param.get_shape(*example_inputs))
                 else:
-                    if sub_example_input is None:
+                    if len(sub_example_input) == 0:
                         return param
 
-                    return param.init_params(sub_example_input, rng)
+                    return param.init_params(rng, *sub_example_input)
 
             if callable(param) and not _is_parameterized_fun(param):
                 return ()
@@ -73,25 +77,25 @@ def parameterized(fun):
             return param
 
         # TODO refactor: leaves submodules untouched, replaced later by tracer:
-        all_param_values = nested_map(lambda x: init_param(sub_example_input=None, param=x),
+        all_param_values = nested_map(lambda p: init_param(p),
                                       parameters,
                                       tuples_to_lists=True, element_types=(Param,))
 
         def traced_submodule_wrapper(index_path, submodule):
-            def traced_apply(wrong_param_values, inputs):
-                param_values = init_param(inputs, submodule)
+            def traced_apply(wrong_param_values, *inputs):
+                param_values = init_param(submodule, *inputs)
                 set_nested_element(all_param_values, index_path=index_path,
                                    value=param_values)
-                return submodule(param_values, inputs)
+                return submodule(param_values, *inputs)
 
             return traced_apply
 
-        apply(all_param_values, example_inputs, sublayer_wrapper=traced_submodule_wrapper)
+        apply_fun(sublayer_wrapper=traced_submodule_wrapper)(all_param_values, *example_inputs)
 
         return Parameters(**all_param_values)
 
+    apply = apply_fun()
     apply.init_params = init_params
-
     return apply
 
 
@@ -245,3 +249,39 @@ def _pool(reducer, init_val, rescaler=None):
 
 MaxPool = _pool(lax.max, -np.inf)
 SumPool = _pool(lax.add, 0.)
+
+
+def GRUCell(carry_size, param_init):
+    def param(): return Param(lambda carry, x: (x.shape[1] + carry_size, carry_size), param_init)
+
+    @parameterized
+    def gru_cell(carry, x,
+                 update_params=param(),
+                 reset_params=param(),
+                 compute_params=param()):
+        both = np.concatenate((x, carry), axis=1)
+        update = sigmoid(np.dot(both, update_params))
+        reset = sigmoid(np.dot(both, reset_params))
+        both_reset_carry = np.concatenate((x, reset * carry), axis=1)
+        compute = np.tanh(np.dot(both_reset_carry, compute_params))
+        out = update * compute + (1 - update) * carry
+        return out, out
+
+    def init_carry(batch_size):
+        return np.zeros((batch_size, carry_size))
+
+    return gru_cell, init_carry
+
+
+def Rnn(cell, init_carry):
+    """Layer construction function for recurrent neural nets.
+    Expecting input shape (batch, sequence, channels).
+    TODO allow returning last carry."""
+
+    @parameterized
+    def rnn(xs, cell=cell):
+        xs = np.swapaxes(xs, 0, 1)
+        _, ys = scan(cell, init_carry(xs.shape[1]), xs)
+        return np.swapaxes(ys, 0, 1)
+
+    return rnn

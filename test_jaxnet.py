@@ -1,13 +1,14 @@
 from jax import numpy as np, random, jit
 
-from jaxnet import Dense, Sequential, relu, parameterized, Conv, flatten, MaxPool, zeros
+from jaxnet import Dense, Sequential, relu, parameterized, Conv, flatten, MaxPool, zeros, GRUCell, \
+    Rnn, softmax
 
 
 def test_params():
     net = Dense(2, kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 3))
 
-    params = net.init_params(inputs, random.PRNGKey(0))
+    params = net.init_params(random.PRNGKey(0), inputs)
     assert len(params) == 2
     assert np.array_equal(params.kernel, np.zeros((3, 2)))
     assert np.array_equal(params.bias, np.zeros(2))
@@ -26,7 +27,7 @@ def test_submodule():
 
     inputs = np.zeros((1, 2))
 
-    params = net.init_params(inputs, random.PRNGKey(0))
+    params = net.init_params(random.PRNGKey(0), inputs)
     assert len(params) == 1
     assert len(params.layer) == 2
     assert np.array_equal(params.layer.kernel, np.zeros((2, 2)))
@@ -43,7 +44,7 @@ def test_submodule_list():
     layer = Sequential([Dense(2, zeros, zeros), relu])
     inputs = np.zeros((1, 2))
 
-    params = layer.init_params(inputs, random.PRNGKey(0))
+    params = layer.init_params(random.PRNGKey(0), inputs)
     assert len(params) == 1
     assert len(params.layers) == 2
     assert np.array_equal(params.layers[0].kernel, np.zeros((2, 2)))
@@ -63,7 +64,7 @@ def test_internal_param_sharing():
         return layer(layer(inputs))
 
     inputs = np.zeros((1, 2))
-    params = shared_net.init_params(inputs, random.PRNGKey(0))
+    params = shared_net.init_params(random.PRNGKey(0), inputs)
     assert len(params) == 1
     assert len(params.layer) == 2
     assert np.array_equal(params.layer.kernel, np.zeros((2, 2)))
@@ -81,7 +82,7 @@ def test_external_param_sharing():
     shared_net = Sequential([layer, layer])
 
     inputs = np.zeros((1, 2))
-    params = shared_net.init_params(inputs, random.PRNGKey(0))
+    params = shared_net.init_params(random.PRNGKey(0), inputs)
     assert len(params) == 1
     assert len(params.layers) == 2
     assert np.array_equal(params.layers[0].kernel, np.zeros((2, 2)))
@@ -102,7 +103,7 @@ def test_internal_param_sharing2():
         return layer(inputs)
 
     inputs = np.zeros((1, 2))
-    params = shared_net.init_params(inputs, random.PRNGKey(0))
+    params = shared_net.init_params(random.PRNGKey(0), inputs)
 
     assert len(params) == 1
     assert len(params.layer) == 1
@@ -119,7 +120,7 @@ def test_conv_flatten():
     conv = Conv(2, filter_shape=(3, 3), padding='SAME', kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 5, 5, 2))
 
-    params = conv.init_params(inputs, random.PRNGKey(0))
+    params = conv.init_params(random.PRNGKey(0), inputs)
     output = conv(params, inputs)
     assert np.array_equal(output, np.zeros((1, 5, 5, 2)))
 
@@ -132,7 +133,7 @@ def test_conv_max_pool():
     conv = Conv(2, filter_shape=(3, 3), padding='SAME', kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 5, 5, 2))
 
-    params = conv.init_params(inputs, random.PRNGKey(0))
+    params = conv.init_params(random.PRNGKey(0), inputs)
     pooled = Sequential([conv, MaxPool(window_shape=(1, 1), strides=(2, 2))])
     inputs = np.zeros((1, 5, 5, 2))
     output = pooled({'layers': [params, ()]}, inputs)
@@ -142,8 +143,70 @@ def test_conv_max_pool():
 def test_example():
     net = Sequential([Dense(2), relu, Dense(4)])
     batch = np.zeros((3, 2))
-    params = net.init_params(batch, random.PRNGKey(0))
+    params = net.init_params(random.PRNGKey(0), batch)
     print(params.layers[2].bias)
 
     output = net(params, batch)
     output = jit(net)(params, batch)
+
+
+def test_gru_cell():
+    gru_cell, init_carry = GRUCell(10, zeros)
+
+    x = np.zeros((2, 3))
+    carry = init_carry(batch_size=2)
+    params = gru_cell.init_params(random.PRNGKey(0), carry, x)
+    output = gru_cell(params, carry, x)
+
+    assert isinstance(output, tuple)
+    assert len(output) == 2
+
+    assert np.array_equal(output[0], np.zeros((2, 10)))
+    assert np.array_equal(output[1], np.zeros((2, 10)))
+
+
+def test_rnn():
+    xs = np.zeros((2, 5, 4))
+    rnn = Rnn(*GRUCell(3, zeros))
+    params = rnn.init_params(random.PRNGKey(0), xs)
+
+    assert len(params) == 1
+    assert len(params.cell) == 3
+    assert np.array_equal(params.cell.update_params, np.zeros((7, 3)))
+    assert np.array_equal(params.cell.reset_params, np.zeros((7, 3)))
+    assert np.array_equal(params.cell.compute_params, np.zeros((7, 3)))
+
+    output = rnn(params, xs)
+    assert np.array_equal(output, np.zeros((2, 5, 3)))
+
+
+def test_rnn_net():
+    length = 5
+    carry_size = 3
+    class_count = 4
+    xs = np.zeros((1, length, 4))
+
+    def rnn(): return Rnn(*GRUCell(carry_size, zeros))
+
+    net = Sequential([
+        rnn(),
+        rnn(),
+        rnn(),
+        lambda x: np.reshape(x, (-1, carry_size)),  # -> same weights for all time steps
+        Dense(out_dim=class_count),
+        softmax,
+        lambda x: np.reshape(x, (-1, length, class_count))])
+
+    params = net.init_params(random.PRNGKey(0), xs)
+
+    assert len(params) == 1
+    assert len(params.layers[0]) == 1
+    cell = params.layers[0].cell
+    assert len(cell) == 3
+    assert np.array_equal(cell.update_params, np.zeros((7, 3)))
+    assert np.array_equal(cell.reset_params, np.zeros((7, 3)))
+    assert np.array_equal(cell.compute_params, np.zeros((7, 3)))
+
+    output = net(params, xs)
+
+    print(output.shape)
