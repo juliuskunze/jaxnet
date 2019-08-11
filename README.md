@@ -8,10 +8,7 @@ Different from popular neural net libraries, it is completely functional:
 - No global compute graph
 - No global random key
 
-This is an early version. Expect bugs, sharp edges and breaking changes!
-
-Install with
-
+This is an early version. Expect bugs, sharp edges and breaking changes! Install with
 ```
 pip install jaxnet
 ```
@@ -19,7 +16,6 @@ pip install jaxnet
 ## Overview
 
 Defining networks looks similar to the [TensorFlow2 / Keras functional API](https://www.tensorflow.org/beta/guide/keras/functional):
-
 ```python
 from jax import numpy as np, random, jit
 from jaxnet import *
@@ -30,7 +26,6 @@ net = Sequential([Dense(10), relu, Dense(4)])
 `Sequential`, `Dense`, `Conv` and `RNN` (with `GRUCell`) are already supported.
 
 To initialize parameter values for a network, call `init_params` on any module (with example inputs and a random key):
-
 ```python
 batch = np.zeros((3, 2))
 params = net.init_params(random.PRNGKey(0), batch)
@@ -57,7 +52,6 @@ A working demo for training an `RNN` for OCR is [here](https://colab.research.go
 ## Defining modules
 
 Modules are functions decorated with `@parameterized`, with parameters defined through default values:
-
 ```python
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parameterized
@@ -83,8 +77,7 @@ def net(inputs, layer1=Dense(10), layer2=Dense(20))
     return layer2(inputs)
 ```
 
-Submodules can also be passed in through collections:
-
+Use many modules at once with collections:
 ```python
 def Sequential(layers):
     @parameterized
@@ -96,9 +89,9 @@ def Sequential(layers):
     return sequential
 ```
 
-Arbitrarily nested `tuples`/`list`/`dicts` of modules work. (The same is true for `Param`s.)
-Use of parameter-free functions is seamless:
+Nested `tuples`/`list`/`dicts` of modules work. The same is true for `Params`.
 
+Using parameter-free functions is seamless:
 ```python
 def relu(input):
     return np.maximum(input, 0)
