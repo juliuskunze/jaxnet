@@ -193,7 +193,7 @@ def test_rnn_net():
         rnn(),
         rnn(),
         lambda x: np.reshape(x, (-1, carry_size)),  # -> same weights for all time steps
-        Dense(out_dim=class_count),
+        Dense(class_count, zeros, zeros),
         softmax,
         lambda x: np.reshape(x, (-1, length, class_count))])
 
@@ -208,5 +208,4 @@ def test_rnn_net():
     assert np.array_equal(cell.compute_params, np.zeros((7, 3)))
 
     output = net(params, xs)
-
-    print(output.shape)
+    assert np.array_equal(output, np.ones((1, 5, 4)) * .25)

@@ -30,7 +30,7 @@ params = net.init_params(batch, random.PRNGKey(0))
 
 It initializes and returns all parameters, accessible via attributes:
 ```python
-print(params.layer.layers[0].bias) # [0.00212132 0.01169001 0.00331698 0.00460713]
+print(params.layers[0].bias) # [0.00212132 0.01169001 0.00331698 0.00460713]
 ```
 
 To invoke the network with these `params`:
@@ -97,8 +97,6 @@ def relu(input):
 
 layer = Sequential([Dense(10), relu])
 ```
-
-# Parameter sharing
 
 Parameter sharing will be done by using module or parameter objects multiple times (not yet implemented):
 

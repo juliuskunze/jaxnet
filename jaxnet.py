@@ -267,13 +267,13 @@ def GRUCell(carry_size, param_init):
         out = update * compute + (1 - update) * carry
         return out, out
 
-    def init_carry(batch_size):
+    def carry_init(batch_size):
         return np.zeros((batch_size, carry_size))
 
-    return gru_cell, init_carry
+    return gru_cell, carry_init
 
 
-def Rnn(cell, init_carry):
+def Rnn(cell, carry_init):
     """Layer construction function for recurrent neural nets.
     Expecting input shape (batch, sequence, channels).
     TODO allow returning last carry."""
@@ -281,7 +281,7 @@ def Rnn(cell, init_carry):
     @parameterized
     def rnn(xs, cell=cell):
         xs = np.swapaxes(xs, 0, 1)
-        _, ys = scan(cell, init_carry(xs.shape[1]), xs)
+        _, ys = scan(cell, carry_init(xs.shape[1]), xs)
         return np.swapaxes(ys, 0, 1)
 
     return rnn
