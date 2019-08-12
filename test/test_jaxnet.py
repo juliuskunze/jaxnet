@@ -144,8 +144,8 @@ def test_init_params_submodule_reuse():
     net2 = Sequential([layer, Dense(3)])
 
     layer_params = layer.init_params(random.PRNGKey(0), inputs)
-    net1_params = net1.init_params(random.PRNGKey(0), inputs, reuse={layer: layer_params})
-    net2_params = net2.init_params(random.PRNGKey(1), inputs, reuse={layer: layer_params})
+    net1_params = net1.init_params(random.PRNGKey(1), inputs, reuse={layer: layer_params})
+    net2_params = net2.init_params(random.PRNGKey(2), inputs, reuse={layer: layer_params})
     assert_dense_params_equal(layer_params, net1_params.layers[0])
     assert_dense_params_equal(layer_params, net2_params.layers[0])
 
@@ -174,21 +174,22 @@ def test_join_params():
     net = Sequential([layer, relu])
     inputs = np.zeros((1, 3))
     layer_params = layer.init_params(random.PRNGKey(0), inputs)
-    params = (layer_params, ())
+    # TODO allow: params = (layer_params, ())
+    params = net.Parameters((layer_params, ()))
     output = net(params, inputs)
 
     params_ = net.join_params({layer: layer_params})
-    assert len(params_) == 2
+    assert len(params_) == 1
     assert_dense_params_equal(params_.layers[0], layer_params)
-    assert len(params_[1]) == ()
+    assert params_.layers[1] == ()
 
     output_ = net(params_, inputs)
     assert np.array_equal(output_, output)
 
-    output_ = net.apply_joined_params({net: params}, inputs)
+    output_ = net.apply_joined({layer: layer_params}, inputs)
     assert np.array_equal(output_, output)
 
-    output_ = net.apply_joined_params({net: params}, inputs, jit=True)
+    output_ = net.apply_joined({layer: layer_params}, inputs, jit=True)
     assert np.array_equal(output_, output)
 
 

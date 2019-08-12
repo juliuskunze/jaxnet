@@ -3,6 +3,7 @@ import itertools
 from collections import namedtuple
 from inspect import signature
 
+import jax
 import numpy as onp
 from jax import numpy as np, random, partial
 from jax.lax import lax, scan
@@ -32,7 +33,8 @@ def parameterized(fun):
         k: v.default for k, v in signature(fun).parameters.items()
         if _is_parameterized(v.default) or _is_parameterized_collection(v.default)}
 
-    Parameters = namedtuple(fun.__name__, parameters.keys())
+    name = fun.__name__
+    Parameters = namedtuple(name, parameters.keys())
 
     def apply_fun(sublayer_wrapper=lambda index_path, apply: apply):
         def apply(param_values, *inputs):
@@ -56,22 +58,30 @@ def parameterized(fun):
 
         return apply
 
-    def init_params(rng, *example_inputs, reuse=None):
-        def init_param(param, *sub_example_input):
+    apply = apply_fun()
+
+    def _init_params(rng, *example_inputs, reuse=None, reuse_only=False):
+        def init_param(param, *sub_example_input, skip_submodules=False):
+            if _is_parameterized_fun(param) and reuse and param in reuse:
+                return reuse[param]
+
+            if _is_parameterized_fun(param) and skip_submodules:
+                return param
+
             if _is_parameterized(param):
+                if reuse_only:
+                    # TODO: include path to submodule
+                    raise ValueError(
+                        f'No param values specified for {param if _is_parameter(param) else param.name}.')
+
                 nonlocal rng
                 rng, rng_param = random.split(rng)
 
                 if _is_parameter(param):
                     return param.init(rng, param.get_shape(*example_inputs))
                 else:
-                    if len(sub_example_input) == 0:
-                        return param
-
-                    if reuse and param in reuse:
-                        return reuse[param]
-
-                    return param.init_params(rng, *sub_example_input, reuse=reuse)
+                    return param.init_params(rng, *sub_example_input, reuse=reuse,
+                                             reuse_only=reuse_only)
 
             if callable(param) and not _is_parameterized_fun(param):
                 return ()
@@ -79,8 +89,8 @@ def parameterized(fun):
             assert isinstance(param, np.ndarray)
             return param
 
-        # TODO refactor: leaves submodules untouched, replaced later by tracer:
-        all_param_values = nested_map(lambda p: init_param(p), parameters,
+        # TODO refactor: replaced later by tracer:
+        all_param_values = nested_map(lambda p: init_param(p, skip_submodules=True), parameters,
                                       tuples_to_lists=True, element_types=(Param,))
 
         def traced_submodule_wrapper(index_path, submodule):
@@ -91,12 +101,22 @@ def parameterized(fun):
 
             return traced_apply
 
-        apply_fun(sublayer_wrapper=traced_submodule_wrapper)(all_param_values, *example_inputs)
+        if not reuse_only:
+            apply_fun(sublayer_wrapper=traced_submodule_wrapper)(all_param_values, *example_inputs)
 
         return Parameters(**all_param_values)
 
-    apply = apply_fun()
-    apply.init_params = init_params
+    def join_params(reuse):
+        return _init_params(None, reuse=reuse, reuse_only=True)
+
+    def apply_joined(reuse, *inputs, jit=False):
+        return apply((jax.jit(join_params) if jit else join_params)(reuse=reuse), *inputs)
+
+    apply.name = name
+    apply.init_params = partial(_init_params, reuse_only=False)
+    apply.join_params = join_params
+    apply.apply_joined = apply_joined
+    apply.Parameters = Parameters
     return apply
 
 

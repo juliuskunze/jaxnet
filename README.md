@@ -99,15 +99,15 @@ def relu(input):
 layer = Sequential([Dense(10), relu])
 ```
 
-## Parameter sharing (to be implemented)
+## Parameter sharing
 
-Parameter sharing can be shared by using module or parameter objects multiple times:
+Parameters can be shared by using module or parameter objects multiple times (not yet implemented):
 
 ```python
 shared_net=Sequential([layer, layer])
 ```
 
-This is equivalent to (already implemented!):
+This is equivalent to (already implemented):
 
 ```python
 @parameterized
@@ -115,7 +115,7 @@ def shared_net(input, layer=layer):
     return layer(layer(input))
 ```
 
-## Parameter reuse (to be implemented)
+## Parameter reuse
 
 You can reuse parameters of submodules:
 
