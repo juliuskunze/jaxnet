@@ -1,3 +1,4 @@
+import pytest
 from jax import numpy as np, random, jit
 
 from jaxnet import Dense, Sequential, relu, parameterized, Conv, flatten, MaxPool, zeros, \
@@ -116,7 +117,7 @@ def test_multiple_init_params_calls():
     assert p1.layers[0].kernel.shape == p2.layers[0].kernel.shape
     assert not np.array_equal(p1.layers[0].kernel, p2.layers[0].kernel)
 
-
+@pytest.mark.skip(reason="TODO reconsider design")
 def test_external_param_sharing():
     layer = Dense(2, zeros, zeros)
     shared_net = Sequential([layer, layer])
@@ -193,6 +194,7 @@ def test_join_params():
     assert np.array_equal(output_, output)
 
 
+@pytest.mark.skip(reason="Unclear if needed")
 def test_join_params_top_level():
     net = Dense(2)
     inputs = np.zeros((1, 3))

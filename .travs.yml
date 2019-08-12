@@ -1,0 +1,24 @@
+sudo: false
+dist: xenial
+language: python
+python:
+  - "2.7"
+  - "3.6"
+before_install:
+  - if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then
+      wget https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda.sh;
+    else
+      wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
+    fi
+  - bash miniconda.sh -b -p $HOME/miniconda
+  - export PATH="$HOME/miniconda/bin:$PATH"
+  - conda update --yes conda
+  - conda config --add channels conda-forge
+install:
+  - conda install --yes python=$TRAVIS_PYTHON_VERSION pip pytest six protobuf>=3.6.0 absl-py opt_einsum numpy scipy
+  - pip install jaxlib
+  - pip install git+git://github.com/google/jax.git
+  - pip install -v .
+script:
+  - cd tests
+  - pytest
