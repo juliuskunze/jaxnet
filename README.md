@@ -45,7 +45,7 @@ For acceleration use `jit`:
 output = jit(net)(params, batch)
 ```
 
-A working demo for training an `RNN` for OCR is [here](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E).
+Full examples are given in these interactive demos: [Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g) and [OCR with RNNs](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E).
 
 ## Defining modules
 
