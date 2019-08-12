@@ -110,7 +110,8 @@ def parameterized(fun):
         return _init_params(None, reuse=reuse, reuse_only=True)
 
     def apply_joined(reuse, *inputs, jit=False):
-        return apply((jax.jit(join_params) if jit else join_params)(reuse=reuse), *inputs)
+        params = join_params(reuse=reuse)
+        return (jax.jit(apply) if jit else apply)(params, *inputs)
 
     apply.name = name
     apply.init_params = partial(_init_params, reuse_only=False)
