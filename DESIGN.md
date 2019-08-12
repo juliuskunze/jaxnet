@@ -2,7 +2,7 @@
 
 This document discusses some alternative designs.
 
-## Alternative: Defining parameter and submodules inline
+## Alternative: Defining parameters and submodules inline
 
 ```python
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
@@ -24,12 +24,11 @@ def Sequential(layers):
     return sequential
 ```
 
-This might be realizable with JAX' tracing / function transformation engine.
 While it is slightly more concise, it has strong downsides:
 - **No step-by-step debugging.** Custom code is called once for graph generation, and never again,
 much like graphs/sessions from the old version of TensorFlow.
 - Submodule naming would be more arbitrary since no parameter names are not associated.
-- Potentially large implementation complexity.
+- Potentially large implementation complexity, requires direct use of JAX' tracing / function transformation capabilities.
 
 JAXnet invokes the user's function (when `jit` is not used) and thereby allows step-by-step debugging of any module.
 
