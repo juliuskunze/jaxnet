@@ -99,9 +99,7 @@ def relu(input):
 layer = Sequential([Dense(10), relu])
 ```
 
-## Parameter sharing and reuse
-
-**Most unctionality in this section is not yet implemented.**
+## Parameter sharing (to be implemented)
 
 Parameter sharing can be shared by using module or parameter objects multiple times:
 
@@ -109,7 +107,7 @@ Parameter sharing can be shared by using module or parameter objects multiple ti
 shared_net=Sequential([layer, layer])
 ```
 
-This is equivalent to: (This is already working in the current implementation.)
+This is equivalent to (already implemented!):
 
 ```python
 @parameterized
@@ -117,7 +115,9 @@ def shared_net(input, layer=layer):
     return layer(layer(input))
 ```
 
-You can also reuse parameters of some submodules:
+## Parameter reuse (to be implemented)
+
+You can reuse parameters of submodules:
 
 ```python
 inputs = np.zeros((1, 2))
