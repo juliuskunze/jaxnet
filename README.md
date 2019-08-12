@@ -99,18 +99,60 @@ def relu(input):
 layer = Sequential([Dense(10), relu])
 ```
 
-Parameter sharing will be done by using module or parameter objects multiple times (not yet implemented):
+## Parameter sharing and reuse
+
+**Most unctionality in this section is not yet implemented.**
+
+Parameter sharing can be shared by using module or parameter objects multiple times:
 
 ```python
 shared_net=Sequential([layer, layer])
 ```
 
-(As a workaround, internal parameter sharing already works:)
+This is equivalent to: (This is already working in the current implementation.)
 
 ```python
 @parameterized
 def shared_net(input, layer=layer):
     return layer(layer(input))
+```
+
+You can also reuse parameters of some submodules:
+
+```python
+inputs = np.zeros((1, 2))
+
+layer = Dense(5)
+net1 = Sequential([layer, Dense(2)])
+net2 = Sequential([layer, Dense(3)])
+
+layer_params = layer.init_params(random.PRNGKey(0), inputs)
+net1_params = net1.init_params(random.PRNGKey(0), inputs, reuse={layer: layer_params})
+net2_params = net2.init_params(random.PRNGKey(1), inputs, reuse={layer: layer_params})
+
+# Now net1_params.layers[0] equals net2_params.layers[0] equals layer_params
+```
+
+If all parameters are reused, you can use `join_params` instead of `init_params`:
+
+```python
+inputs = np.zeros((1, 2))
+
+net = Dense(5)
+prediction = Sequential([net, softmax])
+
+net_params = net.init_params(random.PRNGKey(0), inputs)
+prediction_params = prediction.join_params({net: layer_params})
+
+# net_params.layers[0] is now equal to net_params
+
+output = jit(prediction)(prediction_params, inputs)
+```
+
+If you just want to call the network with these joined parameters, you can use the shorthand:
+
+```python
+output = prediction.apply_joined({net: layer_params}, inputs, jit=True)
 ```
 
 ## What about [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
