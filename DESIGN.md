@@ -2,17 +2,15 @@
 
 This document discusses some alternative designs.
 
-## Alternative: Inline parameter and layer definitions
-
-Defining parameters and submodules inline:
+## Alternative: Defining parameter and submodules inline
 
 ```python
-def Dense(out_dim, W_init=glorot(), b_init=randn()):
+def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parameterized
     def dense(inputs):
-        W = Param('W', (inputs.shape[-1], out_dim), init=W_init)
-        b = Param('b', (out_dim,), init=b_init)
-        return np.dot(inputs, W) + b
+        kernel = Param('kernel', (inputs.shape[-1], out_dim), init=kernel_init)
+        bias = Param('bias', (out_dim,), init=bias_init)
+        return np.dot(inputs, kernel) + bias
 
     return dense
 
@@ -35,23 +33,23 @@ much like graphs/sessions from the old version of TensorFlow.
 
 JAXnet invokes the user's function (when `jit` is not used) and thereby allows step-by-step debugging of any module.
 
-## Alternative: Attributes instead of default attributes
+## Alternative: Using attributes instead of default values
 
 ```python
-def Dense(out_dim, W_init=glorot(), b_init=randn()):
-        @Param('W', lambda input_shape: (input_shape.shape[-1], out_dim), init=W_init)
-        @Param('b', lambda _: (out_dim,), init=b_init)
-        def dense(inputs, W, b):
-            return np.dot(inputs, W) + b
+def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
+        @Param('kernel', lambda input_shape: (input_shape.shape[-1], out_dim), init=kernel_init)
+        @Param('bias', lambda _: (out_dim,), init=bias_init)
+        def dense(inputs, kernel, bias):
+            return np.dot(inputs, kernel) + bias
 
-    def Serial(layers):
+    def Sequential(layers):
         @Submodule('layers', layers)
-        def serial(inputs, layers):
+        def sequential(inputs, layers):
             for module in layers:
                 inputs = module(inputs)
             return inputs
 
-        return serial
+        return sequential
 ```
 
 This perhaps makes the transformation logic more explicit. Downsides:
