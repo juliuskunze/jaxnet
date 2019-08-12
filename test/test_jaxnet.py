@@ -136,7 +136,7 @@ def test_external_param_sharing():
     assert np.array_equal(output, np.zeros((1, 2)))
 
 
-def test_init_params_reuse():
+def test_init_params_submodule_reuse():
     inputs = np.zeros((1, 2))
 
     layer = Dense(5)
@@ -146,25 +146,27 @@ def test_init_params_reuse():
     layer_params = layer.init_params(random.PRNGKey(0), inputs)
     net1_params = net1.init_params(random.PRNGKey(0), inputs, reuse={layer: layer_params})
     net2_params = net2.init_params(random.PRNGKey(1), inputs, reuse={layer: layer_params})
-    assert_dense_params_equal(net1_params.layers[0], net2_params.layers[0])
+    assert_dense_params_equal(layer_params, net1_params.layers[0])
+    assert_dense_params_equal(layer_params, net2_params.layers[0])
 
-    output1 = net1(net1_params, input)
+    output1 = net1(net1_params, inputs)
     assert output1.shape == (1, 2)
 
-    output2 = net2(net2_params, input)
+    output2 = net2(net2_params, inputs)
     assert output2.shape == (1, 3)
 
-def test_init_params_reuse_top_level():
+
+def test_init_params_submodule_reuse_top_level():
     net = Dense(2)
     inputs = np.zeros((1, 3))
     params = net.init_params(random.PRNGKey(0), inputs)
     output = net(params, inputs)
 
     params_ = net.init_params(random.PRNGKey(0), inputs, reuse={net: params})
-    output_ = net(params, output)
-    assert np.array_equal(output_, output)
-
     assert_dense_params_equal(params, params_)
+
+    output_ = net(params_, inputs)
+    assert np.array_equal(output_, output)
 
 
 def test_join_params():

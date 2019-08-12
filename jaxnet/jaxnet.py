@@ -56,7 +56,7 @@ def parameterized(fun):
 
         return apply
 
-    def init_params(rng, *example_inputs):
+    def init_params(rng, *example_inputs, reuse=None):
         def init_param(param, *sub_example_input):
             if _is_parameterized(param):
                 nonlocal rng
@@ -68,7 +68,10 @@ def parameterized(fun):
                     if len(sub_example_input) == 0:
                         return param
 
-                    return param.init_params(rng, *sub_example_input)
+                    if reuse and param in reuse:
+                        return reuse[param]
+
+                    return param.init_params(rng, *sub_example_input, reuse=reuse)
 
             if callable(param) and not _is_parameterized_fun(param):
                 return ()
@@ -77,15 +80,13 @@ def parameterized(fun):
             return param
 
         # TODO refactor: leaves submodules untouched, replaced later by tracer:
-        all_param_values = nested_map(lambda p: init_param(p),
-                                      parameters,
+        all_param_values = nested_map(lambda p: init_param(p), parameters,
                                       tuples_to_lists=True, element_types=(Param,))
 
         def traced_submodule_wrapper(index_path, submodule):
             def traced_apply(wrong_param_values, *inputs):
                 param_values = init_param(submodule, *inputs)
-                set_nested_element(all_param_values, index_path=index_path,
-                                   value=param_values)
+                set_nested_element(all_param_values, index_path=index_path, value=param_values)
                 return submodule(param_values, *inputs)
 
             return traced_apply
