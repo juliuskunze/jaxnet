@@ -6,10 +6,12 @@ Different from popular neural net libraries, it is completely functional:
 - No global compute graph
 - No global random key
 
-This is an early version. Expect bugs, sharp edges and breaking changes! Install with
+**This is an early version. Expect breaking changes!** Install with
 ```
 pip install jaxnet
 ```
+
+If you want to run networks on GPU/TPU, first install the [right version of jaxlib](https://github.com/google/jax#installation).
 
 ## Overview
 
@@ -99,7 +101,7 @@ layer = Sequential([Dense(10), relu])
 
 ## Parameter sharing
 
-Parameters can be shared by using module or parameter objects multiple times (not yet implemented):
+Parameters can be shared by using module or parameter objects multiple times (**not yet implemented**):
 
 ```python
 shared_net=Sequential([layer, layer])
