@@ -362,3 +362,25 @@ def Dropout(rate, mode='train'):
             return inputs
 
     return dropout
+
+
+def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,
+              beta_init=zeros, gamma_init=ones):
+    """Layer construction function for a batch normalization layer."""
+
+    get_shape = lambda input: tuple(d for i, d in enumerate(input.shape) if i not in axis)
+    axis = (axis,) if np.isscalar(axis) else axis
+
+    @parametrized
+    def batch_norm(x,
+                   beta=Param(get_shape, beta_init) if center else None,
+                   gamma=Param(get_shape, gamma_init) if scale else None):
+        ed = tuple(None if i in axis else slice(None) for i in range(np.ndim(x)))
+        mean, var = np.mean(x, axis, keepdims=True), fastvar(x, axis, keepdims=True)
+        z = (x - mean) / np.sqrt(var + epsilon)
+        if center and scale: return gamma[ed] * z + beta[ed]
+        if center: return z + beta[ed]
+        if scale: return gamma[ed] * z
+        return z
+
+    return batch_norm

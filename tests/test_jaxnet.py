@@ -1,9 +1,18 @@
 import pytest
-from jax import numpy as np, jit
+from jax import numpy as np, jit, random
 from jax.random import PRNGKey
 
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, MaxPool, zeros, GRUCell, \
-    Rnn, softmax, SumPool, AvgPool, Dropout
+    Rnn, softmax, SumPool, AvgPool, Dropout, BatchNorm
+
+
+def random_inputs(input_shape, rng=PRNGKey(0)):
+    if type(input_shape) is tuple:
+        return random.uniform(rng, input_shape, np.float32)
+    elif type(input_shape) is list:
+        return [random_inputs(rng, shape) for shape in input_shape]
+    else:
+        raise TypeError(type(input_shape))
 
 
 def test_params():
@@ -15,11 +24,11 @@ def test_params():
     assert np.array_equal(np.zeros((3, 2)), params.kernel)
     assert np.array_equal(np.zeros(2), params.bias)
 
-    output = net(params, inputs)
-    assert np.array_equal(np.zeros((1, 2)), output)
+    out = net(params, inputs)
+    assert np.array_equal(np.zeros((1, 2)), out)
 
-    output_ = jit(net)(params, inputs)
-    assert np.array_equal(output, output_)
+    out_ = jit(net)(params, inputs)
+    assert np.array_equal(out, out_)
 
 
 def test_submodule():
@@ -35,11 +44,11 @@ def test_submodule():
     assert np.array_equal(np.zeros((2, 2)), params.layer.kernel)
     assert np.array_equal(np.zeros(2), params.layer.bias)
 
-    output = net(params, inputs)
-    assert np.array_equal(np.zeros((1, 2)), output)
+    out = net(params, inputs)
+    assert np.array_equal(np.zeros((1, 2)), out)
 
-    output_ = jit(net)(params, inputs)
-    assert np.array_equal(output, output_)
+    out_ = jit(net)(params, inputs)
+    assert np.array_equal(out, out_)
 
 
 def test_submodule_list():
@@ -53,11 +62,11 @@ def test_submodule_list():
     assert np.array_equal(np.zeros(2), params.layers[0].bias)
     assert params.layers[1] == ()
 
-    output = layer(params, inputs)
-    assert np.array_equal(np.zeros((1, 2)), output)
+    out = layer(params, inputs)
+    assert np.array_equal(np.zeros((1, 2)), out)
 
-    output_ = jit(layer)(params, inputs)
-    assert np.array_equal(output, output_)
+    out_ = jit(layer)(params, inputs)
+    assert np.array_equal(out, out_)
 
 
 def assert_dense_params_equal(p, p_):
@@ -78,11 +87,11 @@ def test_internal_param_sharing():
     assert np.array_equal(np.zeros((2, 2)), params.layer.kernel)
     assert np.array_equal(np.zeros(2), params.layer.bias)
 
-    output = shared_net(params, inputs)
-    assert np.array_equal(np.zeros((1, 2)), output)
+    out = shared_net(params, inputs)
+    assert np.array_equal(np.zeros((1, 2)), out)
 
-    output_ = jit(shared_net)(params, inputs)
-    assert np.array_equal(output, output_)
+    out_ = jit(shared_net)(params, inputs)
+    assert np.array_equal(out, out_)
 
 
 def test_internal_param_sharing2():
@@ -101,8 +110,8 @@ def test_internal_param_sharing2():
     assert np.array_equal(np.zeros((2, 2)), params.layer.layers[0].kernel)
     assert np.array_equal(np.zeros(2), params.layer.layers[0].bias)
 
-    output = shared_net(params, inputs)
-    assert np.array_equal(np.zeros((1, 2)), output)
+    out = shared_net(params, inputs)
+    assert np.array_equal(np.zeros((1, 2)), out)
 
 
 def test_multiple_init_params_calls():
@@ -132,11 +141,11 @@ def test_external_param_sharing():
     assert np.array_equal(np.zeros(2), params.layers[0].bias)
     assert params.layers[1] == ()
 
-    output = shared_net(params, inputs)
-    assert np.array_equal(np.zeros((1, 2)), output)
+    out = shared_net(params, inputs)
+    assert np.array_equal(np.zeros((1, 2)), out)
 
-    output = jit(shared_net)(params, inputs)
-    assert np.array_equal(np.zeros((1, 2)), output)
+    out = jit(shared_net)(params, inputs)
+    assert np.array_equal(np.zeros((1, 2)), out)
 
 
 def test_init_params_submodule_reuse():
@@ -152,24 +161,24 @@ def test_init_params_submodule_reuse():
     assert_dense_params_equal(layer_params, net1_params.layers[0])
     assert_dense_params_equal(layer_params, net2_params.layers[0])
 
-    output1 = net1(net1_params, inputs)
-    assert output1.shape == (1, 2)
+    out1 = net1(net1_params, inputs)
+    assert out1.shape == (1, 2)
 
-    output2 = net2(net2_params, inputs)
-    assert output2.shape == (1, 3)
+    out2 = net2(net2_params, inputs)
+    assert out2.shape == (1, 3)
 
 
 def test_init_params_submodule_reuse_top_level():
     net = Dense(2)
     inputs = np.zeros((1, 3))
     params = net.init_params(PRNGKey(0), inputs)
-    output = net(params, inputs)
+    out = net(params, inputs)
 
     params_ = net.init_params(PRNGKey(0), inputs, reuse={net: params})
     assert_dense_params_equal(params, params_)
 
-    output_ = net(params_, inputs)
-    assert np.array_equal(output, output_)
+    out_ = net(params_, inputs)
+    assert np.array_equal(out, out_)
 
 
 def test_join_params():
@@ -179,21 +188,21 @@ def test_join_params():
     layer_params = layer.init_params(PRNGKey(0), inputs)
 
     params = net.Parameters((layer_params, ()))
-    output = net(params, inputs)
+    out = net(params, inputs)
 
     params_ = net.join_params({layer: layer_params})
     assert len(params_) == 1
     assert_dense_params_equal(layer_params, params_.layers[0])
     assert params_.layers[1] == ()
 
-    output_ = net(params_, inputs)
-    assert np.array_equal(output, output_)
+    out_ = net(params_, inputs)
+    assert np.array_equal(out, out_)
 
-    output_ = net.apply_joined({layer: layer_params}, inputs)
-    assert np.array_equal(output, output_)
+    out_ = net.apply_joined({layer: layer_params}, inputs)
+    assert np.array_equal(out, out_)
 
-    output_ = net.apply_joined({layer: layer_params}, inputs, jit=True)
-    assert np.array_equal(output, output_)
+    out_ = net.apply_joined({layer: layer_params}, inputs, jit=True)
+    assert np.array_equal(out, out_)
 
 
 def test_join_params_subsubmodule():
@@ -202,38 +211,38 @@ def test_join_params_subsubmodule():
     net = Sequential([sublayer, np.sum])
     inputs = np.zeros((1, 3))
     params = net.init_params(PRNGKey(0), inputs)
-    output = net(params, inputs)
+    out = net(params, inputs)
 
     subsublayer_params = subsublayer.init_params(PRNGKey(0), inputs)
 
     params_ = net.join_params({subsublayer: subsublayer_params})
     assert_dense_params_equal(subsublayer_params, params_.layers[0].layers[0])
-    output_ = net(params_, inputs)
-    assert output.shape == output_.shape
+    out_ = net(params_, inputs)
+    assert out.shape == out_.shape
 
-    output_ = net.apply_joined({subsublayer: subsublayer_params}, inputs)
-    assert output.shape == output_.shape
+    out_ = net.apply_joined({subsublayer: subsublayer_params}, inputs)
+    assert out.shape == out_.shape
 
-    output_ = net.apply_joined({subsublayer: subsublayer_params}, inputs, jit=True)
-    assert output.shape == output_.shape
+    out_ = net.apply_joined({subsublayer: subsublayer_params}, inputs, jit=True)
+    assert out.shape == out_.shape
 
 
 def test_join_params_top_level():
     net = Dense(2)
     inputs = np.zeros((1, 3))
     params = net.init_params(PRNGKey(0), inputs)
-    output = net(params, inputs)
+    out = net(params, inputs)
 
     params_ = net.join_params({net: params})
     assert_dense_params_equal(params, params_)
-    output_ = net(params_, inputs)
-    assert np.array_equal(output, output_)
+    out_ = net(params_, inputs)
+    assert np.array_equal(out, out_)
 
-    output_ = net.apply_joined({net: params}, inputs)
-    assert np.array_equal(output, output_)
+    out_ = net.apply_joined({net: params}, inputs)
+    assert np.array_equal(out, out_)
 
-    output_ = net.apply_joined({net: params}, inputs, jit=True)
-    assert np.array_equal(output, output_)
+    out_ = net.apply_joined({net: params}, inputs, jit=True)
+    assert np.array_equal(out, out_)
 
 
 def assert_params_equal(p, p_):
@@ -258,18 +267,18 @@ def test_join_params_shared_submodules():
 
     inputs = np.zeros((1, 3))
     net1_params = part1.init_params(PRNGKey(0), inputs)
-    output = part1(net1_params, inputs)
+    out = part1(net1_params, inputs)
 
     params = net.join_params({part1: net1_params})
     assert_params_equal(net1_params.layers[0], params.part2.layers[0])
-    output_ = net(params, inputs)
-    assert output.shape == output_[0].shape
+    out_ = net(params, inputs)
+    assert out.shape == out_[0].shape
 
-    output_ = net.apply_joined({part1: net1_params}, inputs)
-    assert output.shape == output_[0].shape
+    out_ = net.apply_joined({part1: net1_params}, inputs)
+    assert out.shape == out_[0].shape
 
-    output_ = net.apply_joined({part1: net1_params}, inputs, jit=True)
-    assert output.shape == output_[0].shape
+    out_ = net.apply_joined({part1: net1_params}, inputs, jit=True)
+    assert out.shape == out_[0].shape
 
 
 def test_example():
@@ -278,11 +287,11 @@ def test_example():
     params = net.init_params(PRNGKey(0), batch)
     print(params.layers[3].bias)
 
-    output = net(params, batch)
-    output_ = jit(net)(params, batch)
+    out = net(params, batch)
+    out_ = jit(net)(params, batch)
 
-    assert (3, 4) == output.shape
-    assert output.shape == output_.shape
+    assert (3, 4) == out.shape
+    assert out.shape == out_.shape
 
 
 def test_conv_flatten_shape():
@@ -290,12 +299,12 @@ def test_conv_flatten_shape():
     inputs = np.zeros((1, 5, 5, 2))
 
     params = conv.init_params(PRNGKey(0), inputs)
-    output = conv(params, inputs)
-    assert np.array_equal(np.zeros((1, 5, 5, 2)), output)
+    out = conv(params, inputs)
+    assert np.array_equal(np.zeros((1, 5, 5, 2)), out)
 
     flattened = Sequential([conv, flatten])
-    output = flattened({'layers': [params, ()]}, inputs)
-    assert np.array_equal(np.zeros((1, 50)), output)
+    out = flattened({'layers': [params, ()]}, inputs)
+    assert np.array_equal(np.zeros((1, 50)), out)
 
 
 @pytest.mark.parametrize('Pool', (MaxPool, SumPool, AvgPool))
@@ -305,19 +314,19 @@ def test_conv_pool_shape(Pool):
 
     pooled = Sequential([conv, Pool(window_shape=(1, 1), strides=(2, 2))])
     params = pooled.init_params(PRNGKey(0), inputs)
-    output = pooled(params, inputs)
-    assert np.array_equal(np.zeros((1, 3, 3, 2)), output)
+    out = pooled(params, inputs)
+    assert np.array_equal(np.zeros((1, 3, 3, 2)), out)
 
 
 @pytest.mark.parametrize('mode', ('train', 'test'))
 def test_dropout_shape(mode, input_shape=(1, 2, 3)):
     dropout = Dropout(.9, mode=mode)
     inputs = np.zeros(input_shape)
-    output = dropout(inputs, PRNGKey(0))
-    assert np.array_equal(np.zeros(input_shape), output)
+    out = dropout(inputs, PRNGKey(0))
+    assert np.array_equal(np.zeros(input_shape), out)
 
-    output_ = dropout(inputs, rng=PRNGKey(0))
-    assert np.array_equal(output, output_)
+    out_ = dropout(inputs, rng=PRNGKey(0))
+    assert np.array_equal(out, out_)
 
     try:
         dropout(inputs)
@@ -334,13 +343,13 @@ def test_gru_cell_shape():
     x = np.zeros((2, 3))
     carry = init_carry(batch_size=2)
     params = gru_cell.init_params(PRNGKey(0), carry, x)
-    output = gru_cell(params, carry, x)
+    out = gru_cell(params, carry, x)
 
-    assert isinstance(output, tuple)
-    assert len(output) == 2
+    assert isinstance(out, tuple)
+    assert len(out) == 2
 
-    assert np.array_equal(np.zeros((2, 10)), output[0])
-    assert np.array_equal(np.zeros((2, 10)), output[1])
+    assert np.array_equal(np.zeros((2, 10)), out[0])
+    assert np.array_equal(np.zeros((2, 10)), out[1])
 
 
 def test_rnn_shape():
@@ -354,8 +363,8 @@ def test_rnn_shape():
     assert np.array_equal(np.zeros((7, 3)), params.cell.reset_params)
     assert np.array_equal(np.zeros((7, 3)), params.cell.compute_params)
 
-    output = rnn(params, xs)
-    assert np.array_equal(np.zeros((2, 5, 3)), output)
+    out = rnn(params, xs)
+    assert np.array_equal(np.zeros((2, 5, 3)), out)
 
 
 def test_rnn_net_shape():
@@ -385,5 +394,39 @@ def test_rnn_net_shape():
     assert np.array_equal(np.zeros((7, 3)), cell.reset_params)
     assert np.array_equal(np.zeros((7, 3)), cell.compute_params)
 
-    output = net(params, xs)
-    assert np.array_equal(.25 * np.ones((1, 5, 4)), output)
+    out = net(params, xs)
+    assert np.array_equal(.25 * np.ones((1, 5, 4)), out)
+
+
+@pytest.mark.parametrize('center', (False, True))
+@pytest.mark.parametrize('scale', (False, True))
+def test_BatchNorm_shape_NHWC(center, scale):
+    input_shape = (4, 5, 6, 7)
+    batch_norm = BatchNorm(axis=(0, 1, 2), center=center, scale=scale)
+    inputs = random_inputs(input_shape)
+
+    params = batch_norm.init_params(PRNGKey(0), inputs)
+    out = batch_norm(params, inputs)
+
+    assert out.shape == input_shape
+    if center:
+        assert params.beta.shape == (7,)
+    if scale:
+        assert params.gamma.shape == (7,)
+
+
+@pytest.mark.parametrize('center', (False, True))
+@pytest.mark.parametrize('scale', (False, True))
+def test_BatchNorm_shape_NCHW(center, scale):
+    input_shape = (4, 5, 6, 7)
+    batch_norm = BatchNorm(axis=(0, 2, 3), center=center, scale=scale)
+
+    inputs = random_inputs(input_shape)
+    params = batch_norm.init_params(PRNGKey(0), inputs)
+    out = batch_norm(params, inputs)
+
+    assert out.shape == input_shape
+    if center:
+        assert params.beta.shape == (5,)
+    if scale:
+        assert params.gamma.shape == (5,)
