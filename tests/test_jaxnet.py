@@ -216,13 +216,16 @@ def test_join_params_top_level():
 
 
 def test_example():
-    net = Sequential([Dense(2), relu, Dense(4)])
-    batch = np.zeros((3, 2))
+    net = Sequential([Conv(2, (3, 3)), relu, flatten, Dense(4), softmax])
+    batch = np.zeros((3, 5, 5, 1))
     params = net.init_params(PRNGKey(0), batch)
-    print(params.layers[2].bias)
+    print(params.layers[3].bias)
 
     output = net(params, batch)
-    output = jit(net)(params, batch)
+    output_ = jit(net)(params, batch)
+
+    assert (3, 4) == output.shape
+    assert output.shape == output_.shape
 
 
 def test_conv_flatten():
