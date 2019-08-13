@@ -1,8 +1,8 @@
 ## What about [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
 
-### Motivation over `stax`
+JAXnet is independent of stax.
 
-The main motivation of JAXnet over stax is to simplify nesting modules:
+The main motivation over stax is to simplify nesting modules:
  - Automating `init_params`: delegation to submodules, `output_shape` inference, `rng` passing
  - Allowing streamlined module/parameter-sharing
  - Seamless use of parameter-free functions as modules
@@ -10,7 +10,7 @@ The main motivation of JAXnet over stax is to simplify nesting modules:
 You can compare the [JAXnet version](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g#scrollTo=yAOLiz_P_L-z)
 of an MNIST VAE with its [stax version](https://github.com/google/jax/blob/master/examples/mnist_vae.py).
 
-### Porting from `stax`
+### Porting from stax
 
 It's straight-forward to port models from stax:
 
