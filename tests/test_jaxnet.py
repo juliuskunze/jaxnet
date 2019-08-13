@@ -3,7 +3,7 @@ from jax import numpy as np, jit, random
 from jax.random import PRNGKey
 
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, MaxPool, zeros, GRUCell, \
-    Rnn, softmax, SumPool, AvgPool, Dropout, BatchNorm
+    Rnn, softmax, SumPool, AvgPool, Dropout, BatchNorm, ConvTranspose, Conv1DTranspose
 
 
 def random_inputs(input_shape, rng=PRNGKey(0)):
@@ -294,7 +294,43 @@ def test_example():
     assert out.shape == out_.shape
 
 
-def test_conv_flatten_shape():
+@pytest.mark.parametrize('channels', [2, 3])
+@pytest.mark.parametrize('filter_shape', [(1, 1), (2, 3)])
+@pytest.mark.parametrize('padding', ["SAME", "VALID"])
+@pytest.mark.parametrize('strides', [None, (2, 1)])
+@pytest.mark.parametrize('input_shape', [(2, 10, 11, 1)])
+def test_Conv_runs(channels, filter_shape, padding, strides, input_shape):
+    conv = Conv(channels, filter_shape, strides=strides, padding=padding)
+    inputs = random_inputs(input_shape)
+    params = conv.init_params(PRNGKey(0), inputs)
+    conv(params, inputs)
+
+
+@pytest.mark.parametrize('channels', [2, 3])
+@pytest.mark.parametrize('filter_shape', [(1,), (2,), (3,)])
+@pytest.mark.parametrize('padding', ["SAME", "VALID"])
+@pytest.mark.parametrize('strides', [None, (1,), (2,)])
+@pytest.mark.parametrize('input_shape', [(2, 10, 1)])
+def test_Conv1DTranspose_runs(channels, filter_shape, padding, strides, input_shape):
+    convt = Conv1DTranspose(channels, filter_shape, strides=strides, padding=padding)
+    inputs = random_inputs(input_shape)
+    params = convt.init_params(PRNGKey(0), inputs)
+    convt(params, inputs)
+
+
+@pytest.mark.parametrize('channels', [2, 3])
+@pytest.mark.parametrize('filter_shape', [(1, 1), (2, 3), (3, 3)])
+@pytest.mark.parametrize('padding', ["SAME", "VALID"])
+@pytest.mark.parametrize('strides', [None, (2, 1), (2, 2)])
+@pytest.mark.parametrize('input_shape', [(2, 10, 11, 1)])
+def test_ConvTranspose_runs(channels, filter_shape, padding, strides, input_shape):
+    convt = ConvTranspose(channels, filter_shape, strides=strides, padding=padding)
+    inputs = random_inputs(input_shape)
+    params = convt.init_params(PRNGKey(0), inputs)
+    convt(params, inputs)
+
+
+def test_Conv_flatten_shape():
     conv = Conv(2, filter_shape=(3, 3), padding='SAME', kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 5, 5, 2))
 
@@ -308,7 +344,7 @@ def test_conv_flatten_shape():
 
 
 @pytest.mark.parametrize('Pool', (MaxPool, SumPool, AvgPool))
-def test_conv_pool_shape(Pool):
+def test_Conv_pool_shape(Pool):
     conv = Conv(2, filter_shape=(3, 3), padding='SAME', kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 5, 5, 2))
 
@@ -319,7 +355,7 @@ def test_conv_pool_shape(Pool):
 
 
 @pytest.mark.parametrize('mode', ('train', 'test'))
-def test_dropout_shape(mode, input_shape=(1, 2, 3)):
+def test_Dropout_shape(mode, input_shape=(1, 2, 3)):
     dropout = Dropout(.9, mode=mode)
     inputs = np.zeros(input_shape)
     out = dropout(inputs, PRNGKey(0))
@@ -337,7 +373,7 @@ def test_dropout_shape(mode, input_shape=(1, 2, 3)):
         assert False
 
 
-def test_gru_cell_shape():
+def test_GRUCell_shape():
     gru_cell, init_carry = GRUCell(10, zeros)
 
     x = np.zeros((2, 3))
@@ -352,7 +388,7 @@ def test_gru_cell_shape():
     assert np.array_equal(np.zeros((2, 10)), out[1])
 
 
-def test_rnn_shape():
+def test_Rnn_shape():
     xs = np.zeros((2, 5, 4))
     rnn = Rnn(*GRUCell(3, zeros))
     params = rnn.init_params(PRNGKey(0), xs)
@@ -367,7 +403,7 @@ def test_rnn_shape():
     assert np.array_equal(np.zeros((2, 5, 3)), out)
 
 
-def test_rnn_net_shape():
+def test_Rnn_net_shape():
     length = 5
     carry_size = 3
     class_count = 4

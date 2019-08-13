@@ -272,6 +272,40 @@ def GeneralConv(dimension_numbers, out_chan, filter_shape,
 Conv = functools.partial(GeneralConv, ('NHWC', 'HWIO', 'NHWC'))
 
 
+def GeneralConvTranspose(dimension_numbers, out_chan, filter_shape,
+                         strides=None, padding='VALID', kernel_init=None,
+                         bias_init=randn(1e-6)):
+    """Layer construction function for a general transposed-convolution layer."""
+
+    lhs_spec, rhs_spec, out_spec = dimension_numbers
+    one = (1,) * len(filter_shape)
+    strides = strides or one
+    kernel_init = kernel_init or glorot(rhs_spec.index('O'), rhs_spec.index('I'))
+
+    def kernel_shape(inputs):
+        filter_shape_iter = iter(filter_shape)
+
+        return [out_chan if c == 'O' else
+                inputs.shape[lhs_spec.index('C')] if c == 'I' else
+                next(filter_shape_iter) for c in rhs_spec]
+
+    bias_shape = tuple(
+        itertools.dropwhile(lambda x: x == 1, [out_chan if c == 'C' else 1 for c in out_spec]))
+
+    @parametrized
+    def conv_transpose(inputs,
+                       kernel=Param(kernel_shape, kernel_init),
+                       bias=Param(lambda _: bias_shape, bias_init)):
+        return lax.conv_transpose(inputs, kernel, strides, padding,
+                                  dimension_numbers) + bias
+
+    return conv_transpose
+
+
+Conv1DTranspose = functools.partial(GeneralConvTranspose, ('NHC', 'HIO', 'NHC'))
+ConvTranspose = functools.partial(GeneralConvTranspose, ('NHWC', 'HWIO', 'NHWC'))
+
+
 def _pool(reducer, init_val, rescaler=None):
     def Pool(window_shape, strides=None, padding='VALID'):
         """Layer construction function for a pooling layer."""

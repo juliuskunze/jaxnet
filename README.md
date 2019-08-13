@@ -47,6 +47,7 @@ output = jit(net)(params, inputs)
 ```
 
 See JAXnet in action in these demos: [Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g) and [OCR with RNNs](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E).
+Alternative design ideas are discussed [here](DESIGN.md).
 
 ## Defining modules
 
@@ -156,9 +157,5 @@ output = prediction.apply_joined({net: layer_params}, inputs, jit=True)
 
 ## What about [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
 JAXnet is independent of stax.
-The main motivation over stax is to simplify nesting modules:
- - Automating `init_params`: delegation to submodules, `output_shape` inference, `rng` passing
- - Seamless use of parameter-free functions as modules
- - Allowing streamlined module/parameter-sharing
-
-Alternative design ideas are discussed [here](DESIGN.md).
+The main motivation over stax is to simplify nesting modules.
+Find details and porting instructions [here](STAX.md).
