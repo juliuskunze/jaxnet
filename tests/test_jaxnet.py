@@ -2,8 +2,8 @@ import pytest
 from jax import numpy as np, jit
 from jax.random import PRNGKey
 
-from jaxnet import Dense, Sequential, relu, parameterized, Conv, flatten, MaxPool, zeros, \
-    GRUCell, Rnn, softmax
+from jaxnet import parameterized, Dense, Sequential, relu, Conv, flatten, MaxPool, zeros, GRUCell, \
+    Rnn, softmax
 
 
 def test_params():

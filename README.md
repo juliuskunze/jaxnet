@@ -21,10 +21,8 @@ from jax import numpy as np, jit
 from jax.random import PRNGKey
 from jaxnet import *
 
-net = Sequential([Dense(10), relu, Dense(4)])
+net = Sequential([Conv(10), relu, Dense(4)])
 ```
-
-`Sequential`, `Dense`, `Conv` and `RNN` (with `GRUCell`) are already supported.
 
 To initialize parameter values for a network, call `init_params` on any module (with example inputs and a random key):
 ```python
@@ -34,7 +32,7 @@ params = net.init_params(PRNGKey(0), batch)
 
 It initializes and returns all parameters, accessible via attributes:
 ```python
-print(params.layers[0].bias) # [0.00212132 0.01169001 0.00331698 0.00460713]
+print(params.layers[2].bias) # [0.00212132 0.01169001 0.00331698 0.00460713]
 ```
 
 Invoke the network with:
@@ -48,7 +46,7 @@ For acceleration use `jit`:
 output = jit(net)(params, batch)
 ```
 
-Full examples are given in these interactive demos: [Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g) and [OCR with RNNs](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E).
+See JAXnet in action in these demos: [Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g) and [OCR with RNNs](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E).
 
 ## Defining modules
 
