@@ -28,12 +28,11 @@ To initialize parameter values for a network, call `init_params` on any module (
 ```python
 inputs = np.zeros((3, 5, 5, 1))
 params = net.init_params(PRNGKey(0), inputs)
-print(params.layers[3].bias)
 ```
 
 It initializes and returns all parameters, accessible via attributes:
 ```python
-print(params.layers[2].bias) # [0.00212132 0.01169001 0.00331698 0.00460713]
+print(params.layers[3].bias) # [0.00212132 0.01169001 0.00331698 0.00460713]
 ```
 
 Invoke the network with:
