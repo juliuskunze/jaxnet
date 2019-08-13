@@ -17,7 +17,8 @@ If you want to run networks on GPU/TPU, first install the [right version of jaxl
 
 Defining networks looks similar to the [TensorFlow2 / Keras functional API](https://www.tensorflow.org/beta/guide/keras/functional):
 ```python
-from jax import numpy as np, random, jit
+from jax import numpy as np, jit
+from jax.random import PRNGKey
 from jaxnet import *
 
 net = Sequential([Dense(10), relu, Dense(4)])
@@ -28,7 +29,7 @@ net = Sequential([Dense(10), relu, Dense(4)])
 To initialize parameter values for a network, call `init_params` on any module (with example inputs and a random key):
 ```python
 batch = np.zeros((3, 2))
-params = net.init_params(random.PRNGKey(0), batch)
+params = net.init_params(PRNGKey(0), batch)
 ```
 
 It initializes and returns all parameters, accessible via attributes:
@@ -126,9 +127,9 @@ layer = Dense(5)
 net1 = Sequential([layer, Dense(2)])
 net2 = Sequential([layer, Dense(3)])
 
-layer_params = layer.init_params(random.PRNGKey(0), inputs)
-net1_params = net1.init_params(random.PRNGKey(0), inputs, reuse={layer: layer_params})
-net2_params = net2.init_params(random.PRNGKey(1), inputs, reuse={layer: layer_params})
+layer_params = layer.init_params(PRNGKey(0), inputs)
+net1_params = net1.init_params(PRNGKey(0), inputs, reuse={layer: layer_params})
+net2_params = net2.init_params(PRNGKey(1), inputs, reuse={layer: layer_params})
 
 # Now net1_params.layers[0] equals net2_params.layers[0] equals layer_params
 ```
@@ -141,7 +142,7 @@ inputs = np.zeros((1, 2))
 net = Dense(5)
 prediction = Sequential([net, softmax])
 
-net_params = net.init_params(random.PRNGKey(0), inputs)
+net_params = net.init_params(PRNGKey(0), inputs)
 prediction_params = prediction.join_params({net: layer_params})
 
 # net_params.layers[0] is now equal to net_params
