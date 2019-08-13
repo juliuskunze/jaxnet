@@ -3,7 +3,7 @@ from jax import numpy as np, jit
 from jax.random import PRNGKey
 
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, MaxPool, zeros, GRUCell, \
-    Rnn, softmax, SumPool, AvgPool
+    Rnn, softmax, SumPool, AvgPool, Dropout
 
 
 def test_params():
@@ -285,7 +285,7 @@ def test_example():
     assert output.shape == output_.shape
 
 
-def test_conv_flatten():
+def test_conv_flatten_shape():
     conv = Conv(2, filter_shape=(3, 3), padding='SAME', kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 5, 5, 2))
 
@@ -298,19 +298,37 @@ def test_conv_flatten():
     assert np.array_equal(np.zeros((1, 50)), output)
 
 
-@pytest.mark.parametrize('pool_op', (MaxPool, SumPool, AvgPool))
-def test_conv_pool(pool_op):
+@pytest.mark.parametrize('Pool', (MaxPool, SumPool, AvgPool))
+def test_conv_pool_shape(Pool):
     conv = Conv(2, filter_shape=(3, 3), padding='SAME', kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 5, 5, 2))
 
-    pooled = Sequential([conv, MaxPool(window_shape=(1, 1), strides=(2, 2))])
+    pooled = Sequential([conv, Pool(window_shape=(1, 1), strides=(2, 2))])
     params = pooled.init_params(PRNGKey(0), inputs)
-    inputs = np.zeros((1, 5, 5, 2))
     output = pooled(params, inputs)
     assert np.array_equal(np.zeros((1, 3, 3, 2)), output)
 
 
-def test_gru_cell():
+@pytest.mark.parametrize('mode', ('train', 'test'))
+def test_dropout_shape(mode, input_shape=(1, 2, 3)):
+    dropout = Dropout(.9, mode=mode)
+    inputs = np.zeros(input_shape)
+    output = dropout(inputs, PRNGKey(0))
+    assert np.array_equal(np.zeros(input_shape), output)
+
+    output_ = dropout(inputs, rng=PRNGKey(0))
+    assert np.array_equal(output, output_)
+
+    try:
+        dropout(inputs)
+        assert False
+    except ValueError:
+        pass
+    except:
+        assert False
+
+
+def test_gru_cell_shape():
     gru_cell, init_carry = GRUCell(10, zeros)
 
     x = np.zeros((2, 3))
@@ -325,7 +343,7 @@ def test_gru_cell():
     assert np.array_equal(np.zeros((2, 10)), output[1])
 
 
-def test_rnn():
+def test_rnn_shape():
     xs = np.zeros((2, 5, 4))
     rnn = Rnn(*GRUCell(3, zeros))
     params = rnn.init_params(PRNGKey(0), xs)
@@ -340,7 +358,7 @@ def test_rnn():
     assert np.array_equal(np.zeros((2, 5, 3)), output)
 
 
-def test_rnn_net():
+def test_rnn_net_shape():
     length = 5
     carry_size = 3
     class_count = 4
