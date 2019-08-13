@@ -236,6 +236,42 @@ def test_join_params_top_level():
     assert np.array_equal(output, output_)
 
 
+def assert_params_equal(p, p_):
+    if isinstance(p, np.ndarray):
+        assert np.array_equal(p, p_)
+        return
+
+    assert type(p) == type(p_)
+    assert len(p) == len(p_)
+    for e, e_ in zip(p, p_):
+        assert_params_equal(e, e_)
+
+
+def test_join_params_shared_submodules():
+    sublayer = Dense(2)
+    part1 = Sequential([sublayer, relu])
+    part2 = Sequential([sublayer, np.sum])
+
+    @parameterized
+    def net(inputs, part1=part1, part2=part2):
+        return part1(inputs), part2(inputs)
+
+    inputs = np.zeros((1, 3))
+    net1_params = part1.init_params(PRNGKey(0), inputs)
+    output = part1(net1_params, inputs)
+
+    params = net.join_params({part1: net1_params})
+    assert_params_equal(net1_params.layers[0], params.part2.layers[0])
+    output_ = net(params, inputs)
+    assert output.shape == output_[0].shape
+
+    output_ = net.apply_joined({part1: net1_params}, inputs)
+    assert output.shape == output_[0].shape
+
+    output_ = net.apply_joined({part1: net1_params}, inputs, jit=True)
+    assert output.shape == output_[0].shape
+
+
 def test_example():
     net = Sequential([Conv(2, (3, 3)), relu, flatten, Dense(4), softmax])
     batch = np.zeros((3, 5, 5, 1))

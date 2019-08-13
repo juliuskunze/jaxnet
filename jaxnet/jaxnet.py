@@ -9,8 +9,8 @@ from jax import numpy as np, random, partial
 from jax.lax import lax, scan
 from jax.scipy.special import logsumexp
 
-from jaxnet.tools import nested_zip, nested_map, nested_enumerate, set_nested_element, \
-    nested_any, IndexedValue, ZippedValue
+from jaxnet.tools import zip_nested, map_nested, enumerate_nested, set_nested_element, \
+    nested_any, IndexedValue, ZippedValue, flatten_nested
 
 Param = namedtuple('Param', ('get_shape', 'init'))
 NoParams = namedtuple('NoParams', ())
@@ -21,7 +21,7 @@ def _is_parameterized(param): return isinstance(param, Param) or isinstance(para
 
 
 def _is_parameterized_collection(x):
-    return nested_any(nested_map(_is_parameterized, x, element_types=(Param,)))
+    return nested_any(map_nested(_is_parameterized, x, element_types=(Param,)))
 
 
 class parameterized:
@@ -35,6 +35,11 @@ class parameterized:
         self.apply = self._apply_fun()
         self.init_params = partial(self._init_params, reuse_only=False)
 
+    def param_value_pairs(self, param_values):
+        param_values = param_values._asdict() if isinstance(param_values,
+                                                            tuple) else param_values
+        return zip_nested(self.parameters, param_values, element_types=(Param,))
+
     def _apply_fun(self, sublayer_wrapper=lambda index_path, apply: apply):
         def apply(param_values, *inputs):
             def resolve_parameters(index_path, param, param_values):
@@ -47,11 +52,9 @@ class parameterized:
 
                 return param
 
-            param_values = param_values._asdict() if isinstance(param_values,
-                                                                tuple) else param_values
-            pairs = nested_zip(self.parameters, param_values, element_types=(Param,))
-            indexed_pairs = nested_enumerate(pairs, element_types=(ZippedValue, Param))
-            resolved_params = nested_map(lambda pair: resolve_parameters(pair[0], *pair[1]),
+            pairs = self.param_value_pairs(param_values)
+            indexed_pairs = enumerate_nested(pairs, element_types=(ZippedValue, Param))
+            resolved_params = map_nested(lambda pair: resolve_parameters(pair[0], *pair[1]),
                                          indexed_pairs, element_types=(IndexedValue, Param))
             return self.fun(*inputs, **resolved_params)
 
@@ -89,7 +92,7 @@ class parameterized:
             return param
 
         # TODO refactor: replaced later by tracer, needed for shape information:
-        all_param_values = nested_map(
+        all_param_values = map_nested(
             lambda param: init_param(param, none_for_submodules=not reuse_only),
             self.parameters, tuples_to_lists=True, element_types=(Param,))
 
@@ -110,7 +113,24 @@ class parameterized:
     def __call__(self, *args, **kwargs):
         return self.apply(*args, **kwargs)
 
+    def _expand_reuse_dict(self, reuse):
+        r = dict()
+
+        for param, value in reuse.items():
+            r.update({param: value})
+
+            if isinstance(param, parameterized):
+                pairs = param.param_value_pairs(value)
+                pairs = flatten_nested(pairs, (ZippedValue, ))
+                values_by_submodule = {p: v for (p, v) in pairs}
+
+                r.update(param._expand_reuse_dict(values_by_submodule))
+
+        return r
+
     def join_params(self, reuse):
+        # TODO: optimization wrong, duplicate values, needs param adapter
+        reuse = self._expand_reuse_dict(reuse)
         return self._init_params(None, reuse=reuse, reuse_only=True)
 
     def apply_joined(self, reuse, *inputs, jit=False):

@@ -1,16 +1,16 @@
 from collections import namedtuple
 
 
-def nested_map(transform, nested, element_types=(), tuples_to_lists=False):
+def map_nested(transform, nested, element_types=(), tuples_to_lists=False):
     if any(isinstance(nested, t) for t in element_types):
         return transform(nested)
 
     if isinstance(nested, list) or isinstance(nested, tuple):
-        result = (nested_map(transform, v, element_types) for v in nested)
+        result = (map_nested(transform, v, element_types) for v in nested)
         return list(result) if isinstance(nested, list) or tuples_to_lists else tuple(result)
 
     if isinstance(nested, dict):
-        return {k: nested_map(transform, v, element_types) for k, v in nested.items()}
+        return {k: map_nested(transform, v, element_types) for k, v in nested.items()}
 
     return transform(nested)
 
@@ -23,36 +23,52 @@ ZippedValue = namedtuple('ZippedValue', ('value1', 'value2'))
 IndexedValue = namedtuple('IndexedValue', ('index', 'value'))
 
 
-def nested_zip(nested1, nested2, element_types=()):
+def zip_nested(nested1, nested2, element_types=()):
     if any(isinstance(nested1, t) or isinstance(nested2, t) for t in element_types):
         return ZippedValue(nested1, nested2)
 
     if isinstance(nested1, list) or isinstance(nested1, tuple):
-        return type(nested1)(map(lambda cs: nested_zip(*cs, element_types), zip(nested1, nested2)))
+        return type(nested1)(map(lambda cs: zip_nested(*cs, element_types), zip(nested1, nested2)))
 
     if isinstance(nested1, dict):
         return type(nested1)(
-            {k: nested_zip(v1, v2, element_types) for k, (v1, v2) in
+            {k: zip_nested(v1, v2, element_types) for k, (v1, v2) in
              zip_dicts(nested1, nested2).items()})
 
     return ZippedValue(nested1, nested2)
 
 
-def nested_enumerate(nested, prefix=(), element_types=()):
+def enumerate_nested(nested, prefix=(), element_types=()):
     if any(isinstance(nested, t) for t in element_types):
         return IndexedValue(prefix, nested)
 
     if isinstance(nested, list) or isinstance(nested, tuple):
         return type(nested)(
-            nested_enumerate(value, prefix=prefix + (index,), element_types=element_types)
+            enumerate_nested(value, prefix=prefix + (index,), element_types=element_types)
             for index, value in enumerate(nested))
 
     if isinstance(nested, dict):
         return type(nested)(
-            {index: nested_enumerate(value, prefix=prefix + (index,), element_types=element_types)
+            {index: enumerate_nested(value, prefix=prefix + (index,), element_types=element_types)
              for index, value in nested.items()})
 
     return IndexedValue(prefix, nested)
+
+
+def flatten_nested(nested, element_types=()):
+    if any(isinstance(nested, t) for t in element_types):
+        yield nested
+    elif isinstance(nested, list) or isinstance(nested, tuple):
+        for v in nested:
+            for e in (flatten_nested(v, element_types)):
+                yield e
+
+    elif isinstance(nested, dict):
+        for _, v in nested.items():
+            for e in flatten_nested(v, element_types):
+                yield e
+    else:
+        yield nested
 
 
 def get_nested_element(nested, index_path):
