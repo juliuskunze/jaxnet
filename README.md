@@ -50,10 +50,10 @@ See JAXnet in action in these demos: [Mnist VAE](https://colab.research.google.c
 
 ## Defining modules
 
-Modules are functions decorated with `@parameterized`, with parameters defined through default values:
+Modules are functions decorated with `@parametrized`, with parameters defined through default values:
 ```python
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
-    @parameterized
+    @parametrized
     def dense(inputs,
               kernel=Param(lambda inputs: (inputs.shape[-1], out_dim), kernel_init),
               bias=Param(lambda _: (out_dim,), bias_init)):
@@ -63,14 +63,14 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
 ```
 
 `Param` specifies parameter shape and initialization function. 
-`@parameterized` transforms this function to allow usage as above.
+`@parametrized` transforms this function to allow usage as above.
 
 ## Nesting modules
 
 Modules can be used in other modules through default arguments:
 
 ```python
-@parameterized
+@parametrized
 def net(inputs, layer1=Dense(10), layer2=Dense(20))
     inputs = layer1(inputs)
     return layer2(inputs)
@@ -79,7 +79,7 @@ def net(inputs, layer1=Dense(10), layer2=Dense(20))
 Use many modules at once with collections:
 ```python
 def Sequential(layers):
-    @parameterized
+    @parametrized
     def sequential(inputs, layers=layers):
         for module in layers:
             inputs = module(inputs)
@@ -109,7 +109,7 @@ shared_net=Sequential([layer, layer])
 This is equivalent to (already implemented):
 
 ```python
-@parameterized
+@parametrized
 def shared_net(input, layer=layer):
     return layer(layer(input))
 ```

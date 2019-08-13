@@ -17,25 +17,37 @@ NoParams = namedtuple('NoParams', ())
 no_params = NoParams()
 
 
-def _is_parameterized(param): return isinstance(param, Param) or isinstance(param, parameterized)
+def _is_parametrized(param): return isinstance(param, Param) or isinstance(param, parametrized)
 
 
-def _is_parameterized_collection(x):
-    return nested_any(map_nested(_is_parameterized, x, element_types=(Param,)))
+def _is_parametrized_collection(x):
+    return nested_any(map_nested(_is_parametrized, x, element_types=(Param,)))
 
 
-class parameterized:
+class parametrized:
     def __init__(self, fun):
         self.fun = fun
         self.parameters = {k: v.default for k, v in signature(fun).parameters.items()
-                           if _is_parameterized_collection(v.default)}
+                           if _is_parametrized_collection(v.default)}
 
         self.name = fun.__name__
         self.Parameters = namedtuple(self.name, self.parameters.keys())
         self.apply = self._apply_fun()
         self.init_params = partial(self._init_params, reuse_only=False)
 
-    def param_value_pairs(self, param_values):
+    def __call__(self, *args, **kwargs):
+        return self.apply(*args, **kwargs)
+
+    def join_params(self, reuse):
+        # TODO: optimization wrong, duplicate values, needs param adapter
+        reuse = self._expand_reuse_dict(reuse)
+        return self._init_params(None, reuse=reuse, reuse_only=True)
+
+    def apply_joined(self, reuse, *inputs, jit=False):
+        params = self.join_params(reuse=reuse)
+        return (jax.jit(self.apply) if jit else self.apply)(params, *inputs)
+
+    def _param_value_pairs(self, param_values):
         param_values = param_values._asdict() if isinstance(param_values,
                                                             tuple) else param_values
         return zip_nested(self.parameters, param_values, element_types=(Param,))
@@ -46,13 +58,13 @@ class parameterized:
                 if isinstance(param, Param):
                     return param_values
 
-                if isinstance(param, parameterized):
+                if isinstance(param, parametrized):
                     apply = sublayer_wrapper(index_path, param)
                     return partial(apply, param_values)
 
                 return param
 
-            pairs = self.param_value_pairs(param_values)
+            pairs = self._param_value_pairs(param_values)
             indexed_pairs = enumerate_nested(pairs, element_types=(ZippedValue, Param))
             resolved_params = map_nested(lambda pair: resolve_parameters(pair[0], *pair[1]),
                                          indexed_pairs, element_types=(IndexedValue, Param))
@@ -61,16 +73,16 @@ class parameterized:
         return apply
 
     def _init_params(self, rng, *example_inputs, reuse=None, reuse_only=False):
-        if isinstance(self, parameterized):
+        if isinstance(self, parametrized):
             if reuse and self in reuse:
                 return reuse[self]
 
         def init_param(param, *sub_example_input, none_for_submodules=False):
-            if isinstance(param, parameterized):
+            if isinstance(param, parametrized):
                 if none_for_submodules:
                     return None
 
-            if _is_parameterized(param):
+            if _is_parametrized(param):
                 if reuse_only:
                     if isinstance(param, Param):
                         # TODO: include index path to param in message
@@ -85,7 +97,7 @@ class parameterized:
 
                 return param.init_params(rng_param, *sub_example_input, reuse=reuse)
 
-            if callable(param) and not isinstance(param, parameterized):
+            if callable(param) and not isinstance(param, parametrized):
                 return no_params
 
             assert isinstance(param, np.ndarray)
@@ -110,32 +122,20 @@ class parameterized:
 
         return self.Parameters(**all_param_values)
 
-    def __call__(self, *args, **kwargs):
-        return self.apply(*args, **kwargs)
-
     def _expand_reuse_dict(self, reuse):
         r = dict()
 
         for param, value in reuse.items():
             r.update({param: value})
 
-            if isinstance(param, parameterized):
-                pairs = param.param_value_pairs(value)
-                pairs = flatten_nested(pairs, (ZippedValue, ))
+            if isinstance(param, parametrized):
+                pairs = param._param_value_pairs(value)
+                pairs = flatten_nested(pairs, (ZippedValue,))
                 values_by_submodule = {p: v for (p, v) in pairs}
 
                 r.update(param._expand_reuse_dict(values_by_submodule))
 
         return r
-
-    def join_params(self, reuse):
-        # TODO: optimization wrong, duplicate values, needs param adapter
-        reuse = self._expand_reuse_dict(reuse)
-        return self._init_params(None, reuse=reuse, reuse_only=True)
-
-    def apply_joined(self, reuse, *inputs, jit=False):
-        params = self.join_params(reuse=reuse)
-        return (jax.jit(self.apply) if jit else self.apply)(params, *inputs)
 
     def __str__(self):
         return f'{self.name}({id(self)}):{self.parameters}'
@@ -213,7 +213,7 @@ ones = lambda rng, shape: np.ones(shape, dtype='float32')
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     """Layer constructor function for a dense (fully-connected) layer."""
 
-    @parameterized
+    @parametrized
     def dense(inputs,
               kernel=Param(lambda inputs: (inputs.shape[-1], out_dim), kernel_init),
               bias=Param(lambda _: (out_dim,), bias_init)):
@@ -226,13 +226,13 @@ def Sequential(layers):
     """Combinator for composing layers in sequence.
 
     Args:
-      *layers: a sequence of layers, each a function or parameterized function.
+      *layers: a sequence of layers, each a function or parametrized function.
 
     Returns:
-        A new parameterized function.
+        A new parametrized function.
     """
 
-    @parameterized
+    @parametrized
     def sequential(inputs, layers=layers):
         for module in layers:
             inputs = module(inputs)
@@ -259,7 +259,7 @@ def GeneralConv(dimension_numbers, out_chan, filter_shape,
     bias_shape = tuple(
         itertools.dropwhile(lambda x: x == 1, [out_chan if c == 'C' else 1 for c in out_spec]))
 
-    @parameterized
+    @parametrized
     def general_conv(inputs,
                      kernel=Param(kernel_shape, kernel_init),
                      bias=Param(lambda _: bias_shape, bias_init)):
@@ -293,10 +293,22 @@ MaxPool = _pool(lax.max, -np.inf)
 SumPool = _pool(lax.add, 0.)
 
 
+def _normalize_by_window_size(dims, strides, padding):
+    def rescale(outputs, inputs):
+        one = np.ones(inputs.shape[1:-1], dtype=inputs.dtype)
+        window_sizes = lax.reduce_window(one, 0., lax.add, dims, strides, padding)
+        return outputs / window_sizes[..., np.newaxis]
+
+    return rescale
+
+
+AvgPool = _pool(lax.add, 0., _normalize_by_window_size)
+
+
 def GRUCell(carry_size, param_init):
     def param(): return Param(lambda carry, x: (x.shape[1] + carry_size, carry_size), param_init)
 
-    @parameterized
+    @parametrized
     def gru_cell(carry, x,
                  update_params=param(),
                  reset_params=param(),
@@ -320,7 +332,7 @@ def Rnn(cell, carry_init):
     Expecting input shape (batch, sequence, channels).
     TODO allow returning last carry."""
 
-    @parameterized
+    @parametrized
     def rnn(xs, cell=cell):
         xs = np.swapaxes(xs, 0, 1)
         _, ys = scan(cell, carry_init(xs.shape[1]), xs)

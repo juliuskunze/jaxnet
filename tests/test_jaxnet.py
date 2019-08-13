@@ -2,8 +2,8 @@ import pytest
 from jax import numpy as np, jit
 from jax.random import PRNGKey
 
-from jaxnet import parameterized, Dense, Sequential, relu, Conv, flatten, MaxPool, zeros, GRUCell, \
-    Rnn, softmax
+from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, MaxPool, zeros, GRUCell, \
+    Rnn, softmax, SumPool, AvgPool
 
 
 def test_params():
@@ -23,7 +23,7 @@ def test_params():
 
 
 def test_submodule():
-    @parameterized
+    @parametrized
     def net(inputs, layer=Dense(2, zeros, zeros)):
         return layer(inputs)
 
@@ -67,7 +67,7 @@ def assert_dense_params_equal(p, p_):
 
 
 def test_internal_param_sharing():
-    @parameterized
+    @parametrized
     def shared_net(inputs, layer=Dense(2, zeros, zeros)):
         return layer(layer(inputs))
 
@@ -86,7 +86,7 @@ def test_internal_param_sharing():
 
 
 def test_internal_param_sharing2():
-    @parameterized
+    @parametrized
     def shared_net(inputs, layer=Sequential([Dense(2, zeros, zeros), relu])):
         inputs = layer(inputs)
         return layer(inputs)
@@ -252,7 +252,7 @@ def test_join_params_shared_submodules():
     part1 = Sequential([sublayer, relu])
     part2 = Sequential([sublayer, np.sum])
 
-    @parameterized
+    @parametrized
     def net(inputs, part1=part1, part2=part2):
         return part1(inputs), part2(inputs)
 
@@ -298,14 +298,15 @@ def test_conv_flatten():
     assert np.array_equal(np.zeros((1, 50)), output)
 
 
-def test_conv_max_pool():
+@pytest.mark.parametrize('pool_op', (MaxPool, SumPool, AvgPool))
+def test_conv_pool(pool_op):
     conv = Conv(2, filter_shape=(3, 3), padding='SAME', kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 5, 5, 2))
 
-    params = conv.init_params(PRNGKey(0), inputs)
     pooled = Sequential([conv, MaxPool(window_shape=(1, 1), strides=(2, 2))])
+    params = pooled.init_params(PRNGKey(0), inputs)
     inputs = np.zeros((1, 5, 5, 2))
-    output = pooled({'layers': [params, ()]}, inputs)
+    output = pooled(params, inputs)
     assert np.array_equal(np.zeros((1, 3, 3, 2)), output)
 
 
