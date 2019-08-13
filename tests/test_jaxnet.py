@@ -196,7 +196,28 @@ def test_join_params():
     assert np.array_equal(output, output_)
 
 
-@pytest.mark.skip(reason="Unclear if needed")
+def test_join_params_subsubmodule():
+    subsublayer = Dense(2)
+    sublayer = Sequential([subsublayer, relu])
+    net = Sequential([sublayer, np.sum])
+    inputs = np.zeros((1, 3))
+    params = net.init_params(PRNGKey(0), inputs)
+    output = net(params, inputs)
+
+    subsublayer_params = subsublayer.init_params(PRNGKey(0), inputs)
+
+    params_ = net.join_params({subsublayer: subsublayer_params})
+    assert_dense_params_equal(subsublayer_params, params_.layers[0].layers[0])
+    output_ = net(params_, inputs)
+    assert output.shape == output_.shape
+
+    output_ = net.apply_joined({subsublayer: subsublayer_params}, inputs)
+    assert output.shape == output_.shape
+
+    output_ = net.apply_joined({subsublayer: subsublayer_params}, inputs, jit=True)
+    assert output.shape == output_.shape
+
+
 def test_join_params_top_level():
     net = Dense(2)
     inputs = np.zeros((1, 3))
@@ -208,10 +229,10 @@ def test_join_params_top_level():
     output_ = net(params_, inputs)
     assert np.array_equal(output, output_)
 
-    output_ = net.apply_joined_params({net: params}, inputs)
+    output_ = net.apply_joined({net: params}, inputs)
     assert np.array_equal(output, output_)
 
-    output_ = net.apply_joined_params({net: params}, inputs, jit=True)
+    output_ = net.apply_joined({net: params}, inputs, jit=True)
     assert np.array_equal(output, output_)
 
 

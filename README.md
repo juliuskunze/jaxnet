@@ -89,7 +89,7 @@ def Sequential(layers):
     return sequential
 ```
 
-Nested `tuples`/`list`/`dicts` of modules work. The same is true for `Params`.
+Nested `tuples`/`list`/`dicts` of modules work. The same is true for `Param`s.
 
 Using parameter-free functions is seamless:
 ```python

@@ -7,16 +7,10 @@ def nested_map(transform, nested, element_types=(), tuples_to_lists=False):
 
     if isinstance(nested, list) or isinstance(nested, tuple):
         result = (nested_map(transform, v, element_types) for v in nested)
-
-        if isinstance(nested, list) or tuples_to_lists:
-            return list(result)
-
-        return tuple(result)
+        return list(result) if isinstance(nested, list) or tuples_to_lists else list(result)
 
     if isinstance(nested, dict):
-        nested = {k: nested_map(transform, v, element_types) for k, v in nested.items()}
-
-        return nested
+        return {k: nested_map(transform, v, element_types) for k, v in nested.items()}
 
     return transform(nested)
 
