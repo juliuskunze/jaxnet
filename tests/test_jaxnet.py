@@ -3,7 +3,8 @@ from jax import numpy as np, jit, random
 from jax.random import PRNGKey
 
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, MaxPool, zeros, GRUCell, \
-    Rnn, softmax, SumPool, AvgPool, Dropout, BatchNorm, ConvTranspose, Conv1DTranspose
+    Rnn, softmax, SumPool, AvgPool, Dropout, BatchNorm, ConvTranspose, Conv1DTranspose, \
+    InputDependent
 
 
 def random_inputs(input_shape, rng=PRNGKey(0)):
@@ -23,6 +24,8 @@ def test_params():
     assert len(params) == 2
     assert np.array_equal(np.zeros((3, 2)), params.kernel)
     assert np.array_equal(np.zeros(2), params.bias)
+    name = str(net)
+    assert name.startswith('dense') and 'kernel' in name and 'bias' in name
 
     out = net(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
@@ -510,6 +513,7 @@ def test_BatchNorm_shape_NCHW(center, scale):
     if scale:
         assert params.gamma.shape == (5,)
 
+
 def test_reuse_example():
     inputs = np.zeros((1, 2))
     net = Sequential([Dense(5), relu])
@@ -521,6 +525,37 @@ def test_reuse_example():
 
     assert transfer_net_params.layers[0] is net_params
 
-    transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs, reuse={transfer_net.layers[0]: net_params})
+    transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs,
+                                                   reuse={transfer_net.layers[0]: net_params})
 
     assert transfer_net_params.layers[0] is net_params
+
+
+def test_InputDependent():
+    def make_net(inputs):
+        # output neuron count depends on batch size:
+        return Dense(inputs.shape[0])
+
+    net = InputDependent(make_net)
+
+    inputs = np.zeros((5, 3))
+    params = net.init_params(PRNGKey(0), inputs)
+
+    output = net(params, inputs)
+
+    assert (5, 5) == output.shape
+    assert str(net).startswith('make_net')
+
+def test_InputDependent_nested():
+    def make_net(inputs):
+        # output neuron count depends on batch size:
+        return Dense(inputs.shape[0])
+
+    net = Sequential([Dense(3), InputDependent(make_net)])
+
+    inputs = np.zeros((5, 3))
+    params = net.init_params(PRNGKey(0), inputs)
+
+    output = net(params, inputs)
+
+    assert (5, 5) == output.shape

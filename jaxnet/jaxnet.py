@@ -17,78 +17,78 @@ NoParams = namedtuple('NoParams', ())
 no_params = NoParams()
 
 
-def _is_parametrized(param): return isinstance(param, Param) or isinstance(param, parametrized)
+def _is_parametrized(param): return isinstance(param, Param) or isinstance(param, InputDependent)
 
 
 def _is_parametrized_collection(x):
     return nested_any(map_nested(_is_parametrized, x, element_types=(Param,)))
 
 
-class parametrized:
-    def __init__(self, fun):
-        self._fun = fun
-        self._parameters = {k: v.default for k, v in signature(fun).parameters.items()
-                            if _is_parametrized_collection(v.default)}
-
-        self._name = fun.__name__
-        self._Parameters = namedtuple(self._name, self._parameters.keys())
-        self._apply = self._apply_fun()
+class InputDependent:
+    def __init__(self, parametrized_from_inputs, name=None):
+        self._fun_from_inputs = parametrized_from_inputs
+        self._name = name if name else parametrized_from_inputs.__name__
+        self._apply = self._get_apply()
         self.init_params = partial(self._init_params, reuse_only=False)
 
-        for name in self._parameters.keys():
+    def __call__(self, param_values, *inputs):
+        return self._apply(param_values, *inputs)
+
+    def _get_fun(self, *inputs):
+        p = self._fun_from_inputs(*inputs)
+
+        if not isinstance(p, parametrized):
+            raise ValueError("fun_from_inputs has to return a @parameterized function.")
+
+        return p._fun
+
+    def _get_parameters(self, *inputs):
+        fun = self._get_fun(*inputs)
+        parameters = {k: v.default for k, v in signature(fun).parameters.items()
+                      if _is_parametrized_collection(v.default)}
+
+        for name in parameters.keys():
             if name in dir(self):
                 raise ValueError(f'Submodules cannot be named "{name}", please rename.')
 
-    def __call__(self, *args, **kwargs):
-        return self._apply(*args, **kwargs)
+        return parameters
 
-    def __getattr__(self, item):
-        if item in self._parameters.keys():
-            return self._parameters[item]
+    def _get_Parameters(self, *inputs):
+        return namedtuple(self._name, self._get_parameters(*inputs).keys())
 
-        return getattr(super(parametrized, self), item)
-
-    def params_from(self, values_by_param):
-        # TODO: optimization wrong, duplicate values, needs param adapter
-        values_by_param = self._expand_reuse_dict(values_by_param)
-        return self._init_params(None, reuse=values_by_param, reuse_only=True)
-
-    def apply_from(self, reuse, *inputs, jit=False):
-        params = self.params_from(values_by_param=reuse)
-        return (jax.jit(self._apply) if jit else self._apply)(params, *inputs)
-
-    def _param_value_pairs(self, param_values):
+    def _get_param_value_pairs(self, param_values, *inputs):
         param_values = param_values._asdict() if isinstance(param_values,
                                                             tuple) else param_values
-        return zip_nested(self._parameters, param_values, element_types=(Param,))
+        return zip_nested(self._get_parameters(*inputs), param_values, element_types=(Param,))
 
-    def _apply_fun(self, sublayer_wrapper=lambda index_path, apply: apply):
+    def _get_apply(self, sublayer_wrapper=lambda index_path, apply: apply):
         def apply(param_values, *inputs):
             def resolve_parameters(index_path, param, param_values):
                 if isinstance(param, Param):
                     return param_values
 
-                if isinstance(param, parametrized):
+                if isinstance(param, InputDependent):
                     apply = sublayer_wrapper(index_path, param)
                     return partial(apply, param_values)
 
                 return param
 
-            pairs = self._param_value_pairs(param_values)
+            pairs = self._get_param_value_pairs(param_values, *inputs)
             indexed_pairs = enumerate_nested(pairs, element_types=(ZippedValue, Param))
             resolved_params = map_nested(lambda pair: resolve_parameters(pair[0], *pair[1]),
                                          indexed_pairs, element_types=(IndexedValue, Param))
-            return self._fun(*inputs, **resolved_params)
+            fun = self._get_fun(*inputs)
+            return fun(*inputs, **resolved_params)
 
         return apply
 
     def _init_params(self, rng, *example_inputs, reuse=None, reuse_only=False):
-        if isinstance(self, parametrized):
+        if isinstance(self, InputDependent):
             if reuse and self in reuse:
                 return reuse[self]
 
-        def init_param(param, *sub_example_input, none_for_submodules=False):
-            if isinstance(param, parametrized):
+        def init_param(param, *sub_example_inputs, none_for_submodules=False):
+            if isinstance(param, InputDependent):
                 if none_for_submodules:
                     return None
 
@@ -105,9 +105,9 @@ class parametrized:
                 if isinstance(param, Param):
                     return param.init(rng_param, param.get_shape(*example_inputs))
 
-                return param.init_params(rng_param, *sub_example_input, reuse=reuse)
+                return param.init_params(rng_param, *sub_example_inputs, reuse=reuse)
 
-            if callable(param) and not isinstance(param, parametrized):
+            if callable(param) and not isinstance(param, InputDependent):
                 return no_params
 
             assert isinstance(param, np.ndarray)
@@ -116,7 +116,7 @@ class parametrized:
         # TODO refactor: replaced later by tracer, needed for shape information:
         all_param_values = map_nested(
             lambda param: init_param(param, none_for_submodules=not reuse_only),
-            self._parameters, tuples_to_lists=True, element_types=(Param,))
+            self._get_parameters(*example_inputs), tuples_to_lists=True, element_types=(Param,))
 
         if not reuse_only:
             def traced_submodule_wrapper(index_path, submodule):
@@ -127,10 +127,33 @@ class parametrized:
 
                 return traced_apply
 
-            self._apply_fun(sublayer_wrapper=traced_submodule_wrapper)(all_param_values,
-                                                                       *example_inputs)
+            apply = self._get_apply(sublayer_wrapper=traced_submodule_wrapper)
+            apply(all_param_values, *example_inputs)
 
-        return self._Parameters(**all_param_values)
+        return self._get_Parameters(*example_inputs)(**all_param_values)
+
+    def __str__(self):
+        return f'{self._name}({id(self)})'
+
+
+class parametrized(InputDependent):
+    def __init__(self, fun):
+        super().__init__(parametrized_from_inputs=None, name=fun.__name__)
+        self._fun = fun
+        self._parameters = super()._get_parameters()
+        self._Parameters = super()._get_Parameters()
+
+    def _get_fun(self, *inputs): return self._fun
+
+    def _get_parameters(self, *inputs): return self._parameters
+
+    def _get_Parameters(self, *inputs): return self._Parameters
+
+    def __getattr__(self, item):
+        if item in self._parameters.keys():
+            return self._parameters[item]
+
+        return getattr(super(), item)
 
     def _expand_reuse_dict(self, reuse):
         r = dict()
@@ -139,13 +162,22 @@ class parametrized:
             r.update({param: value})
 
             if isinstance(param, parametrized):
-                pairs = param._param_value_pairs(value)
+                pairs = param._get_param_value_pairs(value)
                 pairs = flatten_nested(pairs, (ZippedValue,))
                 values_by_submodule = {p: v for (p, v) in pairs}
 
                 r.update(param._expand_reuse_dict(values_by_submodule))
 
         return r
+
+    def params_from(self, values_by_param):
+        # TODO: optimization wrong, duplicate values, needs param adapter
+        values_by_param = self._expand_reuse_dict(values_by_param)
+        return self._init_params(None, reuse=values_by_param, reuse_only=True)
+
+    def apply_from(self, reuse, *inputs, jit=False):
+        params = self.params_from(values_by_param=reuse)
+        return (jax.jit(self._apply) if jit else self._apply)(params, *inputs)
 
     def __str__(self):
         return f'{self._name}({id(self)}):{self._parameters}'

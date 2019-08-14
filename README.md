@@ -15,8 +15,9 @@ If you want to run networks on GPU/TPU, first install the [right version of jaxl
 
 See JAXnet in action in these demos:
 [Mnist Classifier](https://colab.research.google.com/drive/18kICTUbjqnfg5Lk3xFVQtUj6ahct9Vmv),
-[Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g) and
-[OCR with RNNs](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E).
+[Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g),
+[OCR with RNNs](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E) and
+[ResNet](https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN).
 
 ## Overview
 
@@ -39,7 +40,7 @@ print(params.layers[3].bias) # [0.00212132 0.01169001 0.00331698 0.00460713]
 
 Invoke the network with:
 ```python
-output = net(params, inputs) # use jit(net)(params, inputs) for acceleration
+output = net(params, inputs) # use "jit(net)(params, inputs)" for acceleration
 ```
 
 ## Defining modules
