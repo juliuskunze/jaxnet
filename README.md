@@ -47,7 +47,6 @@ output = jit(net)(params, inputs)
 ```
 
 See JAXnet in action in these demos: [Mnist Classifier](https://colab.research.google.com/drive/18kICTUbjqnfg5Lk3xFVQtUj6ahct9Vmv), [Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g) and [OCR with RNNs](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E).
-Alternative design ideas are discussed [here](DESIGN.md).
 
 ## Defining modules
 
@@ -127,8 +126,8 @@ net1 = Sequential([layer, Dense(2)])
 net2 = Sequential([layer, Dense(3)])
 
 layer_params = layer.init_params(PRNGKey(0), inputs)
-net1_params = net1.init_params(PRNGKey(0), inputs, reuse={layer: layer_params})
-net2_params = net2.init_params(PRNGKey(1), inputs, reuse={layer: layer_params})
+net1_params = net1.init_params(PRNGKey(1), inputs, reuse={layer: layer_params})
+net2_params = net2.init_params(PRNGKey(2), inputs, reuse={layer: layer_params})
 
 # Now net1_params.layers[0] equals net2_params.layers[0] equals layer_params
 ```
@@ -159,3 +158,5 @@ output = prediction.apply_joined({net: net_params}, inputs, jit=True)
 JAXnet is independent of stax.
 The main motivation over stax is to simplify nesting modules.
 Find details and porting instructions [here](STAX.md).
+
+Alternative design ideas are discussed [here](DESIGN.md).
