@@ -116,42 +116,55 @@ def shared_net(input, layer=layer):
 
 ## Parameter reuse
 
-You can reuse parameters of submodules:
+If you want to evaluate parts or extended versions of a trained network
+(i. e. to get accuracy, generate samples, or do introspection), you can use `apply_from`:
 
 ```python
-inputs = np.zeros((1, 2))
+predict = Sequential([Dense(1024), relu, Dense(10), logsoftmax])
 
-layer = Dense(5)
-net1 = Sequential([layer, Dense(2)])
-net2 = Sequential([layer, Dense(3)])
+@parametrized
+def loss(inputs, targets, predict=predict):
+    return -np.mean(predict(inputs) * targets)
 
-layer_params = layer.init_params(PRNGKey(0), inputs)
-net1_params = net1.init_params(PRNGKey(1), inputs, reuse={layer: layer_params})
-net2_params = net2.init_params(PRNGKey(2), inputs, reuse={layer: layer_params})
+@parametrized
+def accuracy(inputs, targets, predict=predict):
+    return np.mean(np.argmax(targets, axis=1) == np.argmax(predict(inputs), axis=1))
 
-# Now net1_params.layers[0] equals net2_params.layers[0] equals layer_params
+params = loss.init_params(PRNGKey(0), inputs)
+
+# train params...
+
+test_acc = accuracy.apply_from({loss: params}, *test_inputs, jit=True)
 ```
 
-If all parameters are reused, you can use `join_params` instead of `init_params`:
+This works whenever all parameter values are given. It is a shorthand for:
+
+```python
+accuracy_params = accuracy.params_from({loss: params})
+test_acc = jit(accuracy)(accuracy_params, *test_inputs)
+```
+
+You can also reuse parts of your network while initializing the rest:
 
 ```python
 inputs = np.zeros((1, 2))
-
-net = Dense(5)
-prediction = Sequential([net, softmax])
-
+net = Sequential([Dense(5), relu])
 net_params = net.init_params(PRNGKey(0), inputs)
-prediction_params = prediction.join_params({net: layer_params})
 
-# prediction_params.layers[0] is now equal to net_params
+# train net_params...
 
-output = jit(prediction)(prediction_params, inputs)
+extended_net = Sequential([net, Dense(2)])
+extended_net_params = extended_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
+
+assert extended_net_params.layers[0] is net_params
+
+# train extended_net_params...
 ```
 
-If you just want to call the network with these joined parameters, you can use the shorthand:
+If you don't have subnetwork reference like `net` at hand, you can equivalently write:
 
 ```python
-output = prediction.apply_joined({net: net_params}, inputs, jit=True)
+extended_net_params = extended_net.init_params(PRNGKey(1), inputs, reuse={extended_net.net: net_params})
 ```
 
 ## What about [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?

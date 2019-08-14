@@ -26,31 +26,41 @@ def _is_parametrized_collection(x):
 
 class parametrized:
     def __init__(self, fun):
-        self.fun = fun
-        self.parameters = {k: v.default for k, v in signature(fun).parameters.items()
-                           if _is_parametrized_collection(v.default)}
+        self._fun = fun
+        self._parameters = {k: v.default for k, v in signature(fun).parameters.items()
+                            if _is_parametrized_collection(v.default)}
 
-        self.name = fun.__name__
-        self.Parameters = namedtuple(self.name, self.parameters.keys())
-        self.apply = self._apply_fun()
+        self._name = fun.__name__
+        self._Parameters = namedtuple(self._name, self._parameters.keys())
+        self._apply = self._apply_fun()
         self.init_params = partial(self._init_params, reuse_only=False)
 
+        for name in self._parameters.keys():
+            if name in dir(self):
+                raise ValueError(f'Submodules cannot be named "{name}", please rename.')
+
     def __call__(self, *args, **kwargs):
-        return self.apply(*args, **kwargs)
+        return self._apply(*args, **kwargs)
 
-    def join_params(self, reuse):
+    def __getattr__(self, item):
+        if item in self._parameters.keys():
+            return self._parameters[item]
+
+        return getattr(super(parametrized, self), item)
+
+    def params_from(self, values_by_param):
         # TODO: optimization wrong, duplicate values, needs param adapter
-        reuse = self._expand_reuse_dict(reuse)
-        return self._init_params(None, reuse=reuse, reuse_only=True)
+        values_by_param = self._expand_reuse_dict(values_by_param)
+        return self._init_params(None, reuse=values_by_param, reuse_only=True)
 
-    def apply_joined(self, reuse, *inputs, jit=False):
-        params = self.join_params(reuse=reuse)
-        return (jax.jit(self.apply) if jit else self.apply)(params, *inputs)
+    def apply_from(self, reuse, *inputs, jit=False):
+        params = self.params_from(values_by_param=reuse)
+        return (jax.jit(self._apply) if jit else self._apply)(params, *inputs)
 
     def _param_value_pairs(self, param_values):
         param_values = param_values._asdict() if isinstance(param_values,
                                                             tuple) else param_values
-        return zip_nested(self.parameters, param_values, element_types=(Param,))
+        return zip_nested(self._parameters, param_values, element_types=(Param,))
 
     def _apply_fun(self, sublayer_wrapper=lambda index_path, apply: apply):
         def apply(param_values, *inputs):
@@ -68,7 +78,7 @@ class parametrized:
             indexed_pairs = enumerate_nested(pairs, element_types=(ZippedValue, Param))
             resolved_params = map_nested(lambda pair: resolve_parameters(pair[0], *pair[1]),
                                          indexed_pairs, element_types=(IndexedValue, Param))
-            return self.fun(*inputs, **resolved_params)
+            return self._fun(*inputs, **resolved_params)
 
         return apply
 
@@ -88,7 +98,7 @@ class parametrized:
                         # TODO: include index path to param in message
                         raise ValueError(f'No param value specified for {param}.')
 
-                    return param.join_params(reuse=reuse)
+                    return param.params_from(values_by_param=reuse)
 
                 nonlocal rng
                 rng, rng_param = random.split(rng)
@@ -106,7 +116,7 @@ class parametrized:
         # TODO refactor: replaced later by tracer, needed for shape information:
         all_param_values = map_nested(
             lambda param: init_param(param, none_for_submodules=not reuse_only),
-            self.parameters, tuples_to_lists=True, element_types=(Param,))
+            self._parameters, tuples_to_lists=True, element_types=(Param,))
 
         if not reuse_only:
             def traced_submodule_wrapper(index_path, submodule):
@@ -120,7 +130,7 @@ class parametrized:
             self._apply_fun(sublayer_wrapper=traced_submodule_wrapper)(all_param_values,
                                                                        *example_inputs)
 
-        return self.Parameters(**all_param_values)
+        return self._Parameters(**all_param_values)
 
     def _expand_reuse_dict(self, reuse):
         r = dict()
@@ -138,7 +148,7 @@ class parametrized:
         return r
 
     def __str__(self):
-        return f'{self.name}({id(self)}):{self.parameters}'
+        return f'{self._name}({id(self)}):{self._parameters}'
 
 
 def relu(x):

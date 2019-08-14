@@ -187,10 +187,10 @@ def test_join_params():
     inputs = np.zeros((1, 3))
     layer_params = layer.init_params(PRNGKey(0), inputs)
 
-    params = net.Parameters((layer_params, ()))
+    params = net._Parameters((layer_params, ()))
     out = net(params, inputs)
 
-    params_ = net.join_params({layer: layer_params})
+    params_ = net.params_from({layer: layer_params})
     assert len(params_) == 1
     assert_dense_params_equal(layer_params, params_.layers[0])
     assert params_.layers[1] == ()
@@ -198,10 +198,10 @@ def test_join_params():
     out_ = net(params_, inputs)
     assert np.array_equal(out, out_)
 
-    out_ = net.apply_joined({layer: layer_params}, inputs)
+    out_ = net.apply_from({layer: layer_params}, inputs)
     assert np.array_equal(out, out_)
 
-    out_ = net.apply_joined({layer: layer_params}, inputs, jit=True)
+    out_ = net.apply_from({layer: layer_params}, inputs, jit=True)
     assert np.array_equal(out, out_)
 
 
@@ -215,16 +215,56 @@ def test_join_params_subsubmodule():
 
     subsublayer_params = subsublayer.init_params(PRNGKey(0), inputs)
 
-    params_ = net.join_params({subsublayer: subsublayer_params})
+    params_ = net.params_from({subsublayer: subsublayer_params})
     assert_dense_params_equal(subsublayer_params, params_.layers[0].layers[0])
     out_ = net(params_, inputs)
     assert out.shape == out_.shape
 
-    out_ = net.apply_joined({subsublayer: subsublayer_params}, inputs)
+    out_ = net.apply_from({subsublayer: subsublayer_params}, inputs)
     assert out.shape == out_.shape
 
-    out_ = net.apply_joined({subsublayer: subsublayer_params}, inputs, jit=True)
+    out_ = net.apply_from({subsublayer: subsublayer_params}, inputs, jit=True)
     assert out.shape == out_.shape
+
+
+def test_access_submodules():
+    subsublayer = Dense(2)
+    sublayer = Sequential([subsublayer, relu])
+    net = Sequential([sublayer, np.sum])
+
+    assert net.layers[0] is sublayer
+    assert net.layers[0].layers[0] is subsublayer
+
+    inputs = np.zeros((1, 3))
+    params = net.init_params(PRNGKey(0), inputs)
+    out = net(params, inputs)
+
+    subsublayer_params = subsublayer.init_params(PRNGKey(0), inputs)
+
+    params_ = net.params_from({net.layers[0].layers[0]: subsublayer_params})
+    assert_dense_params_equal(subsublayer_params, params_.layers[0].layers[0])
+    out_ = net(params_, inputs)
+    assert out.shape == out_.shape
+
+    out_ = net.apply_from({net.layers[0].layers[0]: subsublayer_params}, inputs)
+    assert out.shape == out_.shape
+
+    out_ = net.apply_from({net.layers[0].layers[0]: subsublayer_params}, inputs, jit=True)
+    assert out.shape == out_.shape
+
+
+def test_access_submodules_name_clash_raises_error():
+    """Needed to avoid ambiguity when calling submodules, i. e. of net.init_params."""
+    try:
+        @parametrized
+        def net(inputs, init_params=Dense(2)):
+            return init_params(inputs)
+
+        assert False
+    except ValueError as e:
+        assert 'Submodules cannot be named "init_params", please rename.' == str(e)
+    except Exception:
+        assert False
 
 
 def test_join_params_top_level():
@@ -233,15 +273,15 @@ def test_join_params_top_level():
     params = net.init_params(PRNGKey(0), inputs)
     out = net(params, inputs)
 
-    params_ = net.join_params({net: params})
+    params_ = net.params_from({net: params})
     assert_dense_params_equal(params, params_)
     out_ = net(params_, inputs)
     assert np.array_equal(out, out_)
 
-    out_ = net.apply_joined({net: params}, inputs)
+    out_ = net.apply_from({net: params}, inputs)
     assert np.array_equal(out, out_)
 
-    out_ = net.apply_joined({net: params}, inputs, jit=True)
+    out_ = net.apply_from({net: params}, inputs, jit=True)
     assert np.array_equal(out, out_)
 
 
@@ -269,15 +309,15 @@ def test_join_params_shared_submodules():
     net1_params = part1.init_params(PRNGKey(0), inputs)
     out = part1(net1_params, inputs)
 
-    params = net.join_params({part1: net1_params})
+    params = net.params_from({part1: net1_params})
     assert_params_equal(net1_params.layers[0], params.part2.layers[0])
     out_ = net(params, inputs)
     assert out.shape == out_[0].shape
 
-    out_ = net.apply_joined({part1: net1_params}, inputs)
+    out_ = net.apply_from({part1: net1_params}, inputs)
     assert out.shape == out_[0].shape
 
-    out_ = net.apply_joined({part1: net1_params}, inputs, jit=True)
+    out_ = net.apply_from({part1: net1_params}, inputs, jit=True)
     assert out.shape == out_[0].shape
 
 
@@ -367,8 +407,11 @@ def test_Dropout_shape(mode, input_shape=(1, 2, 3)):
     try:
         dropout(inputs)
         assert False
-    except ValueError:
-        pass
+    except ValueError as e:
+        assert 'dropout requires to be called with a PRNG key argument. ' \
+               'That is, instead of `dropout(params, inputs)`, ' \
+               'call it like `dropout(inputs, key)` ' \
+               'where `key` is a jax.random.PRNGKey value.' == str(e)
     except:
         assert False
 
@@ -466,3 +509,14 @@ def test_BatchNorm_shape_NCHW(center, scale):
         assert params.beta.shape == (5,)
     if scale:
         assert params.gamma.shape == (5,)
+
+def test_reuse_example():
+    inputs = np.zeros((1, 2))
+    net = Sequential([Dense(5), relu])
+    net_params = net.init_params(PRNGKey(0), inputs)
+
+    extended_net = Sequential([net, Dense(2)])
+
+    extended_net_params = extended_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
+
+    assert extended_net_params.layers[0] is net_params

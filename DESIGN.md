@@ -28,9 +28,8 @@ While it can be slightly more concise, it has downsides:
 - Naming of parameter values would be more arbitrary since no parameter names are not associated.
 - Potentially large implementation complexity, requires direct use of JAX' tracing / function transformation capabilities.
 
-Allow step-by-step debugging has high priority.
 JAXnet invokes the user's function (when `jit` is not used) and thereby allows step-by-step debugging of any module.
-This could still be achieved with in this alternative (employing "initial style" function transformation).
+This could still be done with in this alternative (using "initial style" function transformation).
 
 ## Alternative: Using attributes instead of default values
 
