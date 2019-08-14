@@ -29,14 +29,11 @@ from jaxnet import *
 net = Sequential([Conv(2, (3, 3)), relu, flatten, Dense(4), softmax])
 ```
 
-To initialize parameter values for a network, call `init_params` on any module (with example inputs and a random key):
+To initialize parameter values for a network, call `init_params` with a random key and example inputs:
 ```python
 inputs = np.zeros((3, 5, 5, 1))
 params = net.init_params(PRNGKey(0), inputs)
-```
 
-It initializes and returns all parameters, accessible via attributes:
-```python
 print(params.layers[3].bias) # [0.00212132 0.01169001 0.00331698 0.00460713]
 ```
 
