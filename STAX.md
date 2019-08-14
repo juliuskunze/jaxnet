@@ -12,11 +12,11 @@ of an MNIST VAE with its [stax version](https://github.com/google/jax/blob/maste
 ### Porting from stax
 
 It's straight-forward to port models from stax:
-- Transform `init_params` into `Param`s. Ignore `output_shape`, it's required anymore.
+- Transform `init_params` into `Param`s. Ignore `output_shape`, it's not required anymore.
 - Pass these `Param`s into `apply_fun` using default arguments. Do the same for any sublayers you are using.
-- Add ``@parameterized` to `apply_fun`, remove the `params` argument, and use layers/params directly.
+- Add `@parameterized` to `apply_fun`, remove the `params` argument, and use layers/params directly.
 - Update `Serial` to `Sequential`.
 - Update parameter-free layers (`Relu`, `Softmax`, ...) from `stax` to functions (`relu`, `softmax`) in JAXnet.
-- Update `FanInConcat` and `FanInSum` to `lambda np.concatenate(x, axis=-1)` and `sum` respectively.
-- Rewrite `FanOut`, `parallel` from `stax` into `@parameterized` functions.
-- Use `init_params` as described in the [overview](README.md#Overview).
+- Update `FanInConcat` and `FanInSum` to `lambda x: np.concatenate(x, axis=-1)` and `sum`.
+- If you use `FanOut` or `parallel` from `stax`, express your code via a custom `@parameterized` function.
+- Update usage of your model as described in the [overview](README.md#Overview).
