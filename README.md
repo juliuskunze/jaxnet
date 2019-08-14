@@ -144,7 +144,7 @@ prediction = Sequential([net, softmax])
 net_params = net.init_params(PRNGKey(0), inputs)
 prediction_params = prediction.join_params({net: layer_params})
 
-# net_params.layers[0] is now equal to net_params
+# prediction_params.layers[0] is now equal to net_params
 
 output = jit(prediction)(prediction_params, inputs)
 ```
@@ -152,7 +152,7 @@ output = jit(prediction)(prediction_params, inputs)
 If you just want to call the network with these joined parameters, you can use the shorthand:
 
 ```python
-output = prediction.apply_joined({net: layer_params}, inputs, jit=True)
+output = prediction.apply_joined({net: net_params}, inputs, jit=True)
 ```
 
 ## What about [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
