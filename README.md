@@ -13,6 +13,11 @@ pip install jaxnet
 
 If you want to run networks on GPU/TPU, first install the [right version of jaxlib](https://github.com/google/jax#installation).
 
+See JAXnet in action in these demos:
+[Mnist Classifier](https://colab.research.google.com/drive/18kICTUbjqnfg5Lk3xFVQtUj6ahct9Vmv),
+[Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g) and
+[OCR with RNNs](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E).
+
 ## Overview
 
 Defining networks looks similar to the [TensorFlow2 / Keras functional API](https://www.tensorflow.org/beta/guide/keras/functional):
@@ -37,19 +42,8 @@ print(params.layers[3].bias) # [0.00212132 0.01169001 0.00331698 0.00460713]
 
 Invoke the network with:
 ```python
-output = net(params, inputs)
+output = net(params, inputs) # use jit(net)(params, inputs) for acceleration
 ```
-
-For acceleration use `jit`:
-
-```python
-output = jit(net)(params, inputs)
-```
-
-See JAXnet in action in these demos:
-[Mnist Classifier](https://colab.research.google.com/drive/18kICTUbjqnfg5Lk3xFVQtUj6ahct9Vmv),
-[Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g) and
-[OCR with RNNs](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E).
 
 ## Defining modules
 
@@ -65,8 +59,8 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     return dense
 ```
 
-`Param` specifies parameter shape and initialization function. 
-`@parametrized` transforms this function to allow usage as above.
+`Param` specifies parameter shape and initialization.
+`@parametrized` transforms the function to allow usage as above.
 
 ## Nesting modules
 
@@ -140,7 +134,7 @@ params = loss.init_params(PRNGKey(0), inputs)
 test_acc = accuracy.apply_from({loss: params}, *test_inputs, jit=True)
 ```
 
-This works whenever all parameter values are given. It is a shorthand for:
+It is a shorthand for:
 
 ```python
 accuracy_params = accuracy.params_from({loss: params})
@@ -151,24 +145,20 @@ You can also reuse parts of your network while initializing the rest:
 
 ```python
 inputs = np.zeros((1, 2))
-net = Sequential([Dense(5), relu])
+net = Sequential([Dense(5)])
 net_params = net.init_params(PRNGKey(0), inputs)
 
 # train net_params...
 
-extended_net = Sequential([net, Dense(2)])
-extended_net_params = extended_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
+transfer_net = Sequential([net, relu, Dense(2)])
+transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
 
-assert extended_net_params.layers[0] is net_params
+assert transfer_net_params.layers[0] is net_params
 
-# train extended_net_params...
+# train transfer_net_params...
 ```
 
-If you don't have subnetwork reference like `net` at hand, you can equivalently write:
-
-```python
-extended_net_params = extended_net.init_params(PRNGKey(1), inputs, reuse={extended_net.net: net_params})
-```
+If you don't have a reference like `net`, `reuse={transfer_net.layers[0]: net_params}` also works.
 
 ## What about [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
 JAXnet is independent of stax.

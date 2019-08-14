@@ -515,8 +515,12 @@ def test_reuse_example():
     net = Sequential([Dense(5), relu])
     net_params = net.init_params(PRNGKey(0), inputs)
 
-    extended_net = Sequential([net, Dense(2)])
+    transfer_net = Sequential([net, Dense(2)])
 
-    extended_net_params = extended_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
+    transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
 
-    assert extended_net_params.layers[0] is net_params
+    assert transfer_net_params.layers[0] is net_params
+
+    transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs, reuse={transfer_net.layers[0]: net_params})
+
+    assert transfer_net_params.layers[0] is net_params
