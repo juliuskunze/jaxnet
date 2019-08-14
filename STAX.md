@@ -19,4 +19,4 @@ It's straight-forward to port models from stax:
 - Update parameter-free layers (`Relu`, `Softmax`, ...) from `stax` to functions (`relu`, `softmax`) in JAXnet.
 - Update `FanInConcat` and `FanInSum` to `lambda np.concatenate(x, axis=-1)` and `sum` respectively.
 - Rewrite `FanOut`, `parallel` from `stax` into `@parameterized` functions.
-- Use `init_params` as described in the [overview](STAX.md#Overview).
+- Use `init_params` as described in the [overview](README.md#Overview).
