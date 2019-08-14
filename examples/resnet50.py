@@ -1,3 +1,5 @@
+# Run this example in your browser: https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN#scrollTo=p0J1g94IpxK-
+
 import numpy.random as npr
 from jax import jit, grad, random, numpy as np
 from jax.experimental import optimizers
