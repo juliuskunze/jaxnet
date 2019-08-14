@@ -65,9 +65,12 @@ Modules can be used in other modules through default arguments:
 
 ```python
 @parametrized
-def net(inputs, layer1=Dense(10), layer2=Dense(20))
-    inputs = layer1(inputs)
-    return layer2(inputs)
+def encode(input, 
+           net=Sequential([Dense(512), relu]),
+           mean_net=Dense(10),
+           variance_net=Sequential([Dense(10), softplus])):
+    input = net(input)
+    return mean_net(input), variance_net(input)
 ```
 
 Use many modules at once with collections:
