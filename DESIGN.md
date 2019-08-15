@@ -77,8 +77,8 @@ def Sequential(Module):
         return inputs
 ```
 Advantages:
-- Removes `@parameterized` attribute and special input syntax.
-- Will look somewhat familiar for people who used [TF2 / Keras custom layers](https://www.tensorflow.org/beta/tutorials/eager/custom_layers).
+- Removes `@parameterized` attribute and special semantics of default arguments.
+- Will look familiar to people using [TF2 / Keras custom layers](https://www.tensorflow.org/beta/tutorials/eager/custom_layers).
 
 Disadvantages:
 - Less compact: Two functions per module, requires `self.<...>`
