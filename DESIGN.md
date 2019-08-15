@@ -1,6 +1,6 @@
 # Design
 
-This document discusses some alternative designs.
+This document discusses some alternative functional API designs.
 
 ## Alternative: Defining parameters and submodules inline
 
@@ -17,8 +17,8 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
 def Sequential(layers):
     @parameterized
     def sequential(inputs):
-        for module in layers:
-            inputs = module(inputs)
+        for layer in layers:
+            inputs = layer(inputs)
         return inputs
 
     return sequential
@@ -43,8 +43,8 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     def Sequential(layers):
         @Submodule('layers', layers)
         def sequential(inputs, layers):
-            for module in layers:
-                inputs = module(inputs)
+            for layer in layers:
+                inputs = layer(inputs)
             return inputs
 
         return sequential
@@ -54,3 +54,31 @@ This perhaps makes the transformation logic more explicit. Downsides:
 - Names would have to be specified twice, resulting in more verbose code.
 - They have to be kept in sync, introducing a new source of errors.
 - Disconnect of argument and attribute makes it harder to parse.
+
+## Alternative: Module classes
+
+```python
+def Dense(Module):
+    def __init__(self, out_dim, kernel_init=glorot(), bias_init=randn()):
+        super().__init__(
+            kernel = Param('kernel', (inputs.shape[-1], out_dim), init=kernel_init)
+            bias = Param('bias', (out_dim,), init=bias_init))
+
+    def __call__(self, inputs):
+        return np.dot(inputs, self.kernel) + self.bias
+
+def Sequential(Module):
+    def __init__(self, layers):
+        super().__init__(layers=layers)
+
+    def __call__(self, inputs):
+        for layer in self.layers:
+            inputs = layer(inputs)
+        return inputs
+```
+Advantages:
+- Removes ``@parameterized` attribute and special input syntax.
+- Will look somewhat familiar for people who used (TF2 / Keras custom layers)[https://www.tensorflow.org/beta/tutorials/eager/custom_layers].
+
+Disadvantages:
+- Less compact: Two functions per module, requires `self.<...>`

@@ -276,8 +276,8 @@ def Sequential(layers):
 
     @parametrized
     def sequential(inputs, layers=layers):
-        for module in layers:
-            inputs = module(inputs)
+        for layer in layers:
+            inputs = layer(inputs)
         return inputs
 
     return sequential
