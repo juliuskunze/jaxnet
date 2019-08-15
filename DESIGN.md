@@ -61,8 +61,8 @@ This perhaps makes the transformation logic more explicit. Downsides:
 def Dense(Module):
     def __init__(self, out_dim, kernel_init=glorot(), bias_init=randn()):
         super().__init__(
-            kernel = Param('kernel', (inputs.shape[-1], out_dim), init=kernel_init)
-            bias = Param('bias', (out_dim,), init=bias_init))
+            kernel=Param('kernel', (inputs.shape[-1], out_dim), init=kernel_init)
+            bias=Param('bias', (out_dim,), init=bias_init))
 
     def __call__(self, inputs):
         return np.dot(inputs, self.kernel) + self.bias
@@ -77,8 +77,8 @@ def Sequential(Module):
         return inputs
 ```
 Advantages:
-- Removes ``@parameterized` attribute and special input syntax.
-- Will look somewhat familiar for people who used (TF2 / Keras custom layers)[https://www.tensorflow.org/beta/tutorials/eager/custom_layers].
+- Removes `@parameterized` attribute and special input syntax.
+- Will look somewhat familiar for people who used [TF2 / Keras custom layers](https://www.tensorflow.org/beta/tutorials/eager/custom_layers).
 
 Disadvantages:
 - Less compact: Two functions per module, requires `self.<...>`
