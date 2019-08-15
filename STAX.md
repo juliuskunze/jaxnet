@@ -1,16 +1,21 @@
 ## What about [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
 
 JAXnet is independent of stax. The main motivation over stax is to simplify nesting modules:
- - Automating `init_params`: delegation to submodules, `output_shape` inference, `rng` passing
- - Allowing streamlined module/parameter-sharing
+ - Automated `init_params`: Delegation to submodules, parameter container layout, output shape inference, random key splitting
+ - Automated parameter handing in `apply`: Unpacking of `params`, passing to submodules
+ - Streamlined module/parameter sharing
  - Seamless use of parameter-free functions as modules
 
 Like stax, JAXnet maintains the purely functional approach of JAX.
-You can compare the [Mnist Classifier](https://colab.research.google.com/drive/18kICTUbjqnfg5Lk3xFVQtUj6ahct9Vmv) and [Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g) demos to their original stax implementations (linked in each).
+You can compare the
+[Mnist Classifier](https://colab.research.google.com/drive/18kICTUbjqnfg5Lk3xFVQtUj6ahct9Vmv),
+[Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g) and
+[ResNet](https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN#scrollTo=p0J1g94IpxK-)
+demos to their original stax implementations (linked in each).
 
 ### Porting from stax
 
-All stax layers are available in JAXnet, making it straight-forward to port models from stax:
+All stax functionality is now in JAXnet. Porting models is straight-forward:
 - Remove `init_params`: Extract `Param`s. Get rid of `output_shape` and `rng` splitting code.
 - Pass these `Param`s into `apply_fun` using default arguments. Do the same for any nested layers you are using.
 - Add `@parameterized` to your `apply_fun`, remove the `params` argument, and use layers/params directly.
