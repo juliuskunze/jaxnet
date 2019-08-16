@@ -16,7 +16,7 @@ def read_dataset():
     return sets.Split(0.66)(dataset)
 
 
-def main():
+if __name__ == "__main__":
     train, test = read_dataset()
     _, length, x_size = train.data.shape
     class_count = train.target.shape[2]
@@ -65,6 +65,3 @@ def main():
         for _ in range(100):
             batch = train.sample(batch_size)
             opt_state = update(next(itercount), opt_state, batch.data, batch.target)
-
-
-main()

@@ -323,7 +323,7 @@ def GeneralConv(dimension_numbers, out_chan, filter_shape,
 
 
 Conv = functools.partial(GeneralConv, ('NHWC', 'HWIO', 'NHWC'))
-Conv1D = functools.partial(GeneralConv, ('NHC', 'HIO', 'NHC'))
+Conv1D = functools.partial(GeneralConv, ('NTC', 'TIO', 'NTC'))
 
 
 def GeneralConvTranspose(dimension_numbers, out_chan, filter_shape,
@@ -357,7 +357,7 @@ def GeneralConvTranspose(dimension_numbers, out_chan, filter_shape,
 
 
 ConvTranspose = functools.partial(GeneralConvTranspose, ('NHWC', 'HWIO', 'NHWC'))
-Conv1DTranspose = functools.partial(GeneralConvTranspose, ('NHC', 'HIO', 'NHC'))
+Conv1DTranspose = functools.partial(GeneralConvTranspose, ('NTC', 'TIO', 'NTC'))
 
 
 def _pool(reducer, init_val, rescaler=None):

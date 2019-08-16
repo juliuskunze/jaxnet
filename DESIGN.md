@@ -1,6 +1,6 @@
-# Design
+# Alternative API designs
 
-This document discusses some alternative functional API designs.
+This document compares some alternative functional API designs for defining custom modules to JAXnet's current implementation.
 
 ## Alternative: Defining parameters and submodules inline
 
@@ -84,7 +84,7 @@ class Sequential(Module):
 Advantages:
 - Does not require `@parameterized` attribute.
 - Does not require special semantics for default arguments.
-- Will look familiar to people who have written [TF2 / Keras](https://www.tensorflow.org/beta/tutorials/eager/custom_layers) or [PyTorch](https://pytorch.org/docs/stable/notes/extending.html#adding-a-module) custom modules.
+- Will look familiar to people who have written [TensorFlow2 / Keras](https://www.tensorflow.org/beta/tutorials/eager/custom_layers#implementing_custom_layers) or [PyTorch](https://pytorch.org/docs/stable/notes/extending.html#adding-a-module) custom modules.
 
 Disadvantages:
 - Less compact: Two functions per module, requires `self.<...>`

@@ -67,7 +67,7 @@ def image_sample(rng, nrow, ncol, decode=decode):
     return image_grid(nrow, ncol, sampled_images, (28, 28))
 
 
-def main():
+if __name__ == "__main__":
     step_size = 0.001
     num_epochs = 100
     batch_size = 32
@@ -116,6 +116,3 @@ def main():
         print("Epoch {: 3d} {} ({:.3f} sec)".format(epoch, test_elbo, time.time() - tic))
         plt.imshow(sampled_images, cmap=plt.cm.gray)
         plt.show()
-
-
-main()
