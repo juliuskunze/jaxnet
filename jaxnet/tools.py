@@ -79,10 +79,18 @@ def get_nested_element(nested, index_path):
 
 
 def set_nested_element(nested, index_path, value):
+    parent = nested
     for index in index_path[:-1]:
-        nested = nested[index]
+        parent = parent[index]
 
-    nested[index_path[-1]] = value
+    is_tuple = isinstance(parent, tuple)
+    if is_tuple:
+        parent = list(parent)
+
+    parent[index_path[-1]] = value
+
+    if is_tuple:
+        set_nested_element(nested, index_path[:-1], parent)
 
 
 def nested_any(nested):

@@ -39,6 +39,13 @@ def test_set_nested_element():
     assert get_nested_element(nested, path) == 3
 
 
+def test_set_nested_element_in_tuple():
+    nested = (0, {'a': 1, 'b': (2,)})
+    path = (1, 'b', 0)
+    set_nested_element(nested, path, 3)
+    assert (0, {'a': 1, 'b': [3]}) == nested
+
+
 def test_nested_any():
     nested = (False, {'a': False, 'b': [True]})
     assert nested_any(nested)

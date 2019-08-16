@@ -7,21 +7,28 @@ import jax
 import numpy as onp
 from jax import numpy as np, random, partial
 from jax.lax import lax, scan
-from jax.scipy.special import logsumexp
+from jax.scipy.special import logsumexp, expit
 
 from jaxnet.tools import zip_nested, map_nested, enumerate_nested, set_nested_element, \
     nested_any, IndexedValue, ZippedValue, flatten_nested
 
-Param = namedtuple('Param', ('get_shape', 'init'))
+ParamInit = namedtuple('Param', ('init_param',))
+
+
+def Param(get_shape, init):
+    return ParamInit(init_param=lambda rng, *example_inputs: init(rng, get_shape(*example_inputs)))
+
+
 NoParams = namedtuple('NoParams', ())
 no_params = NoParams()
 
 
-def _is_parametrized(param): return isinstance(param, Param) or isinstance(param, InputDependent)
+def _is_parametrized(param): return isinstance(param, ParamInit) or isinstance(param,
+                                                                               InputDependent)
 
 
 def _is_parametrized_collection(x):
-    return nested_any(map_nested(_is_parametrized, x, element_types=(Param,)))
+    return nested_any(map_nested(_is_parametrized, x, element_types=(ParamInit,)))
 
 
 class InputDependent:
@@ -59,12 +66,12 @@ class InputDependent:
     def _get_param_value_pairs(self, param_values, *inputs):
         param_values = param_values._asdict() if isinstance(param_values,
                                                             tuple) else param_values
-        return zip_nested(self._get_parameters(*inputs), param_values, element_types=(Param,))
+        return zip_nested(self._get_parameters(*inputs), param_values, element_types=(ParamInit,))
 
     def _get_apply(self, sublayer_wrapper=lambda index_path, apply: apply):
         def apply(param_values, *inputs):
             def resolve_parameters(index_path, param, param_values):
-                if isinstance(param, Param):
+                if isinstance(param, ParamInit):
                     return param_values
 
                 if isinstance(param, InputDependent):
@@ -74,9 +81,9 @@ class InputDependent:
                 return param
 
             pairs = self._get_param_value_pairs(param_values, *inputs)
-            indexed_pairs = enumerate_nested(pairs, element_types=(ZippedValue, Param))
+            indexed_pairs = enumerate_nested(pairs, element_types=(ZippedValue, ParamInit))
             resolved_params = map_nested(lambda pair: resolve_parameters(pair[0], *pair[1]),
-                                         indexed_pairs, element_types=(IndexedValue, Param))
+                                         indexed_pairs, element_types=(IndexedValue, ParamInit))
             fun = self._get_fun(*inputs)
             return fun(*inputs, **resolved_params)
 
@@ -94,7 +101,7 @@ class InputDependent:
 
             if _is_parametrized(param):
                 if reuse_only:
-                    if isinstance(param, Param):
+                    if isinstance(param, ParamInit):
                         # TODO: include index path to param in message
                         raise ValueError(f'No param value specified for {param}.')
 
@@ -102,8 +109,8 @@ class InputDependent:
 
                 nonlocal rng
                 rng, rng_param = random.split(rng)
-                if isinstance(param, Param):
-                    return param.init(rng_param, param.get_shape(*example_inputs))
+                if isinstance(param, ParamInit):
+                    return param.init_param(rng_param, *example_inputs)
 
                 return param.init_params(rng_param, *sub_example_inputs, reuse=reuse)
 
@@ -116,7 +123,7 @@ class InputDependent:
         # TODO refactor: replaced later by tracer, needed for shape information:
         all_param_values = map_nested(
             lambda param: init_param(param, none_for_submodules=not reuse_only),
-            self._get_parameters(*example_inputs), tuples_to_lists=True, element_types=(Param,))
+            self._get_parameters(*example_inputs), tuples_to_lists=True, element_types=(ParamInit,))
 
         if not reuse_only:
             def traced_submodule_wrapper(index_path, submodule):
@@ -143,11 +150,14 @@ class parametrized(InputDependent):
         self._parameters = super()._get_parameters()
         self._Parameters = super()._get_Parameters()
 
-    def _get_fun(self, *inputs): return self._fun
+    def _get_fun(self, *inputs):
+        return self._fun
 
-    def _get_parameters(self, *inputs): return self._parameters
+    def _get_parameters(self, *inputs):
+        return self._parameters
 
-    def _get_Parameters(self, *inputs): return self._Parameters
+    def _get_Parameters(self, *inputs):
+        return self._Parameters
 
     def __getattr__(self, item):
         if item in self._parameters.keys():
@@ -191,8 +201,7 @@ def softplus(x):
     return np.logaddexp(x, 0.)
 
 
-def sigmoid(x):
-    return 1. / (1. + np.exp(-x))
+sigmoid = expit
 
 
 def elu(x):
@@ -264,7 +273,7 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     return dense
 
 
-def Sequential(layers):
+def Sequential(*layers):
     """Combinator for composing layers in sequence.
 
     Args:
@@ -284,11 +293,13 @@ def Sequential(layers):
 
 
 def GeneralConv(dimension_numbers, out_chan, filter_shape,
-                strides=None, padding='VALID', kernel_init=None, bias_init=randn(1e-6)):
+                strides=None, padding='VALID', kernel_init=None, bias_init=randn(1e-6),
+                dilation=None):
     """Layer construction function for a general convolution layer."""
     lhs_spec, rhs_spec, out_spec = dimension_numbers
     one = (1,) * len(filter_shape)
     strides = strides or one
+    dilation = dilation or one
     kernel_init = kernel_init or glorot(rhs_spec.index('O'), rhs_spec.index('I'))
 
     def kernel_shape(inputs):
@@ -305,13 +316,14 @@ def GeneralConv(dimension_numbers, out_chan, filter_shape,
     def general_conv(inputs,
                      kernel=Param(kernel_shape, kernel_init),
                      bias=Param(lambda _: bias_shape, bias_init)):
-        return lax.conv_general_dilated(inputs, kernel, strides, padding, one, one,
+        return lax.conv_general_dilated(inputs, kernel, strides, padding, one, dilation,
                                         dimension_numbers) + bias
 
     return general_conv
 
 
 Conv = functools.partial(GeneralConv, ('NHWC', 'HWIO', 'NHWC'))
+Conv1D = functools.partial(GeneralConv, ('NHC', 'HIO', 'NHC'))
 
 
 def GeneralConvTranspose(dimension_numbers, out_chan, filter_shape,
@@ -344,8 +356,8 @@ def GeneralConvTranspose(dimension_numbers, out_chan, filter_shape,
     return conv_transpose
 
 
-Conv1DTranspose = functools.partial(GeneralConvTranspose, ('NHC', 'HIO', 'NHC'))
 ConvTranspose = functools.partial(GeneralConvTranspose, ('NHWC', 'HWIO', 'NHWC'))
+Conv1DTranspose = functools.partial(GeneralConvTranspose, ('NHC', 'HIO', 'NHC'))
 
 
 def _pool(reducer, init_val, rescaler=None):

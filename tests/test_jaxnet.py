@@ -4,7 +4,7 @@ from jax.random import PRNGKey
 
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, MaxPool, zeros, GRUCell, \
     Rnn, softmax, SumPool, AvgPool, Dropout, BatchNorm, ConvTranspose, Conv1DTranspose, \
-    InputDependent
+    InputDependent, Conv1D
 
 
 def random_inputs(input_shape, rng=PRNGKey(0)):
@@ -55,7 +55,7 @@ def test_submodule():
 
 
 def test_submodule_list():
-    layer = Sequential([Dense(2, zeros, zeros), relu])
+    layer = Sequential(Dense(2, zeros, zeros), relu)
     inputs = np.zeros((1, 2))
 
     params = layer.init_params(PRNGKey(0), inputs)
@@ -99,7 +99,7 @@ def test_internal_param_sharing():
 
 def test_internal_param_sharing2():
     @parametrized
-    def shared_net(inputs, layer=Sequential([Dense(2, zeros, zeros), relu])):
+    def shared_net(inputs, layer=Sequential(Dense(2, zeros, zeros), relu)):
         inputs = layer(inputs)
         return layer(inputs)
 
@@ -121,10 +121,10 @@ def test_multiple_init_params_calls():
     inputs = np.zeros((1, 2))
 
     layer = Dense(5)
-    net1 = Sequential([layer, Dense(2)])
+    net1 = Sequential(layer, Dense(2))
     p1 = net1.init_params(PRNGKey(0), inputs)
 
-    net2 = Sequential([layer, Dense(3)])
+    net2 = Sequential(layer, Dense(3))
     p2 = net2.init_params(PRNGKey(1), inputs)
 
     assert p1.layers[0].kernel.shape == p2.layers[0].kernel.shape
@@ -134,7 +134,7 @@ def test_multiple_init_params_calls():
 @pytest.mark.skip(reason="TODO reconsider design")
 def test_external_param_sharing():
     layer = Dense(2, zeros, zeros)
-    shared_net = Sequential([layer, layer])
+    shared_net = Sequential(layer, layer)
 
     inputs = np.zeros((1, 2))
     params = shared_net.init_params(PRNGKey(0), inputs)
@@ -155,8 +155,8 @@ def test_init_params_submodule_reuse():
     inputs = np.zeros((1, 2))
 
     layer = Dense(5)
-    net1 = Sequential([layer, Dense(2)])
-    net2 = Sequential([layer, Dense(3)])
+    net1 = Sequential(layer, Dense(2))
+    net2 = Sequential(layer, Dense(3))
 
     layer_params = layer.init_params(PRNGKey(0), inputs)
     net1_params = net1.init_params(PRNGKey(1), inputs, reuse={layer: layer_params})
@@ -186,7 +186,7 @@ def test_init_params_submodule_reuse_top_level():
 
 def test_join_params():
     layer = Dense(2)
-    net = Sequential([layer, relu])
+    net = Sequential(layer, relu)
     inputs = np.zeros((1, 3))
     layer_params = layer.init_params(PRNGKey(0), inputs)
 
@@ -210,8 +210,8 @@ def test_join_params():
 
 def test_join_params_subsubmodule():
     subsublayer = Dense(2)
-    sublayer = Sequential([subsublayer, relu])
-    net = Sequential([sublayer, np.sum])
+    sublayer = Sequential(subsublayer, relu)
+    net = Sequential(sublayer, np.sum)
     inputs = np.zeros((1, 3))
     params = net.init_params(PRNGKey(0), inputs)
     out = net(params, inputs)
@@ -232,8 +232,8 @@ def test_join_params_subsubmodule():
 
 def test_access_submodules():
     subsublayer = Dense(2)
-    sublayer = Sequential([subsublayer, relu])
-    net = Sequential([sublayer, np.sum])
+    sublayer = Sequential(subsublayer, relu)
+    net = Sequential(sublayer, np.sum)
 
     assert net.layers[0] is sublayer
     assert net.layers[0].layers[0] is subsublayer
@@ -301,8 +301,8 @@ def assert_params_equal(p, p_):
 
 def test_join_params_shared_submodules():
     sublayer = Dense(2)
-    part1 = Sequential([sublayer, relu])
-    part2 = Sequential([sublayer, np.sum])
+    part1 = Sequential(sublayer, relu)
+    part2 = Sequential(sublayer, np.sum)
 
     @parametrized
     def net(inputs, part1=part1, part2=part2):
@@ -325,7 +325,7 @@ def test_join_params_shared_submodules():
 
 
 def test_example():
-    net = Sequential([Conv(2, (3, 3)), relu, flatten, Dense(4), softmax])
+    net = Sequential(Conv(2, (3, 3)), relu, flatten, Dense(4), softmax)
     batch = np.zeros((3, 5, 5, 1))
     params = net.init_params(PRNGKey(0), batch)
     print(params.layers[3].bias)
@@ -342,8 +342,9 @@ def test_example():
 @pytest.mark.parametrize('padding', ["SAME", "VALID"])
 @pytest.mark.parametrize('strides', [None, (2, 1)])
 @pytest.mark.parametrize('input_shape', [(2, 10, 11, 1)])
-def test_Conv_runs(channels, filter_shape, padding, strides, input_shape):
-    conv = Conv(channels, filter_shape, strides=strides, padding=padding)
+@pytest.mark.parametrize('dilation', [(1, 1), (2, 2)])
+def test_Conv_runs(channels, filter_shape, padding, strides, input_shape, dilation):
+    conv = Conv(channels, filter_shape, strides=strides, padding=padding, dilation=dilation)
     inputs = random_inputs(input_shape)
     params = conv.init_params(PRNGKey(0), inputs)
     conv(params, inputs)
@@ -355,10 +356,10 @@ def test_Conv_runs(channels, filter_shape, padding, strides, input_shape):
 @pytest.mark.parametrize('strides', [None, (1,), (2,)])
 @pytest.mark.parametrize('input_shape', [(2, 10, 1)])
 def test_Conv1DTranspose_runs(channels, filter_shape, padding, strides, input_shape):
-    convt = Conv1DTranspose(channels, filter_shape, strides=strides, padding=padding)
+    conv = Conv1D(channels, filter_shape, strides=strides, padding=padding)
     inputs = random_inputs(input_shape)
-    params = convt.init_params(PRNGKey(0), inputs)
-    convt(params, inputs)
+    params = conv.init_params(PRNGKey(0), inputs)
+    conv(params, inputs)
 
 
 @pytest.mark.parametrize('channels', [2, 3])
@@ -373,6 +374,18 @@ def test_ConvTranspose_runs(channels, filter_shape, padding, strides, input_shap
     convt(params, inputs)
 
 
+@pytest.mark.parametrize('channels', [2, 3])
+@pytest.mark.parametrize('filter_shape', [(1,), (2,), (3,)])
+@pytest.mark.parametrize('padding', ["SAME", "VALID"])
+@pytest.mark.parametrize('strides', [None, (1,), (2,)])
+@pytest.mark.parametrize('input_shape', [(2, 10, 1)])
+def test_Conv1DTranspose_runs(channels, filter_shape, padding, strides, input_shape):
+    convt = Conv1DTranspose(channels, filter_shape, strides=strides, padding=padding)
+    inputs = random_inputs(input_shape)
+    params = convt.init_params(PRNGKey(0), inputs)
+    convt(params, inputs)
+
+
 def test_Conv_flatten_shape():
     conv = Conv(2, filter_shape=(3, 3), padding='SAME', kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 5, 5, 2))
@@ -381,7 +394,7 @@ def test_Conv_flatten_shape():
     out = conv(params, inputs)
     assert np.array_equal(np.zeros((1, 5, 5, 2)), out)
 
-    flattened = Sequential([conv, flatten])
+    flattened = Sequential(conv, flatten)
     out = flattened({'layers': [params, ()]}, inputs)
     assert np.array_equal(np.zeros((1, 50)), out)
 
@@ -391,7 +404,7 @@ def test_Conv_pool_shape(Pool):
     conv = Conv(2, filter_shape=(3, 3), padding='SAME', kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 5, 5, 2))
 
-    pooled = Sequential([conv, Pool(window_shape=(1, 1), strides=(2, 2))])
+    pooled = Sequential(conv, Pool(window_shape=(1, 1), strides=(2, 2)))
     params = pooled.init_params(PRNGKey(0), inputs)
     out = pooled(params, inputs)
     assert np.array_equal(np.zeros((1, 3, 3, 2)), out)
@@ -457,14 +470,14 @@ def test_Rnn_net_shape():
 
     def rnn(): return Rnn(*GRUCell(carry_size, zeros))
 
-    net = Sequential([
+    net = Sequential(
         rnn(),
         rnn(),
         rnn(),
         lambda x: np.reshape(x, (-1, carry_size)),  # -> same weights for all time steps
         Dense(class_count, zeros, zeros),
         softmax,
-        lambda x: np.reshape(x, (-1, length, class_count))])
+        lambda x: np.reshape(x, (-1, length, class_count)))
 
     params = net.init_params(PRNGKey(0), xs)
 
@@ -516,10 +529,10 @@ def test_BatchNorm_shape_NCHW(center, scale):
 
 def test_reuse_example():
     inputs = np.zeros((1, 2))
-    net = Sequential([Dense(5), relu])
+    net = Sequential(Dense(5), relu)
     net_params = net.init_params(PRNGKey(0), inputs)
 
-    transfer_net = Sequential([net, Dense(2)])
+    transfer_net = Sequential(net, Dense(2))
 
     transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
 
@@ -546,12 +559,13 @@ def test_InputDependent():
     assert (5, 5) == output.shape
     assert str(net).startswith('make_net')
 
+
 def test_InputDependent_nested():
     def make_net(inputs):
         # output neuron count depends on batch size:
         return Dense(inputs.shape[0])
 
-    net = Sequential([Dense(3), InputDependent(make_net)])
+    net = Sequential(Dense(3), InputDependent(make_net))
 
     inputs = np.zeros((5, 3))
     params = net.init_params(PRNGKey(0), inputs)

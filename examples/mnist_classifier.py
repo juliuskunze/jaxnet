@@ -26,10 +26,10 @@ def mnist():
     return images(train), labels(train), images(test), labels(test)
 
 
-predict = Sequential([
+predict = Sequential(
     Dense(1024), relu,
     Dense(1024), relu,
-    Dense(10), logsoftmax])
+    Dense(10), logsoftmax)
 
 
 @parametrized

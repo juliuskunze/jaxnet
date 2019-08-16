@@ -67,16 +67,16 @@ Modules can be used in other modules through default arguments:
 ```python
 @parametrized
 def encode(input, 
-           net=Sequential([Dense(512), relu]),
+           net=Sequential(Dense(512), relu),
            mean_net=Dense(10),
-           variance_net=Sequential([Dense(10), softplus])):
+           variance_net=Sequential(Dense(10), softplus)):
     input = net(input)
     return mean_net(input), variance_net(input)
 ```
 
 Use many modules at once with collections:
 ```python
-def Sequential(layers):
+def Sequential(*layers):
     @parametrized
     def sequential(inputs, layers=layers):
         for module in layers:
@@ -90,10 +90,10 @@ Nested `tuples`/`list`/`dicts` of modules work. The same is true for `Param`s.
 
 Using parameter-free functions is seamless:
 ```python
-def relu(input):
-    return np.maximum(input, 0)
+def relu(x):
+    return np.maximum(x, 0)
 
-layer = Sequential([Dense(10), relu])
+layer = Sequential(Dense(10), relu)
 ```
 
 ## Parameter sharing
@@ -101,7 +101,7 @@ layer = Sequential([Dense(10), relu])
 Parameters can be shared by using module or parameter objects multiple times (**not yet implemented**):
 
 ```python
-shared_net=Sequential([layer, layer])
+shared_net=Sequential(layer, layer)
 ```
 
 This is equivalent to (already implemented):
@@ -118,7 +118,7 @@ If you want to evaluate parts or extended versions of a trained network
 (i. e. to get accuracy, generate samples, or do introspection), you can use `apply_from`:
 
 ```python
-predict = Sequential([Dense(1024), relu, Dense(10), logsoftmax])
+predict = Sequential(Dense(1024), relu, Dense(10), logsoftmax)
 
 @parametrized
 def loss(inputs, targets, predict=predict):
@@ -146,12 +146,12 @@ You can also reuse parts of your network while initializing the rest:
 
 ```python
 inputs = np.zeros((1, 2))
-net = Sequential([Dense(5)])
+net = Sequential(Dense(5))
 net_params = net.init_params(PRNGKey(0), inputs)
 
 # train net_params...
 
-transfer_net = Sequential([net, relu, Dense(2)])
+transfer_net = Sequential(net, relu, Dense(2))
 transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
 
 assert transfer_net_params.layers[0] is net_params

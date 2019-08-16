@@ -14,7 +14,7 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
 
     return dense
 
-def Sequential(layers):
+def Sequential(*layers):
     @parameterized
     def sequential(inputs):
         for layer in layers:
@@ -24,12 +24,17 @@ def Sequential(layers):
     return sequential
 ```
 
-While it can be slightly more concise, it has downsides:
+Advantages:
+- Requires less indirection.
+- Does not require special semantics for default arguments.
+- All layers can be input dependent by default, removes need for `InputDependent`.
+
+Downsides:
 - Naming of parameter values would be more arbitrary since no parameter names are not associated.
 - Potentially large implementation complexity, requires direct use of JAX' tracing / function transformation capabilities.
 
-JAXnet invokes the user's function (when `jit` is not used) and thereby allows step-by-step debugging of any module.
-This could still be done with in this alternative (using "initial style" function transformation).
+JAXnet invokes the user's function (when `jit` is not used), allowing step-by-step debugging.
+This could also be achieved in this alternative using initial-style function transformation.
 
 ## Alternative: Using attributes instead of default values
 
@@ -40,7 +45,7 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
         def dense(inputs, kernel, bias):
             return np.dot(inputs, kernel) + bias
 
-    def Sequential(layers):
+    def Sequential(*layers):
         @Submodule('layers', layers)
         def sequential(inputs, layers):
             for layer in layers:
@@ -58,7 +63,7 @@ This perhaps makes the transformation logic more explicit. Downsides:
 ## Alternative: Module classes
 
 ```python
-def Dense(Module):
+class Dense(Module):
     def __init__(self, out_dim, kernel_init=glorot(), bias_init=randn()):
         super().__init__(
             kernel=Param('kernel', (inputs.shape[-1], out_dim), init=kernel_init)
@@ -67,8 +72,8 @@ def Dense(Module):
     def __call__(self, inputs):
         return np.dot(inputs, self.kernel) + self.bias
 
-def Sequential(Module):
-    def __init__(self, layers):
+class Sequential(Module):
+    def __init__(self, *layers):
         super().__init__(layers=layers)
 
     def __call__(self, inputs):
@@ -77,8 +82,9 @@ def Sequential(Module):
         return inputs
 ```
 Advantages:
-- Removes `@parameterized` attribute and special semantics of default arguments.
-- Will look familiar to people using [TF2 / Keras custom layers](https://www.tensorflow.org/beta/tutorials/eager/custom_layers).
+- Does not require `@parameterized` attribute.
+- Does not require special semantics for default arguments.
+- Will look familiar to people who have written [TF2 / Keras](https://www.tensorflow.org/beta/tutorials/eager/custom_layers) or [PyTorch](https://pytorch.org/docs/stable/notes/extending.html#adding-a-module) custom modules.
 
 Disadvantages:
 - Less compact: Two functions per module, requires `self.<...>`

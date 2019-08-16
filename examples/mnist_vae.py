@@ -41,17 +41,13 @@ def image_grid(nrow, ncol, imagevecs, imshape):
 
 
 @parametrized
-def encode(input, net=Sequential([Dense(512), relu, Dense(512), relu]),
-           mean_net=Dense(10), variance_net=Sequential([Dense(10), softplus])):
+def encode(input, net=Sequential(Dense(512), relu, Dense(512), relu),
+           mean_net=Dense(10), variance_net=Sequential(Dense(10), softplus)):
     input = net(input)
     return mean_net(input), variance_net(input)
 
 
-decode = Sequential([
-    Dense(512), relu,
-    Dense(512), relu,
-    Dense(28 * 28),
-])
+decode = Sequential(Dense(512), relu, Dense(512), relu, Dense(28 * 28))
 
 
 @parametrized

@@ -14,11 +14,11 @@ def ConvBlock(kernel_size, filters, strides=(2, 2)):
 
     @parametrized
     def conv_block(inputs,
-                   main=Sequential([
+                   main=Sequential(
                        Conv(filters1, (1, 1), strides), BatchNorm(), relu,
                        Conv(filters2, (ks, ks), padding='SAME'), BatchNorm(), relu,
-                       Conv(filters3, (1, 1)), BatchNorm()]),
-                   shortcut=Sequential([Conv(filters3, (1, 1), strides), BatchNorm()])):
+                       Conv(filters3, (1, 1)), BatchNorm()),
+                   shortcut=Sequential(Conv(filters3, (1, 1), strides), BatchNorm())):
         return relu(sum((main(inputs), shortcut(inputs))))
 
     return conv_block
@@ -30,10 +30,10 @@ def IdentityBlock(kernel_size, filters):
 
     def make_main(inputs):
         # the number of output channels depends on the number of input channels
-        return Sequential([
+        return Sequential(
             Conv(filters1, (1, 1)), BatchNorm(), relu,
             Conv(filters2, (ks, ks), padding='SAME'), BatchNorm(), relu,
-            Conv(inputs.shape[3], (1, 1)), BatchNorm()])
+            Conv(inputs.shape[3], (1, 1)), BatchNorm())
 
     @parametrized
     def identity_block(inputs, main=InputDependent(make_main)):
@@ -43,7 +43,7 @@ def IdentityBlock(kernel_size, filters):
 
 
 def ResNet50(num_classes):
-    return Sequential([
+    return Sequential(
         GeneralConv(('HWCN', 'OIHW', 'NHWC'), 64, (7, 7), (2, 2), 'SAME'),
         BatchNorm(), relu, MaxPool((3, 3), strides=(2, 2)),
         ConvBlock(3, [64, 64, 256], strides=(1, 1)),
@@ -62,7 +62,7 @@ def ResNet50(num_classes):
         ConvBlock(3, [512, 512, 2048]),
         IdentityBlock(3, [512, 512]),
         IdentityBlock(3, [512, 512]),
-        AvgPool((7, 7)), flatten, Dense(num_classes), logsoftmax])
+        AvgPool((7, 7)), flatten, Dense(num_classes), logsoftmax)
 
 
 if __name__ == "__main__":

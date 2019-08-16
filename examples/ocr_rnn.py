@@ -27,14 +27,14 @@ def main():
         return Rnn(*GRUCell(carry_size=carry_size,
                             param_init=lambda rng, shape: random.normal(rng, shape) * 0.01))
 
-    net = Sequential([
+    net = Sequential(
         rnn(),
         rnn(),
         rnn(),
         lambda x: np.reshape(x, (-1, carry_size)),  # -> same weights for all time steps
         Dense(out_dim=class_count),
         softmax,
-        lambda x: np.reshape(x, (-1, length, class_count))])
+        lambda x: np.reshape(x, (-1, length, class_count)))
 
     @parametrized
     def cross_entropy(inputs, targets, net=net):
@@ -58,7 +58,8 @@ def main():
     params = cross_entropy.init_params(random.PRNGKey(0), batch.data, batch.target)
     opt_state = opt_init(params)
     for epoch in range(10):
-        e = error.apply_from({cross_entropy: get_params(opt_state)}, test.data, test.target, jit=True)
+        e = error.apply_from({cross_entropy: get_params(opt_state)}, test.data, test.target,
+                             jit=True)
         print(f'Epoch {epoch} error {e * 100:.1f}')
 
         for _ in range(100):
