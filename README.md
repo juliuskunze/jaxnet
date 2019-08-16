@@ -20,18 +20,17 @@ See JAXnet in action in these demos:
 [ResNet](https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN).
 
 ## Overview
-
-Defining networks looks similar to the [TensorFlow2 / Keras functional API](https://www.tensorflow.org/beta/guide/keras/functional):
 ```python
-from jax import numpy as np, jit
-from jax.random import PRNGKey
 from jaxnet import *
 
 net = Sequential(Conv(2, (3, 3)), relu, flatten, Dense(4), softmax)
 ```
-
-To initialize parameter values for a network, call `init_params` with a random key and example inputs:
+creates a neural net model.
+To initialize parameters, call `init_params` with a random key and example inputs:
 ```python
+from jax import numpy as np, jit
+from jax.random import PRNGKey
+
 inputs = np.zeros((3, 5, 5, 1))
 params = net.init_params(PRNGKey(0), inputs)
 
