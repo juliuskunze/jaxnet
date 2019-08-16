@@ -573,7 +573,7 @@ def test_InputDependent_nested():
 
 def test_sequential_graceful_update_message():
     message = 'Call like Sequential(Dense(10), relu), without "[" and "]". ' \
-              '(Or pass lists with Sequential(*layers).)'
+              '(Or pass iterables with Sequential(*layers).)'
     try:
         Sequential([Dense(2), relu])
         assert False
