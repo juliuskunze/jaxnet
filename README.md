@@ -27,7 +27,7 @@ from jax import numpy as np, jit
 from jax.random import PRNGKey
 from jaxnet import *
 
-net = Sequential([Conv(2, (3, 3)), relu, flatten, Dense(4), softmax])
+net = Sequential(Conv(2, (3, 3)), relu, flatten, Dense(4), softmax)
 ```
 
 To initialize parameter values for a network, call `init_params` with a random key and example inputs:
@@ -146,7 +146,7 @@ You can also reuse parts of your network while initializing the rest:
 
 ```python
 inputs = np.zeros((1, 2))
-net = Sequential(Dense(5))
+net = Dense(5)
 net_params = net.init_params(PRNGKey(0), inputs)
 
 # train net_params...

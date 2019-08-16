@@ -529,10 +529,10 @@ def test_BatchNorm_shape_NCHW(center, scale):
 
 def test_reuse_example():
     inputs = np.zeros((1, 2))
-    net = Sequential(Dense(5), relu)
+    net = Dense(5)
     net_params = net.init_params(PRNGKey(0), inputs)
 
-    transfer_net = Sequential(net, Dense(2))
+    transfer_net = Sequential(net, relu, Dense(2))
 
     transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
 
