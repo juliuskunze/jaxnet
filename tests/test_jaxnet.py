@@ -266,8 +266,6 @@ def test_access_submodules_name_clash_raises_error():
         assert False
     except ValueError as e:
         assert 'Submodules cannot be named "init_params", please rename.' == str(e)
-    except Exception:
-        assert False
 
 
 def test_join_params_top_level():
@@ -428,8 +426,6 @@ def test_Dropout_shape(mode, input_shape=(1, 2, 3)):
                'That is, instead of `dropout(params, inputs)`, ' \
                'call it like `dropout(inputs, key)` ' \
                'where `key` is a jax.random.PRNGKey value.' == str(e)
-    except:
-        assert False
 
 
 def test_GRUCell_shape():
@@ -573,3 +569,19 @@ def test_InputDependent_nested():
     output = net(params, inputs)
 
     assert (5, 5) == output.shape
+
+
+def test_sequential_graceful_update_message():
+    message = 'Call like Sequential(Dense(10), relu), without "[" and "]". ' \
+              '(Or pass lists with Sequential(*layers).)'
+    try:
+        Sequential([Dense(2), relu])
+        assert False
+    except ValueError as e:
+        assert message == str(e)
+
+    try:
+        Sequential(Dense(2) for _ in range(3))
+        assert False
+    except ValueError as e:
+        assert message == str(e)

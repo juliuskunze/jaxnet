@@ -283,6 +283,9 @@ def Sequential(*layers):
         A new parametrized function.
     """
 
+    if len(layers) > 0 and hasattr(layers[0], '__iter__'):
+        raise ValueError('Call like Sequential(Dense(10), relu), without "[" and "]". (Or pass iterables with Sequential(*layers).)')
+
     @parametrized
     def sequential(inputs, layers=layers):
         for layer in layers:
