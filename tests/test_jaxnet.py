@@ -4,7 +4,7 @@ from jax.random import PRNGKey
 
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, MaxPool, zeros, GRUCell, \
     Rnn, softmax, SumPool, AvgPool, Dropout, BatchNorm, ConvTranspose, Conv1DTranspose, \
-    InputDependent, Conv1D, save, load
+    InputDependent, Conv1D, save_params, load_params
 
 
 def random_inputs(input_shape, rng=PRNGKey(0)):
@@ -340,7 +340,7 @@ def test_example():
 @pytest.mark.parametrize('padding', ["SAME", "VALID"])
 @pytest.mark.parametrize('strides', [None, (2, 1)])
 @pytest.mark.parametrize('input_shape', [(2, 10, 11, 1)])
-@pytest.mark.parametrize('dilation', [(1, 1), (2, 2)])
+@pytest.mark.parametrize('dilation', [None, (1, 2)])
 def test_Conv_runs(channels, filter_shape, padding, strides, input_shape, dilation):
     conv = Conv(channels, filter_shape, strides=strides, padding=padding, dilation=dilation)
     inputs = random_inputs(input_shape)
@@ -587,7 +587,7 @@ def test_sequential_graceful_update_message():
         assert message == str(e)
 
 
-def test_save_and_load_params_with_dill():
+def test_save_and_load_params():
     from pathlib import Path
 
     path= Path('/') / 'tmp' / 'net.params4'
@@ -595,7 +595,7 @@ def test_save_and_load_params_with_dill():
     inputs = np.zeros((1, 2))
     net = Dense(5)
     params = net.init_params(PRNGKey(0), inputs)
-    save(params, path)
-    params_ = load(path)
+    save_params(params, path)
+    params_ = load_params(path)
 
     assert_dense_params_equal(params, params_)

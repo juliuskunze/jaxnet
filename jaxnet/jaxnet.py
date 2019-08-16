@@ -480,11 +480,11 @@ def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,
     return batch_norm
 
 
-def save(params, path: Path):
+def save_params(params, path: Path):
     with path.open('wb') as file:
         dill.dump(params, file)
 
 
-def load(path: Path):
+def load_params(path: Path):
     with path.open('rb') as file:
         return dill.load(file)
