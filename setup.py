@@ -9,8 +9,7 @@ setuptools.setup(
     url='http://github.com/JuliusKunze/jaxnet',
     long_description=pathlib.Path('README.md').read_text(),
     long_description_content_type='text/markdown',
-    install_requires=['jax', 'jaxlib'],
-    tests_require=['dill'],
+    install_requires=['jax', 'jaxlib', 'dill'],
     packages=['jaxnet'],
     classifiers=[
         'Programming Language :: Python :: 3',

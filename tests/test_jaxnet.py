@@ -4,7 +4,7 @@ from jax.random import PRNGKey
 
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, MaxPool, zeros, GRUCell, \
     Rnn, softmax, SumPool, AvgPool, Dropout, BatchNorm, ConvTranspose, Conv1DTranspose, \
-    InputDependent, Conv1D
+    InputDependent, Conv1D, save, load
 
 
 def random_inputs(input_shape, rng=PRNGKey(0)):
@@ -588,16 +588,14 @@ def test_sequential_graceful_update_message():
 
 
 def test_save_and_load_params_with_dill():
-    import dill
     from pathlib import Path
 
-    path=Path('/') / 'tmp' / 'net.params'
+    path= Path('/') / 'tmp' / 'net.params4'
 
     inputs = np.zeros((1, 2))
     net = Dense(5)
     params = net.init_params(PRNGKey(0), inputs)
-
-    with path.open('rb') as file:
-        params_ = dill.load(file)
+    save(params, path)
+    params_ = load(path)
 
     assert_dense_params_equal(params, params_)

@@ -2,7 +2,9 @@ import functools
 import itertools
 from collections import namedtuple
 from inspect import signature
+from pathlib import Path
 
+import dill
 import jax
 import numpy as onp
 from jax import numpy as np, random, partial
@@ -284,7 +286,8 @@ def Sequential(*layers):
     """
 
     if len(layers) > 0 and hasattr(layers[0], '__iter__'):
-        raise ValueError('Call like Sequential(Dense(10), relu), without "[" and "]". (Or pass iterables with Sequential(*layers).)')
+        raise ValueError('Call like Sequential(Dense(10), relu), without "[" and "]". '
+                         '(Or pass iterables with Sequential(*layers).)')
 
     @parametrized
     def sequential(inputs, layers=layers):
@@ -475,3 +478,13 @@ def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,
         return z
 
     return batch_norm
+
+
+def save(params, path: Path):
+    with path.open('wb') as file:
+        dill.dump(params, file)
+
+
+def load(path: Path):
+    with path.open('rb') as file:
+        return dill.load(file)
