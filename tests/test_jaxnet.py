@@ -585,3 +585,19 @@ def test_sequential_graceful_update_message():
         assert False
     except ValueError as e:
         assert message == str(e)
+
+
+def test_save_and_load_params_with_dill():
+    import dill
+    from pathlib import Path
+
+    path=Path('/') / 'tmp' / 'net.params'
+
+    inputs = np.zeros((1, 2))
+    net = Dense(5)
+    params = net.init_params(PRNGKey(0), inputs)
+
+    with path.open('rb') as file:
+        params_ = dill.load(file)
+
+    assert_dense_params_equal(params, params_)

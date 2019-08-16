@@ -11,7 +11,7 @@ Different from popular neural net libraries, it is completely functional:
 pip install jaxnet
 ```
 
-If you want to run networks on GPU/TPU, first install the [right version of jaxlib](https://github.com/google/jax#installation).
+To use GPU, first install the [right version of jaxlib](https://github.com/google/jax#installation).
 
 See JAXnet in action in these demos:
 [Mnist Classifier](https://colab.research.google.com/drive/18kICTUbjqnfg5Lk3xFVQtUj6ahct9Vmv),
