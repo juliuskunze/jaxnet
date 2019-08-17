@@ -30,7 +30,7 @@ Advantages:
 - All layers can be input dependent by default, removes need for `InputDependent`.
 
 Downsides:
-- Naming of parameter values would be more arbitrary since no parameter names are not associated.
+- Naming of parameter values would be more arbitrary since no parameter names are associated.
 - Potentially large implementation complexity, requires direct use of JAX' tracing / function transformation capabilities.
 
 JAXnet invokes the user's function (when `jit` is not used), allowing step-by-step debugging.
@@ -40,19 +40,19 @@ This could also be achieved in this alternative using initial-style function tra
 
 ```python
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
-        @Param('kernel', lambda input_shape: (input_shape.shape[-1], out_dim), init=kernel_init)
-        @Param('bias', lambda _: (out_dim,), init=bias_init)
-        def dense(inputs, kernel, bias):
-            return np.dot(inputs, kernel) + bias
+    @Param('kernel', lambda input_shape: (input_shape.shape[-1], out_dim), init=kernel_init)
+    @Param('bias', lambda _: (out_dim,), init=bias_init)
+    def dense(inputs, kernel, bias):
+        return np.dot(inputs, kernel) + bias
 
-    def Sequential(*layers):
-        @Submodule('layers', layers)
-        def sequential(inputs, layers):
-            for layer in layers:
-                inputs = layer(inputs)
-            return inputs
+def Sequential(*layers):
+    @Submodule('layers', layers)
+    def sequential(inputs, layers):
+        for layer in layers:
+            inputs = layer(inputs)
+        return inputs
 
-        return sequential
+    return sequential
 ```
 
 This perhaps makes the transformation logic more explicit. Downsides:
