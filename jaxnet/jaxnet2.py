@@ -11,8 +11,8 @@ from jax.interpreters import batching, xla, partial_eval as pe
 from jax.interpreters.batching import get_aval
 from jax.util import unzip2, safe_zip, safe_map, partial, WrapHashably
 
-from jaxnet import Param, glorot, randn
 import jaxnet
+from jaxnet import Param, glorot, randn
 
 zip = safe_zip
 map = safe_map
@@ -29,15 +29,8 @@ def merge_params(params):
 
 
 # Crude way to auto-generate unique layer names
-layer_counter = [itertools.count()]
-
-
-def init_layer_counter():
-    layer_counter.pop()
-    layer_counter.append(itertools.count())
-
-
-layer_count = lambda: next(layer_counter[0])
+layer_counter = itertools.count()
+layer_count = lambda: next(layer_counter)
 
 
 class Layer(jc.Primitive):
@@ -202,13 +195,11 @@ def apply_subtrace(master, net_params, *vals):
     yield out_tracer.val
 
 
-# TODO merge into the other two:
-class resolve:
+class _resolve:
     def __init__(self, fun):
         self._fun = fun
 
     def init_params(self, rng, *inputs):
-        init_layer_counter()
         net_fun = lu.wrap_init(self._fun)
 
         def pv_like(x):
@@ -218,22 +209,24 @@ class resolve:
         jaxpr, _, consts = pe.trace_to_jaxpr(net_fun, pvals)
         return init_interpreter(rng, jaxpr, consts, [], {}, *inputs)
 
-    def __call__(self, params, *inputs):
-        init_layer_counter()
+    def apply(self, params, *inputs):
         return apply_transform(lu.wrap_init(self._fun), params).call_wrapped(inputs)
 
+    def __call__(self, *inputs):
+        return self._fun(*inputs)
+
+
 # TODO merge the following two. Then make param sharing work
-def parametrized_composed(fun):
+def parametrized(fun):
     """Allow sublayers, but no Param args."""
-    # TODO use list(map(lambda frame: frame.function, inspect.stack())) for name?
-    p = resolve(fun)
-    return Layer("Test", p.init_params, p.__call__).bind
+    p = _resolve(fun)
+    return _resolve(Layer(fun.__name__, p.init_params, p.apply).bind)
+
 
 def parametrized_primitive(fun):
     """Allows Param args, but no sublayers."""
-    # TODO use list(map(lambda frame: frame.function, inspect.stack())) for name?
     p = jaxnet.parametrized(fun)
-    return Layer(p._name, p.init_params, p.__call__).bind
+    return _resolve(Layer(p._name, p.init_params, p.__call__).bind)
 
 
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
@@ -246,6 +239,7 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
         return np.dot(inputs, kernel) + bias
 
     return dense
+
 
 def Sequential(*layers):
     """Combinator for composing layers in sequence.
@@ -261,6 +255,7 @@ def Sequential(*layers):
         raise ValueError('Call like Sequential(Dense(10), relu), without "[" and "]". '
                          '(Or pass iterables with Sequential(*layers).)')
 
+    @parametrized
     def sequential(inputs):
         for layer in layers:
             inputs = layer(inputs)
