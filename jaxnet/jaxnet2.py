@@ -202,7 +202,8 @@ def apply_subtrace(master, net_params, *vals):
     yield out_tracer.val
 
 
-class parametrized:
+# TODO merge into the other two:
+class resolve:
     def __init__(self, fun):
         self._fun = fun
 
@@ -221,8 +222,15 @@ class parametrized:
         init_layer_counter()
         return apply_transform(lu.wrap_init(self._fun), params).call_wrapped(inputs)
 
+# TODO merge the following two. Then make param sharing work
+def parametrized_composed(fun):
+    """Allow sublayers, but no Param args."""
+    # TODO use list(map(lambda frame: frame.function, inspect.stack())) for name?
+    p = resolve(fun)
+    return Layer("Test", p.init_params, p.__call__).bind
 
 def parametrized_primitive(fun):
+    """Allows Param args, but no sublayers."""
     # TODO use list(map(lambda frame: frame.function, inspect.stack())) for name?
     p = jaxnet.parametrized(fun)
     return Layer(p._name, p.init_params, p.__call__).bind
@@ -239,7 +247,7 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
 
     return dense
 
-def SequentialLayer(*layers):
+def Sequential(*layers):
     """Combinator for composing layers in sequence.
 
     Args:
@@ -253,7 +261,6 @@ def SequentialLayer(*layers):
         raise ValueError('Call like Sequential(Dense(10), relu), without "[" and "]". '
                          '(Or pass iterables with Sequential(*layers).)')
 
-    @parametrized_primitive
     def sequential(inputs):
         for layer in layers:
             inputs = layer(inputs)
