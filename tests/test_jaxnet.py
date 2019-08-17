@@ -590,7 +590,7 @@ def test_sequential_graceful_update_message():
 def test_save_and_load_params():
     from pathlib import Path
 
-    path= Path('/') / 'tmp' / 'net.params4'
+    path = Path('/') / 'tmp' / 'net.params4'
 
     inputs = np.zeros((1, 2))
     net = Dense(5)
