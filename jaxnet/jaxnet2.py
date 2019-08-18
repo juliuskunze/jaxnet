@@ -4,6 +4,7 @@ library supports interoperability with lax primitives, layer re-use and
 definition of a neural net as a Python function.
 """
 import itertools
+from collections import namedtuple
 
 from jax import core as jc, linear_util as lu, numpy as np, random
 from jax.abstract_arrays import ShapedArray
@@ -18,19 +19,27 @@ zip = safe_zip
 map = safe_map
 
 
+def to_dict(params):
+    return params if isinstance(params, dict) else params._asdict()
+
+
 def merge_params(params):
-    if len(params) > 0:
-        p = params[0]
-        for param in params[1:]:
-            p.update(param)
-        return p
-    else:
-        return {}
+    if len(params) == 0: return {}
+
+    p = to_dict(params[0])
+    for param in params[1:]:
+        p.update(to_dict(param))
+    return p
 
 
 # Crude way to auto-generate unique layer names
-layer_counter = itertools.count()
-layer_count = lambda: next(layer_counter)
+layer_counter = [itertools.count()]
+layer_count = lambda: next(layer_counter[0])
+
+
+def reset_layer_counter():
+    layer_counter.pop()
+    layer_counter.append(itertools.count())
 
 
 class Layer(jc.Primitive):
@@ -62,41 +71,6 @@ class Layer(jc.Primitive):
             return batched_layer.bind(*batched_args, **params), 0
 
         batching.primitive_batchers[self] = layer_batch
-
-
-def init_interpreter(rng, jaxpr, consts, freevar_vals, net_params, *args):
-    def read(v):
-        if type(v) is jc.Literal:
-            return v.val
-        else:
-            return env[v]
-
-    def write(v, val):
-        env[v] = val
-
-    env = {}
-    write(jc.unitvar, jc.unit)
-    jc.pat_fmap(write, jaxpr.constvars, consts)
-    jc.pat_fmap(write, jaxpr.invars, args)
-    jc.pat_fmap(write, jaxpr.freevars, freevar_vals)
-    for eqn in jaxpr.eqns:
-        rng, prim_rng = random.split(rng)
-        if not eqn.restructure:
-            in_vals = map(read, eqn.invars)
-        else:
-            in_vals = [jc.pack(map(read, invars)) if type(invars) is tuple
-                       else read(invars) for invars in eqn.invars]
-        # Assume no Layers in subjaxprs
-        subfuns = [partial(jc.eval_jaxpr, subjaxpr, map(read, const_bindings),
-                           map(read, freevar_bindings))
-                   for subjaxpr, const_bindings, freevar_bindings
-                   in eqn.bound_subjaxprs]
-        subfuns = map(lu.wrap_init, subfuns)
-        ans, net_params = get_primitive_init(eqn.primitive)(
-            prim_rng, net_params, *(subfuns + in_vals), **eqn.params)
-        outvals = list(ans) if eqn.destructure else [ans]
-        map(write, eqn.outvars, outvals)
-    return net_params
 
 
 init_rules = {}
@@ -158,14 +132,9 @@ class ApplyTrace(jc.Trace):
     def process_primitive(self, primitive, tracers, params):
         vals_in, net_params = unzip2((t.val, t.net_params) for t in tracers)
         net_params = merge_params(net_params)
-        if isinstance(primitive, Layer):
-            apply_fun = primitive.apply_fun
-            layer_params = net_params[primitive.name]
-            return ApplyTracer(
-                self, net_params, apply_fun(layer_params, *vals_in))
-        else:
-            return ApplyTracer(
-                self, net_params, primitive.bind(*vals_in, **params))
+        val = primitive.apply_fun(net_params[primitive.name], *vals_in) if \
+            isinstance(primitive, Layer) else primitive.bind(*vals_in, **params)
+        return ApplyTracer(self, net_params, val)
 
     def process_call(self, call_primitive, f, tracers, params):
         vals_in, net_params = unzip2((t.val, t.net_params) for t in tracers)
@@ -196,8 +165,45 @@ def apply_subtrace(master, net_params, *vals):
 
 
 class _resolve:
-    def __init__(self, fun):
+    def __init__(self, fun, name=None):
         self._fun = fun
+        self._name = name if name else fun.__name__
+
+    def _init_interpreter(self, rng, jaxpr, consts, freevar_vals, net_params, *args):
+        def read(v):
+            if type(v) is jc.Literal:
+                return v.val
+            else:
+                return env[v]
+
+        def write(v, val):
+            env[v] = val
+
+        env = {}
+        write(jc.unitvar, jc.unit)
+        jc.pat_fmap(write, jaxpr.constvars, consts)
+        jc.pat_fmap(write, jaxpr.invars, args)
+        jc.pat_fmap(write, jaxpr.freevars, freevar_vals)
+        for eqn in jaxpr.eqns:
+            rng, prim_rng = random.split(rng)
+            if not eqn.restructure:
+                in_vals = map(read, eqn.invars)
+            else:
+                in_vals = [jc.pack(map(read, invars)) if type(invars) is tuple
+                           else read(invars) for invars in eqn.invars]
+            # Assume no Layers in subjaxprs
+            subfuns = [partial(jc.eval_jaxpr, subjaxpr, map(read, const_bindings),
+                               map(read, freevar_bindings))
+                       for subjaxpr, const_bindings, freevar_bindings
+                       in eqn.bound_subjaxprs]
+            subfuns = map(lu.wrap_init, subfuns)
+            ans, net_params = get_primitive_init(eqn.primitive)(
+                prim_rng, net_params, *(subfuns + in_vals), **eqn.params)
+            outvals = list(ans) if eqn.destructure else [ans]
+            map(write, eqn.outvars, outvals)
+
+        Params = namedtuple(self._name, sorted(net_params))
+        return Params(**net_params)
 
     def init_params(self, rng, *inputs):
         net_fun = lu.wrap_init(self._fun)
@@ -207,7 +213,7 @@ class _resolve:
 
         pvals = map(pv_like, inputs)
         jaxpr, _, consts = pe.trace_to_jaxpr(net_fun, pvals)
-        return init_interpreter(rng, jaxpr, consts, [], {}, *inputs)
+        return self._init_interpreter(rng, jaxpr, consts, [], {}, *inputs)
 
     def apply(self, params, *inputs):
         return apply_transform(lu.wrap_init(self._fun), params).call_wrapped(inputs)
@@ -216,20 +222,22 @@ class _resolve:
         return self._fun(*inputs)
 
 
+def _resolve_layer(p, name=None):
+    return _resolve(Layer(p._name, p.init_params, p.apply).bind, name=name if name else p._name)
+
+
 # TODO merge the following two. Then make param sharing work
 def parametrized(fun):
     """Allow sublayers, but no Param args."""
-    p = _resolve(fun)
-    return _resolve(Layer(fun.__name__, p.init_params, p.apply).bind)
+    return _resolve_layer(_resolve(fun))
 
 
 def parametrized_primitive(fun):
     """Allows Param args, but no sublayers."""
-    p = jaxnet.parametrized(fun)
-    return _resolve(Layer(p._name, p.init_params, p.__call__).bind)
+    return _resolve_layer(jaxnet.parametrized(fun))
 
 
-def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
+def Dense(out_dim, kernel_init=glorot(), bias_init=randn(), name=None):
     """Layer constructor function for a dense (fully-connected) layer."""
 
     @parametrized_primitive

@@ -37,11 +37,11 @@ class InputDependent:
     def __init__(self, parametrized_from_inputs, name=None):
         self._fun_from_inputs = parametrized_from_inputs
         self._name = name if name else parametrized_from_inputs.__name__
-        self._apply = self._get_apply()
+        self.apply = self._get_apply()
         self.init_params = partial(self._init_params, reuse_only=False)
 
     def __call__(self, param_values, *inputs):
-        return self._apply(param_values, *inputs)
+        return self.apply(param_values, *inputs)
 
     def _get_fun(self, *inputs):
         p = self._fun_from_inputs(*inputs)
@@ -189,7 +189,7 @@ class parametrized(InputDependent):
 
     def apply_from(self, reuse, *inputs, jit=False):
         params = self.params_from(values_by_param=reuse)
-        return (jax.jit(self._apply) if jit else self._apply)(params, *inputs)
+        return (jax.jit(self.apply) if jit else self.apply)(params, *inputs)
 
     def __str__(self):
         return f'{self._name}({id(self)}):{self._parameters}'
