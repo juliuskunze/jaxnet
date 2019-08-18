@@ -229,7 +229,7 @@ def parametrized_primitive(fun):
     return _resolve_layer(jaxnet.parametrized(fun))
 
 
-def Dense(out_dim, kernel_init=glorot(), bias_init=randn(), name=None):
+def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     """Layer constructor function for a dense (fully-connected) layer."""
 
     @parametrized_primitive

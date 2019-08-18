@@ -253,7 +253,7 @@ def test_no_params():
     assert np.array_equal(out, out_)
 
 
-@pytest.mark.skip(reason="WIP")
+@pytest.mark.skip('WIP')
 def test_params():
     @parametrized
     def dense(inputs,

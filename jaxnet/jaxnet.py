@@ -13,70 +13,45 @@ from jax.scipy.special import logsumexp, expit
 
 from jaxnet.tools import zip_nested, map_nested, nested_any, ZippedValue, flatten_nested
 
-ParamInit = namedtuple('Param', ('init_param',))
+GeneralParam = namedtuple('Param', ('init_param',))
 
 
 def Param(get_shape, init):
-    return ParamInit(init_param=lambda rng, *example_inputs: init(rng, get_shape(*example_inputs)))
+    return GeneralParam(init_param=lambda rng, *example_inputs: init(rng, get_shape(*example_inputs)))
 
 
-NoParams = namedtuple('NoParams', ())
-no_params = NoParams()
-
-def _is_parametrized_collection(x):
-    return nested_any(map_nested(lambda x: isinstance(x, ParamInit), x, element_types=(ParamInit,)))
+def _is_parameter_collection(x):
+    return nested_any(map_nested(lambda x: isinstance(x, GeneralParam), x, element_types=(GeneralParam,)))
 
 
-class InputDependent:
-    def __init__(self, parametrized_from_inputs, name=None):
-        self._fun_from_inputs = parametrized_from_inputs
-        self._name = name if name else parametrized_from_inputs.__name__
+class parametrized:
+    def __init__(self, fun, name=None):
+        self._fun = fun
+        self._name = name if name else fun.__name__
         self.init_params = partial(self._init_params, reuse_only=False)
+        self._params = {k: v.default for k, v in signature(self._fun).parameters.items()
+                        if _is_parameter_collection(v.default)}
 
-    def __call__(self, param_values, *inputs):
-        return self.apply(param_values, *inputs)
+        self.Parameters = namedtuple(self._name, self._params.keys())
 
-    def _get_fun(self, *inputs):
-        p = self._fun_from_inputs(*inputs)
-
-        if not isinstance(p, parametrized):
-            raise ValueError("fun_from_inputs has to return a @parameterized function.")
-
-        return p._fun
-
-    def _get_parameters(self, *inputs):
-        fun = self._get_fun(*inputs)
-        parameters = {k: v.default for k, v in signature(fun).parameters.items()
-                      if _is_parametrized_collection(v.default)}
-
-        for name in parameters.keys():
-            if name in dir(self):
-                raise ValueError(f'Submodules cannot be named "{name}", please rename.')
-
-        return parameters
-
-    def _get_Parameters(self, *inputs):
-        return namedtuple(self._name, self._get_parameters(*inputs).keys())
-
-    def _get_param_value_pairs(self, param_values, *inputs):
+    def _get_param_value_pairs(self, param_values):
         param_values = param_values._asdict() if isinstance(param_values, tuple) else param_values
-        return zip_nested(self._get_parameters(*inputs), param_values, element_types=(ParamInit,))
+        return zip_nested(self._params, param_values, element_types=(GeneralParam,))
 
     def apply(self, param_values, *inputs):
         def resolve_parameters(param, param_values):
-            if isinstance(param, ParamInit):
+            if isinstance(param, GeneralParam):
                 return param_values
 
             return param
 
-        pairs = self._get_param_value_pairs(param_values, *inputs)
+        pairs = self._get_param_value_pairs(param_values)
         resolved_params = map_nested(lambda pair: resolve_parameters(*pair),
-                                     pairs, element_types=(ZippedValue, ParamInit))
-        fun = self._get_fun(*inputs)
-        return fun(*inputs, **resolved_params)
+                                     pairs, element_types=(ZippedValue, GeneralParam))
+        return self._fun(*inputs, **resolved_params)
 
     def _init_params(self, rng, *example_inputs, reuse=None, reuse_only=False):
-        if isinstance(self, InputDependent):
+        if isinstance(self, parametrized):
             if reuse and self in reuse:
                 return reuse[self]
 
@@ -90,36 +65,13 @@ class InputDependent:
             return param.init_param(rng_param, *example_inputs)
 
         all_param_values = map_nested(
-            lambda param: init_param(param), self._get_parameters(*example_inputs),
-            tuples_to_lists=True, element_types=(ParamInit,))
+            lambda param: init_param(param), self._params,
+            tuples_to_lists=True, element_types=(GeneralParam,))
 
-        return self._get_Parameters(*example_inputs)(**all_param_values)
+        return self.Parameters(**all_param_values)
 
     def __str__(self):
         return f'{self._name}({id(self)})'
-
-
-class parametrized(InputDependent):
-    def __init__(self, fun):
-        super().__init__(parametrized_from_inputs=None, name=fun.__name__)
-        self._fun = fun
-        self._parameters = super()._get_parameters()
-        self._Parameters = super()._get_Parameters()
-
-    def _get_fun(self, *inputs):
-        return self._fun
-
-    def _get_parameters(self, *inputs):
-        return self._parameters
-
-    def _get_Parameters(self, *inputs):
-        return self._Parameters
-
-    def __getattr__(self, item):
-        if item in self._parameters.keys():
-            return self._parameters[item]
-
-        return getattr(super(), item)
 
     def _expand_reuse_dict(self, reuse):
         r = dict()
@@ -144,9 +96,6 @@ class parametrized(InputDependent):
     def apply_from(self, reuse, *inputs, jit=False):
         params = self.params_from(values_by_param=reuse)
         return (jax.jit(self.apply) if jit else self.apply)(params, *inputs)
-
-    def __str__(self):
-        return f'{self._name}({id(self)}):{self._parameters}'
 
 
 def relu(x):

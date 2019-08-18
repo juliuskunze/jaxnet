@@ -3,8 +3,7 @@ from jax import numpy as np, jit, random
 from jax.random import PRNGKey
 
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, MaxPool, zeros, GRUCell, \
-    Rnn, softmax, SumPool, AvgPool, Dropout, BatchNorm, ConvTranspose, Conv1DTranspose, \
-    InputDependent, Conv1D, save_params, load_params
+    Rnn, softmax, SumPool, AvgPool, Dropout, BatchNorm, ConvTranspose, Conv1DTranspose, Conv1D, save_params, load_params
 
 
 def random_inputs(input_shape, rng=PRNGKey(0)):
@@ -545,7 +544,7 @@ def test_InputDependent():
         # output neuron count depends on batch size:
         return Dense(inputs.shape[0])
 
-    net = InputDependent(make_net)
+    net = parametrized(make_net)
 
     inputs = np.zeros((5, 3))
     params = net.init_params(PRNGKey(0), inputs)
@@ -561,7 +560,7 @@ def test_InputDependent_nested():
         # output neuron count depends on batch size:
         return Dense(inputs.shape[0])
 
-    net = Sequential(Dense(3), InputDependent(make_net))
+    net = Sequential(Dense(3), parametrized(make_net))
 
     inputs = np.zeros((5, 3))
     params = net.init_params(PRNGKey(0), inputs)
