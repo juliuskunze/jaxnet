@@ -37,7 +37,7 @@ layer_counter = [itertools.count()]
 layer_count = lambda: next(layer_counter[0])
 
 
-def reset_layer_counter():
+def init_layer_counter():
     layer_counter.pop()
     layer_counter.append(itertools.count())
 
@@ -206,6 +206,7 @@ class _resolve:
         return Params(**net_params)
 
     def init_params(self, rng, *inputs):
+        init_layer_counter()
         net_fun = lu.wrap_init(self._fun)
 
         def pv_like(x):
@@ -216,14 +217,15 @@ class _resolve:
         return self._init_interpreter(rng, jaxpr, consts, [], {}, *inputs)
 
     def apply(self, params, *inputs):
+        init_layer_counter()
         return apply_transform(lu.wrap_init(self._fun), params).call_wrapped(inputs)
 
     def __call__(self, *inputs):
         return self._fun(*inputs)
 
 
-def _resolve_layer(p, name=None):
-    return _resolve(Layer(p._name, p.init_params, p.apply).bind, name=name if name else p._name)
+def _resolve_layer(p):
+    return _resolve(Layer(p._name, p.init_params, p.apply).bind)
 
 
 # TODO merge the following two. Then make param sharing work
