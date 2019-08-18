@@ -11,8 +11,7 @@ from jax import numpy as np, random, partial
 from jax.lax import lax, scan
 from jax.scipy.special import logsumexp, expit
 
-from jaxnet.tools import zip_nested, map_nested, enumerate_nested, set_nested_element, \
-    nested_any, IndexedValue, ZippedValue, flatten_nested
+from jaxnet.tools import zip_nested, map_nested, nested_any, ZippedValue, flatten_nested
 
 ParamInit = namedtuple('Param', ('init_param',))
 
@@ -24,20 +23,14 @@ def Param(get_shape, init):
 NoParams = namedtuple('NoParams', ())
 no_params = NoParams()
 
-
-def _is_parametrized(param): return isinstance(param, ParamInit) or isinstance(param,
-                                                                               InputDependent)
-
-
 def _is_parametrized_collection(x):
-    return nested_any(map_nested(_is_parametrized, x, element_types=(ParamInit,)))
+    return nested_any(map_nested(lambda x: isinstance(x, ParamInit), x, element_types=(ParamInit,)))
 
 
 class InputDependent:
     def __init__(self, parametrized_from_inputs, name=None):
         self._fun_from_inputs = parametrized_from_inputs
         self._name = name if name else parametrized_from_inputs.__name__
-        self.apply = self._get_apply()
         self.init_params = partial(self._init_params, reuse_only=False)
 
     def __call__(self, param_values, *inputs):
@@ -66,78 +59,39 @@ class InputDependent:
         return namedtuple(self._name, self._get_parameters(*inputs).keys())
 
     def _get_param_value_pairs(self, param_values, *inputs):
-        param_values = param_values._asdict() if isinstance(param_values,
-                                                            tuple) else param_values
+        param_values = param_values._asdict() if isinstance(param_values, tuple) else param_values
         return zip_nested(self._get_parameters(*inputs), param_values, element_types=(ParamInit,))
 
-    def _get_apply(self, sublayer_wrapper=lambda index_path, apply: apply):
-        def apply(param_values, *inputs):
-            def resolve_parameters(index_path, param, param_values):
-                if isinstance(param, ParamInit):
-                    return param_values
+    def apply(self, param_values, *inputs):
+        def resolve_parameters(param, param_values):
+            if isinstance(param, ParamInit):
+                return param_values
 
-                if isinstance(param, InputDependent):
-                    apply = sublayer_wrapper(index_path, param)
-                    return partial(apply, param_values)
+            return param
 
-                return param
-
-            pairs = self._get_param_value_pairs(param_values, *inputs)
-            indexed_pairs = enumerate_nested(pairs, element_types=(ZippedValue, ParamInit))
-            resolved_params = map_nested(lambda pair: resolve_parameters(pair[0], *pair[1]),
-                                         indexed_pairs, element_types=(IndexedValue, ParamInit))
-            fun = self._get_fun(*inputs)
-            return fun(*inputs, **resolved_params)
-
-        return apply
+        pairs = self._get_param_value_pairs(param_values, *inputs)
+        resolved_params = map_nested(lambda pair: resolve_parameters(*pair),
+                                     pairs, element_types=(ZippedValue, ParamInit))
+        fun = self._get_fun(*inputs)
+        return fun(*inputs, **resolved_params)
 
     def _init_params(self, rng, *example_inputs, reuse=None, reuse_only=False):
         if isinstance(self, InputDependent):
             if reuse and self in reuse:
                 return reuse[self]
 
-        def init_param(param, *sub_example_inputs, none_for_submodules=False):
-            if isinstance(param, InputDependent):
-                if none_for_submodules:
-                    return None
+        def init_param(param):
+            if reuse_only:
+                # TODO: include index path to param in message
+                raise ValueError(f'No param value specified for {param}.')
 
-            if _is_parametrized(param):
-                if reuse_only:
-                    if isinstance(param, ParamInit):
-                        # TODO: include index path to param in message
-                        raise ValueError(f'No param value specified for {param}.')
+            nonlocal rng
+            rng, rng_param = random.split(rng)
+            return param.init_param(rng_param, *example_inputs)
 
-                    return param.params_from(values_by_param=reuse)
-
-                nonlocal rng
-                rng, rng_param = random.split(rng)
-                if isinstance(param, ParamInit):
-                    return param.init_param(rng_param, *example_inputs)
-
-                return param.init_params(rng_param, *sub_example_inputs, reuse=reuse)
-
-            if callable(param) and not isinstance(param, InputDependent):
-                return no_params
-
-            assert isinstance(param, np.ndarray)
-            return param
-
-        # TODO refactor: replaced later by tracer, needed for shape information:
         all_param_values = map_nested(
-            lambda param: init_param(param, none_for_submodules=not reuse_only),
-            self._get_parameters(*example_inputs), tuples_to_lists=True, element_types=(ParamInit,))
-
-        if not reuse_only:
-            def traced_submodule_wrapper(index_path, submodule):
-                def traced_apply(wrong_param_values, *inputs):
-                    param_values = init_param(submodule, *inputs)
-                    set_nested_element(all_param_values, index_path=index_path, value=param_values)
-                    return submodule(param_values, *inputs)
-
-                return traced_apply
-
-            apply = self._get_apply(sublayer_wrapper=traced_submodule_wrapper)
-            apply(all_param_values, *example_inputs)
+            lambda param: init_param(param), self._get_parameters(*example_inputs),
+            tuples_to_lists=True, element_types=(ParamInit,))
 
         return self._get_Parameters(*example_inputs)(**all_param_values)
 

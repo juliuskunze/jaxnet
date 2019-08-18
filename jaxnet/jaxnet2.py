@@ -60,18 +60,6 @@ class Layer(jc.Primitive):
 
         self.def_abstract_eval(layer_abstract_eval)
 
-        def layer_batch(batched_args, batch_dims, **params):
-            assert batch_dims == (0,)
-            batched_apply_fun = (
-                lambda params, *batch_inputs:
-                batching.batch(lu.wrap_init(partial(self.apply_fun, params)),
-                               batch_inputs, batch_dims, 0))
-            # Assume init_fun is written to handle batched example inputs
-            batched_layer = Layer(name, init_fun, batched_apply_fun, False)
-            return batched_layer.bind(*batched_args, **params), 0
-
-        batching.primitive_batchers[self] = layer_batch
-
 
 init_rules = {}
 
@@ -165,9 +153,10 @@ def apply_subtrace(master, net_params, *vals):
 
 
 class _resolve:
-    def __init__(self, fun, name=None):
-        self._fun = fun
-        self._name = name if name else fun.__name__
+    def __init__(self, name, init_params, apply, primitive_fun=None):
+        self.layer = Layer(name, init_params, apply) if not primitive_fun else None
+        self._fun = primitive_fun if primitive_fun else self.layer.bind
+        self._name = name
 
     def _init_interpreter(self, rng, jaxpr, consts, freevar_vals, net_params, *args):
         def read(v):
@@ -225,13 +214,14 @@ class _resolve:
 
 
 def _resolve_layer(p):
-    return _resolve(Layer(p._name, p.init_params, p.apply).bind)
+    return _resolve(p._name, p.init_params, p.apply)
 
 
 # TODO merge the following two. Then make param sharing work
 def parametrized(fun):
     """Allow sublayers, but no Param args."""
-    return _resolve_layer(_resolve(fun))
+    r = _resolve(name=fun.__name__, primitive_fun=fun, init_params=None, apply=None)
+    return _resolve(r._name, r.init_params, r.apply)
 
 
 def parametrized_primitive(fun):
