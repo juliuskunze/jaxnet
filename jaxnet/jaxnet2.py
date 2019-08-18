@@ -1,19 +1,16 @@
-"""
-A minimal neural net layers library for JAX, an alternative to Stax. This mini-
-library supports interoperability with lax primitives, layer re-use and
-definition of a neural net as a Python function.
-"""
 import itertools
 from collections import namedtuple
+from inspect import signature
 
+import jax
 from jax import core as jc, linear_util as lu, numpy as np, random
 from jax.abstract_arrays import ShapedArray
-from jax.interpreters import batching, xla, partial_eval as pe
+from jax.interpreters import xla, partial_eval as pe
 from jax.interpreters.batching import get_aval
 from jax.util import unzip2, safe_zip, safe_map, partial, WrapHashably
 
-import jaxnet
-from jaxnet import Param, glorot, randn
+from jaxnet import Param, GeneralParam, glorot, randn
+from jaxnet.tools import zip_nested, map_nested, nested_any, ZippedValue, flatten_nested
 
 zip = safe_zip
 map = safe_map
@@ -42,39 +39,20 @@ def init_layer_counter():
     layer_counter.append(itertools.count())
 
 
-class Layer(jc.Primitive):
-    def __init__(self, name, init_fun, apply_fun, append_id=True):
-        self.init_fun = init_fun
-        self.apply_fun = apply_fun
-        name = name + '_' + str(layer_count()) if append_id else name
-        super(Layer, self).__init__(name)
-
-        def layer_abstract_eval(*avals):
-            akey = ShapedArray((2,), 'uint32')
-
-            def init_and_apply(key, *inputs):
-                params = init_fun(key, *inputs)
-                return apply_fun(params, *inputs)
-
-            return pe.abstract_eval_fun(init_and_apply, akey, *avals)
-
-        self.def_abstract_eval(layer_abstract_eval)
-
-
 init_rules = {}
 
 
 def layer_init(layer, rng, net_params, *inputs):
     if layer.name not in net_params:
-        layer_params = layer.init_fun(rng, *inputs)
+        layer_params = layer.init_params(rng, *inputs)
         net_params[layer.name] = layer_params
-    return layer.apply_fun(net_params[layer.name], *inputs), net_params
+    return layer.apply(net_params[layer.name], *inputs), net_params
 
 
 def get_primitive_init(primitive):
     if primitive in init_rules:
         return init_rules[primitive]
-    elif isinstance(primitive, Layer):
+    elif isinstance(primitive, parametrized):
         return partial(layer_init, primitive)
     else:
         return (lambda _, net_params, *in_vals, **params:
@@ -92,7 +70,7 @@ class ApplyTracer(jc.Tracer):
     __slots__ = ['val', 'net_params']
 
     def __init__(self, trace, net_params, val):
-        self.trace = trace
+        super().__init__(trace)
         self.val = val
         self.net_params = net_params
 
@@ -120,8 +98,8 @@ class ApplyTrace(jc.Trace):
     def process_primitive(self, primitive, tracers, params):
         vals_in, net_params = unzip2((t.val, t.net_params) for t in tracers)
         net_params = merge_params(net_params)
-        val = primitive.apply_fun(net_params[primitive.name], *vals_in) if \
-            isinstance(primitive, Layer) else primitive.bind(*vals_in, **params)
+        val = primitive.apply(net_params[primitive.name], *vals_in) if \
+            isinstance(primitive, parametrized) else primitive.bind(*vals_in, **params)
         return ApplyTracer(self, net_params, val)
 
     def process_call(self, call_primitive, f, tracers, params):
@@ -152,11 +130,127 @@ def apply_subtrace(master, net_params, *vals):
     yield out_tracer.val
 
 
-class _resolve:
-    def __init__(self, name, init_params, apply, primitive_fun=None):
-        self.layer = Layer(name, init_params, apply) if not primitive_fun else None
-        self._fun = primitive_fun if primitive_fun else self.layer.bind
-        self._name = name
+def _is_parameter_collection(x):
+    return nested_any(map_nested(lambda x: isinstance(x, GeneralParam), x, (GeneralParam,)))
+
+
+class parametrized(jc.Primitive):
+    def __init__(self, fun, append_id=True):
+        self._fun = fun
+        self._name = fun.__name__
+
+        self._own_params = {k: v.default for k, v in signature(self._fun).parameters.items()
+                            if _is_parameter_collection(v.default)}
+
+        super().__init__(self._name + '_' + str(layer_count())
+                         if append_id else self._name)
+
+        def layer_abstract_eval(*avals):
+            akey = ShapedArray((2,), 'uint32')
+
+            def init_and_apply(rng, *inputs):
+                params = self.init_params(rng, *inputs)
+                return self.apply(params, *inputs)
+
+            return pe.abstract_eval_fun(init_and_apply, akey, *avals)
+
+        self.def_abstract_eval(layer_abstract_eval)
+
+    def __call__(self, *inputs):
+        return self.bind(*inputs)
+
+    def init_params(self, rng, *inputs):
+        init_layer_counter()
+
+        own_param_values = self._init_own_params(rng, *inputs)
+
+        # TODO allow submodules and param_values at the same time:
+        if any(own_param_values):
+            return namedtuple(self._name, own_param_values.keys())(**own_param_values)
+
+        net_fun = lu.wrap_init(self._fun)
+
+        def pv_like(x):
+            return pe.PartialVal((get_aval(x), jc.unit))
+
+        pvals = map(pv_like, inputs)
+        jaxpr, _, consts = pe.trace_to_jaxpr(net_fun, pvals)
+
+        param_values = own_param_values
+        submodule_param_values = self._init_interpreter(rng, jaxpr, consts, [], {}, *inputs)
+        assert param_values.keys().isdisjoint(submodule_param_values.keys())
+        param_values.update(submodule_param_values)
+
+        Parameters = namedtuple(self._name, param_values.keys())
+        return Parameters(**param_values)
+
+    def apply(self, params, *inputs):
+        # TODO allow submodules and params at the same time:
+        if len(self._own_params) > 0:
+            def resolve_params(param, param_values):
+                if isinstance(param, GeneralParam):
+                    return param_values
+
+                return param
+
+            pairs = self._get_param_value_pairs(params)
+            resolved_params = map_nested(lambda pair: resolve_params(*pair),
+                                         pairs, element_types=(ZippedValue, GeneralParam))
+            return self._fun(*inputs, **resolved_params)
+
+        init_layer_counter()
+        return apply_transform(lu.wrap_init(self._fun), params).call_wrapped(inputs)
+
+    def _get_param_value_pairs(self, param_values):
+        param_values = param_values._asdict() if isinstance(param_values, tuple) else param_values
+        return zip_nested(self._own_params, param_values, element_types=(GeneralParam,))
+
+    def _init_own_params(self, rng, *example_inputs, reuse=None, reuse_only=False):
+        if isinstance(self, parametrized):
+            if reuse and self in reuse:
+                return reuse[self]
+
+        def init_param(param):
+            if reuse_only:
+                # TODO: include index path to param in message
+                raise ValueError(f'No param value specified for {param}.')
+
+            nonlocal rng
+            rng, rng_param = random.split(rng)
+            return param.init_param(rng_param, *example_inputs)
+
+        all_param_values = map_nested(
+            lambda param: init_param(param), self._own_params,
+            tuples_to_lists=True, element_types=(GeneralParam,))
+
+        return all_param_values
+
+    def __str__(self):
+        return f'{self._name}({id(self)})'
+
+    def _expand_reuse_dict(self, reuse):
+        r = dict()
+
+        for param, value in reuse.items():
+            r.update({param: value})
+
+            if isinstance(param, parametrized):
+                pairs = param._get_param_value_pairs(value)
+                pairs = flatten_nested(pairs, (ZippedValue,))
+                values_by_submodule = {p: v for (p, v) in pairs}
+
+                r.update(param._expand_reuse_dict(values_by_submodule))
+
+        return r
+
+    def params_from(self, values_by_param):
+        # TODO: optimization wrong, duplicate values, needs param adapter
+        values_by_param = self._expand_reuse_dict(values_by_param)
+        return self._init_own_params(None, reuse=values_by_param, reuse_only=True)
+
+    def apply_from(self, reuse, *inputs, jit=False):
+        params = self.params_from(values_by_param=reuse)
+        return (jax.jit(self.apply) if jit else self.apply)(params, *inputs)
 
     def _init_interpreter(self, rng, jaxpr, consts, freevar_vals, net_params, *args):
         def read(v):
@@ -191,48 +285,13 @@ class _resolve:
             outvals = list(ans) if eqn.destructure else [ans]
             map(write, eqn.outvars, outvals)
 
-        Params = namedtuple(self._name, sorted(net_params))
-        return Params(**net_params)
-
-    def init_params(self, rng, *inputs):
-        init_layer_counter()
-        net_fun = lu.wrap_init(self._fun)
-
-        def pv_like(x):
-            return pe.PartialVal((get_aval(x), jc.unit))
-
-        pvals = map(pv_like, inputs)
-        jaxpr, _, consts = pe.trace_to_jaxpr(net_fun, pvals)
-        return self._init_interpreter(rng, jaxpr, consts, [], {}, *inputs)
-
-    def apply(self, params, *inputs):
-        init_layer_counter()
-        return apply_transform(lu.wrap_init(self._fun), params).call_wrapped(inputs)
-
-    def __call__(self, *inputs):
-        return self._fun(*inputs)
-
-
-def _resolve_layer(p):
-    return _resolve(p._name, p.init_params, p.apply)
-
-
-# TODO merge the following two. Then make param sharing work
-def parametrized(fun):
-    """Allow sublayers, but no Param args."""
-    r = _resolve(name=fun.__name__, primitive_fun=fun, init_params=None, apply=None)
-    return _resolve(r._name, r.init_params, r.apply)
-
-
-def parametrized_primitive(fun):
-    """Allows Param args, but no sublayers."""
-    return _resolve_layer(jaxnet.parametrized(fun))
+        return net_params
 
 
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     """Layer constructor function for a dense (fully-connected) layer."""
 
-    @parametrized_primitive
+    @parametrized
     def dense(inputs,
               kernel=Param(lambda inputs: (inputs.shape[-1], out_dim), kernel_init),
               bias=Param(lambda _: (out_dim,), bias_init)):

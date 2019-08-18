@@ -1,101 +1,23 @@
 import functools
 import itertools
 from collections import namedtuple
-from inspect import signature
 from pathlib import Path
 
 import dill
-import jax
 import numpy as onp
-from jax import numpy as np, random, partial
+from jax import numpy as np, random
 from jax.lax import lax, scan
 from jax.scipy.special import logsumexp, expit
-
-from jaxnet.tools import zip_nested, map_nested, nested_any, ZippedValue, flatten_nested
 
 GeneralParam = namedtuple('Param', ('init_param',))
 
 
-def Param(get_shape, init):
-    return GeneralParam(init_param=lambda rng, *example_inputs: init(rng, get_shape(*example_inputs)))
+def Param(get_shape, init): return GeneralParam(
+    init_param=lambda rng, *example_inputs: init(rng, get_shape(*example_inputs)))
 
 
-def _is_parameter_collection(x):
-    return nested_any(map_nested(lambda x: isinstance(x, GeneralParam), x, element_types=(GeneralParam,)))
-
-
-class parametrized:
-    def __init__(self, fun, name=None):
-        self._fun = fun
-        self._name = name if name else fun.__name__
-        self.init_params = partial(self._init_params, reuse_only=False)
-        self._params = {k: v.default for k, v in signature(self._fun).parameters.items()
-                        if _is_parameter_collection(v.default)}
-
-        self.Parameters = namedtuple(self._name, self._params.keys())
-
-    def _get_param_value_pairs(self, param_values):
-        param_values = param_values._asdict() if isinstance(param_values, tuple) else param_values
-        return zip_nested(self._params, param_values, element_types=(GeneralParam,))
-
-    def apply(self, param_values, *inputs):
-        def resolve_parameters(param, param_values):
-            if isinstance(param, GeneralParam):
-                return param_values
-
-            return param
-
-        pairs = self._get_param_value_pairs(param_values)
-        resolved_params = map_nested(lambda pair: resolve_parameters(*pair),
-                                     pairs, element_types=(ZippedValue, GeneralParam))
-        return self._fun(*inputs, **resolved_params)
-
-    def _init_params(self, rng, *example_inputs, reuse=None, reuse_only=False):
-        if isinstance(self, parametrized):
-            if reuse and self in reuse:
-                return reuse[self]
-
-        def init_param(param):
-            if reuse_only:
-                # TODO: include index path to param in message
-                raise ValueError(f'No param value specified for {param}.')
-
-            nonlocal rng
-            rng, rng_param = random.split(rng)
-            return param.init_param(rng_param, *example_inputs)
-
-        all_param_values = map_nested(
-            lambda param: init_param(param), self._params,
-            tuples_to_lists=True, element_types=(GeneralParam,))
-
-        return self.Parameters(**all_param_values)
-
-    def __str__(self):
-        return f'{self._name}({id(self)})'
-
-    def _expand_reuse_dict(self, reuse):
-        r = dict()
-
-        for param, value in reuse.items():
-            r.update({param: value})
-
-            if isinstance(param, parametrized):
-                pairs = param._get_param_value_pairs(value)
-                pairs = flatten_nested(pairs, (ZippedValue,))
-                values_by_submodule = {p: v for (p, v) in pairs}
-
-                r.update(param._expand_reuse_dict(values_by_submodule))
-
-        return r
-
-    def params_from(self, values_by_param):
-        # TODO: optimization wrong, duplicate values, needs param adapter
-        values_by_param = self._expand_reuse_dict(values_by_param)
-        return self._init_params(None, reuse=values_by_param, reuse_only=True)
-
-    def apply_from(self, reuse, *inputs, jit=False):
-        params = self.params_from(values_by_param=reuse)
-        return (jax.jit(self.apply) if jit else self.apply)(params, *inputs)
+class parametrized():
+    pass
 
 
 def relu(x):

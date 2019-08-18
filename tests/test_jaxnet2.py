@@ -3,8 +3,7 @@ from jax import numpy as np, jit
 from jax.random import PRNGKey
 
 from jaxnet import zeros, relu, Param
-from jaxnet.jaxnet2 import Dense, Sequential, parametrized, init_layer_counter, \
-    parametrized_primitive
+from jaxnet.jaxnet2 import Dense, Sequential, parametrized, init_layer_counter
 from tests.test_jaxnet import random_inputs
 
 
@@ -31,10 +30,6 @@ def assert_params_equal(p, p_):
     else:
         for e, e_ in zip(p, p_):
             assert_params_equal(e, e_)
-
-
-def assert_params_equal_except_1_too_deep(p, p_):
-    return assert_params_equal((p,), p_)  # TODO should be p instead of (p,), nesting 1 too deep
 
 
 def test_external_submodule():
@@ -130,7 +125,7 @@ def test_external_submodule2():
     inputs = np.zeros((1, 2))
 
     params = net.init_params(PRNGKey(0), inputs)
-    assert_params_equal_except_1_too_deep(((np.zeros((2, 2)), np.zeros(2)),), params)
+    assert_params_equal(((np.zeros((2, 2)), np.zeros(2)),), params)
 
     out = net.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
@@ -144,7 +139,7 @@ def test_external_sequential_submodule():
     inputs = np.zeros((1, 2))
 
     params = layer.init_params(PRNGKey(0), inputs)
-    assert_params_equal_except_1_too_deep(((np.zeros((2, 2)), np.zeros(2)),), params)
+    assert_params_equal(((np.zeros((2, 2)), np.zeros(2)),), params)
 
     out = layer.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
@@ -160,7 +155,7 @@ def test_internal_param_sharing():
 
     inputs = np.zeros((1, 2))
     params = shared_net.init_params(PRNGKey(0), inputs)
-    assert_params_equal_except_1_too_deep(((np.zeros((2, 2)), np.zeros(2),),), params)
+    assert_params_equal(((np.zeros((2, 2)), np.zeros(2),),), params)
 
     out = shared_net.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
@@ -178,7 +173,7 @@ def test_internal_param_sharing2():
     inputs = np.zeros((1, 2))
     params = shared_net.init_params(PRNGKey(0), inputs)
 
-    assert_params_equal_except_1_too_deep((((np.zeros((2, 2)), np.zeros(2)),),), params)
+    assert_params_equal((((np.zeros((2, 2)), np.zeros(2)),),), params)
     out = shared_net.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
 
@@ -206,7 +201,7 @@ def test_external_param_sharing():
 
     inputs = np.zeros((1, 2))
     params = shared_net.init_params(PRNGKey(0), inputs)
-    assert_params_equal_except_1_too_deep(((np.zeros((2, 2)), np.zeros(2)),), params)
+    assert_params_equal(((np.zeros((2, 2)), np.zeros(2)),), params)
 
     # TODO repair external parameter sharing
     # out = shared_net(params, inputs)
@@ -244,7 +239,7 @@ def test_no_params():
 
     inputs = np.zeros((1, 3))
     params = double.init_params(PRNGKey(0), inputs)
-    assert_params_equal_except_1_too_deep((), params)
+    assert_params_equal((), params)
 
     out = double.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 3)), out)
@@ -253,33 +248,14 @@ def test_no_params():
     assert np.array_equal(out, out_)
 
 
-@pytest.mark.skip('WIP')
 def test_params():
-    @parametrized
-    def dense(inputs,
-              kernel=Param(lambda inputs: (inputs.shape[-1], 2), zeros),
-              bias=Param(lambda _: (2,), zeros)):
-        return np.dot(inputs, kernel) + bias
-
-    inputs = np.zeros((1, 3))
-    params = dense.init_params(PRNGKey(0), inputs)
-    assert_params_equal_except_1_too_deep((np.zeros((3, 2)), np.zeros(2)), params)
-    name = str(dense)
-    # TODO assert name.startswith('dense') and 'kernel' in name and 'bias' in name
-
-    out = dense.apply(params, inputs)
-    assert np.array_equal(np.zeros((1, 2)), out)
-
-    out_ = jit(dense.apply)(params, inputs)
-    assert np.array_equal(out, out_)
-
-
-def test_params_primitive():
     net = Dense(2, kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 3))
 
     params = net.init_params(PRNGKey(0), inputs)
-    assert_params_equal_except_1_too_deep((np.zeros((3, 2)), np.zeros(2)), params)
+    assert_params_equal((np.zeros((3, 2)), np.zeros(2)), params)
+    name = str(net)
+    # TODO assert name.startswith('dense') and 'kernel' in name and 'bias' in name
 
     out = net.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
@@ -289,7 +265,7 @@ def test_params_primitive():
 
 
 def test_params_list():
-    @parametrized_primitive
+    @parametrized
     def dense(inputs,
               params=(Param(lambda inputs: (inputs.shape[-1], 2), zeros),
                       Param(lambda _: (2,), zeros))):
@@ -299,7 +275,7 @@ def test_params_list():
     inputs = np.zeros((1, 3))
 
     params = dense.init_params(PRNGKey(0), inputs)
-    assert_params_equal_except_1_too_deep(((np.zeros((3, 2)), np.zeros(2)),), params)
+    assert_params_equal(((np.zeros((3, 2)), np.zeros(2)),), params)
     name = str(dense)
     # TODO assert name.startswith('dense') and 'kernel' in name and 'bias' in name
 
@@ -311,7 +287,7 @@ def test_params_list():
 
 
 def test_params_dict():
-    @parametrized_primitive
+    @parametrized
     def dense(inputs,
               params={'kernel': Param(lambda inputs: (inputs.shape[-1], 2), zeros),
                       'bias': Param(lambda _: (2,), zeros)}):
@@ -320,8 +296,29 @@ def test_params_dict():
     inputs = np.zeros((1, 3))
 
     params = dense.init_params(PRNGKey(0), inputs)
-    assert_params_equal_except_1_too_deep(({'kernel': np.zeros((3, 2)), 'bias': np.zeros(2)},),
-                                          params)
+    assert_params_equal(({'kernel': np.zeros((3, 2)), 'bias': np.zeros(2)},), params)
+
+    out = dense.apply(params, inputs)
+    assert np.array_equal(np.zeros((1, 2)), out)
+
+    out_ = jit(dense.apply)(params, inputs)
+    assert np.array_equal(out, out_)
+
+
+@pytest.mark.skip('WIP')
+def test_param_and_submodule_mixed():
+    @parametrized
+    def linear_map(inputs, kernel=Param(lambda inputs: (inputs.shape[-1], 2), zeros)):
+        return np.dot(inputs, kernel)
+
+    @parametrized
+    def dense(inputs, bias=Param(lambda _: (2,), zeros)):
+        return linear_map(inputs) + bias
+
+    inputs = np.zeros((1, 3))
+
+    params = dense.init_params(PRNGKey(0), inputs)
+    assert_params_equal(((np.zeros((3, 2)), np.zeros(2)),), params)
 
     out = dense.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
