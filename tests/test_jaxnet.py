@@ -192,6 +192,7 @@ def test_internal_param_sharing2():
     out = shared_net.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
 
+
 @pytest.mark.skip('TODO repair naming scheme, fix reuse')
 def test_no_reuse():
     inputs = np.zeros((1, 2))
@@ -203,8 +204,8 @@ def test_no_reuse():
     net2 = Sequential(layer, Dense(3))
     p2 = net2.init_params(PRNGKey(1), inputs)
 
-    assert p1[0][0].shape == p2[0][0].shape
-    assert p1[0][1].shape == p2[0][1].shape
+    assert p1[0].kernel.shape == p2[0].kernel.shape
+    assert p1[0].bias.shape == p2[0].bias.shape
     assert not np.array_equal(p1[0][0], p2[0][0])
     assert not np.array_equal(p1[0][1], p2[0][1])
 
@@ -357,7 +358,7 @@ def test_join_params():
     layer_params = layer.init_params(PRNGKey(0), inputs)
 
     params_ = net.params_from({layer: layer_params}, inputs)
-    assert_params_equal((layer_params, ), params_)
+    assert_params_equal((layer_params,), params_)
 
     out = net.apply(params_, inputs)
 
@@ -434,6 +435,7 @@ def test_join_params_top_level():
 
     out_ = net.apply_from({net: params}, inputs, jit=True)
     assert np.array_equal(out, out_)
+
 
 @pytest.mark.skip('TODO')
 def test_join_params_shared_submodules():
