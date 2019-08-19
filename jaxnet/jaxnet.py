@@ -9,6 +9,7 @@ import jax
 import numpy as onp
 from jax import core as jc, linear_util as lu, numpy as np, random
 from jax.abstract_arrays import ShapedArray
+from jax.api_util import flatten_fun
 from jax.interpreters import xla, partial_eval as pe
 from jax.interpreters.batching import get_aval
 from jax.lax import lax, scan
@@ -186,11 +187,13 @@ class parametrized(jc.Primitive):
             return namedtuple(self._name, own_param_values.keys())(**own_param_values)
 
         net_fun = lu.wrap_init(self._fun)
+        jax_inputs, in_tree = jax.tree_flatten((inputs, {}))
+        net_fun, _ = flatten_fun(net_fun, in_tree)
 
         def pv_like(x):
             return pe.PartialVal((get_aval(x), jc.unit))
 
-        pvals = map(pv_like, inputs)
+        pvals = map(pv_like, jax_inputs)
         jaxpr, _, consts = pe.trace_to_jaxpr(net_fun, pvals)
 
         param_values = own_param_values
@@ -224,7 +227,11 @@ class parametrized(jc.Primitive):
             return self._fun(*inputs, **resolved_params)
 
         init_layer_counter()
-        return apply_transform(lu.wrap_init(self._fun), params).call_wrapped(inputs)
+        net_fun = lu.wrap_init(self._fun)
+        jax_inputs, in_tree = jax.tree_flatten((inputs, {}))
+        net_fun, out_tree = flatten_fun(net_fun, in_tree)
+        jax_out = apply_transform(net_fun, params).call_wrapped(inputs)
+        return jax.build_tree(out_tree(), jax_out)
 
     def _get_param_value_pairs(self, param_values):
         param_values = param_values._asdict() if isinstance(param_values, tuple) else param_values
