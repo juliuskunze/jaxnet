@@ -1,8 +1,6 @@
-# Alternative API designs
+# API Design
 
-This document compares some alternative functional API designs for defining custom modules to JAXnet's current implementation.
-
-## Alternative: Defining parameters and submodules inline
+Submodules are defined inline and parameters via default arguments:
 
 ```python
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
@@ -24,6 +22,35 @@ def Sequential(*layers):
     return sequential
 ```
 
+Some key design features:
+
+**JAXnet allows step-by-step debugging.**
+
+JAXnet invokes the user's function (when `jit` is not used), allowing step-by-step debugging.
+
+**JAXnet does not rely on naming modules and parameter values.**
+
+- `init_params` identifies shared modules by object id / submodule path. 
+- `apply` resolves submodule parameter values via nesting structure.
+- `params_from` allows access to parameter values of any submodule.
+
+Since naming modules is not required:
+- We don't need global state for unique name generation.
+- Parameter sharing cannot happen accidentally due to name clashes. 
+  It can only be achieved by reusing a module object.
+
+Naming parameter values is not required.
+- Although nested `tuple`s would suffice, `namedtuple`s can still be used to increase readability. 
+- Since there are no constraints on the naming scheme, and it can in fact be optimized solely for readability:
+    - Weight names can be determinstic for a given model.
+    - Names will not have to be consistent between `init_params` calls of different networks reusing the same weights, allowing to avoid name clashes.
+
+In the following, we discuss and compare some alternative functional API designs.
+
+## Alternative: Define submodules via default arguments
+
+TODO
+
 Advantages:
 - Requires less indirection.
 - Does not require special semantics for default arguments.
@@ -33,8 +60,6 @@ Downsides:
 - Naming of parameter values would be more arbitrary since no parameter names are associated.
 - Potentially large implementation complexity, requires direct use of JAX' tracing / function transformation capabilities.
 
-JAXnet invokes the user's function (when `jit` is not used), allowing step-by-step debugging.
-This could also be achieved in this alternative using initial-style function transformation.
 
 ## Alternative: Using attributes instead of default values
 
