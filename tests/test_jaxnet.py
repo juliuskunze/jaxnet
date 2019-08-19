@@ -193,7 +193,7 @@ def test_internal_param_sharing2():
     assert np.array_equal(np.zeros((1, 2)), out)
 
 @pytest.mark.skip('TODO repair naming scheme, fix reuse')
-def test_multiple_init_params_calls():
+def test_no_reuse():
     inputs = np.zeros((1, 2))
 
     layer = Dense(5)
@@ -203,13 +203,12 @@ def test_multiple_init_params_calls():
     net2 = Sequential(layer, Dense(3))
     p2 = net2.init_params(PRNGKey(1), inputs)
 
-    assert p1[0][0][0].shape == p2[0][0][0].shape
-    assert p1[0][0][1].shape == p2[0][0][1].shape
-    not np.array_equal(p1[0][0][0], p2[0][0][0])
-    not np.array_equal(p1[0][0][1], p2[0][0][1])
+    assert p1[0][0].shape == p2[0][0].shape
+    assert p1[0][1].shape == p2[0][1].shape
+    assert not np.array_equal(p1[0][0], p2[0][0])
+    assert not np.array_equal(p1[0][1], p2[0][1])
 
 
-@pytest.mark.skip('TODO')
 def test_external_param_sharing():
     layer = Dense(2, zeros, zeros)
     shared_net = Sequential(layer, layer)
@@ -218,14 +217,14 @@ def test_external_param_sharing():
     params = shared_net.init_params(PRNGKey(0), inputs)
     assert_params_equal(((np.zeros((2, 2)), np.zeros(2)),), params)
 
-    out = shared_net(params, inputs)
+    out = shared_net.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
 
-    out = jit(shared_net)(params, inputs)
+    out = jit(shared_net.apply)(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
 
 
-def test_init_params_submodule_reuse():
+def test_submodule_reuse():
     inputs = np.zeros((1, 2))
 
     layer = Dense(5)
@@ -235,14 +234,15 @@ def test_init_params_submodule_reuse():
     layer_params = layer.init_params(PRNGKey(0), inputs)
     net1_params = net1.init_params(PRNGKey(1), inputs, reuse={layer: layer_params})
     net2_params = net2.init_params(PRNGKey(2), inputs, reuse={layer: layer_params})
-    assert_dense_params_equal(layer_params, net1_params[0])
-    assert_dense_params_equal(layer_params, net2_params[0])
 
     out1 = net1.apply(net1_params, inputs)
     assert out1.shape == (1, 2)
 
     out2 = net2.apply(net2_params, inputs)
     assert out2.shape == (1, 3)
+
+    assert_dense_params_equal(layer_params, net1_params[0])
+    assert_dense_params_equal(layer_params, net2_params[0])
 
 
 def test_no_params():
@@ -337,8 +337,7 @@ def test_param_and_submodule_mixed():
     assert np.array_equal(out, out_)
 
 
-@pytest.mark.skip('TODO')
-def test_init_params_submodule_reuse_top_level():
+def test_submodule_reuse_top_level():
     net = Dense(2)
     inputs = np.zeros((1, 3))
     params = net.init_params(PRNGKey(0), inputs)
@@ -351,23 +350,16 @@ def test_init_params_submodule_reuse_top_level():
     assert np.array_equal(out, out_)
 
 
-@pytest.mark.skip('TODO')
 def test_join_params():
     layer = Dense(2)
     net = Sequential(layer, relu)
     inputs = np.zeros((1, 3))
     layer_params = layer.init_params(PRNGKey(0), inputs)
 
-    params = net._Parameters((layer_params, ()))
-    out = net(params, inputs)
+    params_ = net.params_from({layer: layer_params}, inputs)
+    assert_params_equal((layer_params, ), params_)
 
-    params_ = net.params_from({layer: layer_params})
-    assert len(params_) == 1
-    assert_dense_params_equal(layer_params, params_.layers[0])
-    assert params_.layers[1] == ()
-
-    out_ = net(params_, inputs)
-    assert np.array_equal(out, out_)
+    out = net.apply(params_, inputs)
 
     out_ = net.apply_from({layer: layer_params}, inputs)
     assert np.array_equal(out, out_)
@@ -426,16 +418,15 @@ def test_access_submodules():
     assert out.shape == out_.shape
 
 
-@pytest.mark.skip('TODO')
 def test_join_params_top_level():
     net = Dense(2)
     inputs = np.zeros((1, 3))
     params = net.init_params(PRNGKey(0), inputs)
-    out = net(params, inputs)
+    out = net.apply(params, inputs)
 
-    params_ = net.params_from({net: params})
+    params_ = net.params_from({net: params}, inputs)
     assert_dense_params_equal(params, params_)
-    out_ = net(params_, inputs)
+    out_ = net.apply(params_, inputs)
     assert np.array_equal(out, out_)
 
     out_ = net.apply_from({net: params}, inputs)
@@ -444,30 +435,29 @@ def test_join_params_top_level():
     out_ = net.apply_from({net: params}, inputs, jit=True)
     assert np.array_equal(out, out_)
 
-
 @pytest.mark.skip('TODO')
 def test_join_params_shared_submodules():
     sublayer = Dense(2)
-    part1 = Sequential(sublayer, relu)
-    part2 = Sequential(sublayer, np.sum)
+    a = Sequential(sublayer, relu)
+    b = Sequential(sublayer, np.sum)
 
     @parametrized
-    def net(inputs, part1=part1, part2=part2):
-        return part1(inputs), part2(inputs)
+    def net(inputs):
+        return a(inputs), b(inputs)
 
     inputs = np.zeros((1, 3))
-    net1_params = part1.init_params(PRNGKey(0), inputs)
-    out = part1(net1_params, inputs)
+    a_params = a.init_params(PRNGKey(0), inputs)
+    out = a.apply(a_params, inputs)
 
-    params = net.params_from({part1: net1_params})
-    assert_params_equal(net1_params.layers[0], params.part2.layers[0])
-    out_ = net(params, inputs)
+    params = net.params_from({a: a_params}, inputs)
+    assert_params_equal(a_params[0], params[0][0])
+    out_ = net.apply(params, inputs)
     assert out.shape == out_[0].shape
 
-    out_ = net.apply_from({part1: net1_params}, inputs)
+    out_ = net.apply_from({a: a_params}, inputs)
     assert out.shape == out_[0].shape
 
-    out_ = net.apply_from({part1: net1_params}, inputs, jit=True)
+    out_ = net.apply_from({a: a_params}, inputs, jit=True)
     assert out.shape == out_[0].shape
 
 
@@ -533,7 +523,6 @@ def test_Conv1DTranspose_runs(channels, filter_shape, padding, strides, input_sh
     convt.apply(params, inputs)
 
 
-@pytest.mark.skip('TODO')
 def test_Conv_flatten_shape():
     conv = Conv(2, filter_shape=(3, 3), padding='SAME', kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 5, 5, 2))
@@ -633,9 +622,9 @@ def test_Rnn_net_shape():
     assert len(params.layers[0]) == 1
     cell = params.layers[0].cell
     assert len(cell) == 3
-    assert np.array_equal(np.zeros((7, 3)), cell.update_params)
-    assert np.array_equal(np.zeros((7, 3)), cell.reset_params)
-    assert np.array_equal(np.zeros((7, 3)), cell.compute_params)
+    assert np.array_equal(np.zeros((7, 3)), cell.update_kernel)
+    assert np.array_equal(np.zeros((7, 3)), cell.reset_kernel)
+    assert np.array_equal(np.zeros((7, 3)), cell.compute_kernel)
 
     out = net.apply(params, inputs)
     assert np.array_equal(.25 * np.ones((1, 5, 4)), out)
@@ -675,7 +664,7 @@ def test_BatchNorm_shape_NCHW(center, scale):
         assert params.gamma.shape == (5,)
 
 
-@pytest.mark.skip('TODO')
+@pytest.mark.skip('TODO repair naming scheme, fix reuse')
 def test_reuse_example():
     inputs = np.zeros((1, 2))
     net = Dense(5)

@@ -12,6 +12,7 @@ from jax.abstract_arrays import ShapedArray
 from jax.interpreters import xla, partial_eval as pe
 from jax.interpreters.batching import get_aval
 from jax.lax import lax, scan
+from jax.random import PRNGKey
 from jax.scipy.special import logsumexp, expit
 from jax.util import unzip2, safe_zip, safe_map, partial, WrapHashably
 
@@ -157,12 +158,11 @@ class parametrized(jc.Primitive):
                          if append_id else self._name)
 
         def layer_abstract_eval(*avals):
-            akey = ShapedArray((2,), 'uint32')
-
             def init_and_apply(rng, *inputs):
                 params = self.init_params(rng, *inputs)
                 return self.apply(params, *inputs)
 
+            akey = ShapedArray((2,), 'uint32')
             return pe.abstract_eval_fun(init_and_apply, akey, *avals)
 
         self.def_abstract_eval(layer_abstract_eval)
@@ -170,10 +170,16 @@ class parametrized(jc.Primitive):
     def __call__(self, *inputs):
         return self.bind(*inputs)
 
-    def init_params(self, rng, *inputs, reuse=None):
+    def init_params(self, rng, *inputs, reuse=None, reuse_only=False):
         init_layer_counter()
 
-        own_param_values = self._init_own_params(rng, *inputs)
+        if reuse:
+            reuse_by_name = {module.name: value for module, value in reuse.items()}
+
+            if self.name in reuse_by_name:
+                return reuse_by_name[self.name]
+
+        own_param_values = self._init_own_params(rng, *inputs, reuse_only=reuse_only)
 
         # TODO allow submodules and param_values at the same time:
         if any(own_param_values):
@@ -189,6 +195,14 @@ class parametrized(jc.Primitive):
 
         param_values = own_param_values
         submodule_param_values = self._init_interpreter(rng, jaxpr, consts, [], {}, *inputs)
+        if reuse:
+            for submodule in submodule_param_values.keys():
+                if submodule in reuse_by_name:
+                    submodule_param_values[submodule] = reuse_by_name[submodule]
+                else:
+                    if reuse_only:
+                        raise ValueError(f'No values specified for "{submodule}".')
+
         assert param_values.keys().isdisjoint(submodule_param_values.keys())
         param_values.update(submodule_param_values)
 
@@ -254,14 +268,14 @@ class parametrized(jc.Primitive):
 
         return r
 
-    def params_from(self, values_by_param):
+    def params_from(self, values_by_param, *example_inputs):
         # TODO: optimization wrong, duplicate values, needs param adapter
-        values_by_param = self._expand_reuse_dict(values_by_param)
-        return self._init_own_params(None, reuse=values_by_param, reuse_only=True)
+        # values_by_param = self._expand_reuse_dict(values_by_param)
+        return self.init_params(PRNGKey(0), *example_inputs, reuse=values_by_param, reuse_only=True)
 
-    def apply_from(self, reuse, *inputs, jit=False):
-        params = self.params_from(values_by_param=reuse)
-        return (jax.jit(self.apply) if jit else self.apply)(params, *inputs)
+    def apply_from(self, reuse, *example_inputs, jit=False):
+        params = self.params_from(reuse, *example_inputs)
+        return (jax.jit(self.apply) if jit else self.apply)(params, *example_inputs)
 
     def _init_interpreter(self, rng, jaxpr, consts, freevar_vals, net_params, *args):
         def read(v):
@@ -297,6 +311,12 @@ class parametrized(jc.Primitive):
             map(write, eqn.outvars, outvals)
 
         return net_params
+
+    def __eq__(self, obj):
+        return isinstance(obj, parametrized) and self.name == obj.name
+
+    def __hash__(self):
+        return hash(self.name)
 
 
 def relu(x):
@@ -402,9 +422,8 @@ def Sequential(*layers):
     return sequential
 
 
-def GeneralConv(dimension_numbers, out_chan, filter_shape,
-                strides=None, padding='VALID', kernel_init=None, bias_init=randn(1e-6),
-                dilation=None):
+def GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None, padding='VALID',
+                kernel_init=None, bias_init=randn(1e-6), dilation=None):
     """Layer construction function for a general convolution layer."""
     lhs_spec, rhs_spec, out_spec = dimension_numbers
     one = (1,) * len(filter_shape)
@@ -508,14 +527,14 @@ def GRUCell(carry_size, param_init):
 
     @parametrized
     def gru_cell(carry, x,
-                 update_params=param(),
-                 reset_params=param(),
-                 compute_params=param()):
+                 update_kernel=param(),
+                 reset_kernel=param(),
+                 compute_kernel=param()):
         both = np.concatenate((x, carry), axis=1)
-        update = sigmoid(np.dot(both, update_params))
-        reset = sigmoid(np.dot(both, reset_params))
+        update = sigmoid(np.dot(both, update_kernel))
+        reset = sigmoid(np.dot(both, reset_kernel))
         both_reset_carry = np.concatenate((x, reset * carry), axis=1)
-        compute = np.tanh(np.dot(both_reset_carry, compute_params))
+        compute = np.tanh(np.dot(both_reset_carry, compute_kernel))
         out = update * compute + (1 - update) * carry
         return out, out
 

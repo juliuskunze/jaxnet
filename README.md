@@ -7,6 +7,7 @@ Different from popular neural net libraries, it is completely functional:
 - No global random key
 
 **This is an early version. Expect breaking changes!** Install with
+
 ```
 pip install jaxnet
 ```
@@ -21,6 +22,7 @@ See JAXnet in action in these demos:
 [WaveNet](https://colab.research.google.com/drive/111cKRfwYX4YFuPH3FF4V46XLfsPG1icZ).
 
 ## Overview
+
 ```python
 from jaxnet import *
 
@@ -28,6 +30,7 @@ net = Sequential(Conv(2, (3, 3)), relu, flatten, Dense(4), softmax)
 ```
 creates a neural net model.
 To initialize parameters, call `init_params` with a random key and example inputs:
+
 ```python
 from jax import numpy as np, jit
 from jax.random import PRNGKey
@@ -39,6 +42,7 @@ print(params.layers[3].bias) # [0.00212132 0.01169001 0.00331698 0.00460713]
 ```
 
 Invoke the network with:
+
 ```python
 output = net(params, inputs) # use "jit(net)(params, inputs)" for acceleration
 ```
@@ -46,6 +50,7 @@ output = net(params, inputs) # use "jit(net)(params, inputs)" for acceleration
 ## Defining modules
 
 Modules are functions decorated with `@parametrized`, with parameters defined through default values:
+
 ```python
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parametrized
@@ -75,6 +80,7 @@ def encode(input,
 ```
 
 Use many modules at once with collections:
+
 ```python
 def Sequential(*layers):
     @parametrized
@@ -89,6 +95,7 @@ def Sequential(*layers):
 Nested `tuple`s/`list`s/`dict`s of modules work. The same is true for `Param`s.
 
 Using parameter-free functions is seamless:
+
 ```python
 def relu(x):
     return np.maximum(x, 0)
