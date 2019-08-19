@@ -1,6 +1,6 @@
 import functools
 import itertools
-from collections import namedtuple
+from collections import namedtuple, OrderedDict, Counter, defaultdict
 from inspect import signature
 from pathlib import Path
 
@@ -32,59 +32,20 @@ def to_dict(params):
     return params if isinstance(params, dict) else params._asdict()
 
 
-def merge_params(params):
-    if len(params) == 0: return {}
-
-    p = to_dict(params[0])
-    for param in params[1:]:
-        p.update(to_dict(param))
-    return p
+def call_init(primitive, rng, module_params, f, *in_vals, **params):
+    return primitive.bind(f, *in_vals, **params), module_params
 
 
-# Crude way to auto-generate unique layer names
-layer_counter = [itertools.count()]
-layer_count = lambda: next(layer_counter[0])
-
-
-def init_layer_counter():
-    layer_counter.pop()
-    layer_counter.append(itertools.count())
-
-
-init_rules = {}
-
-
-def layer_init(layer, rng, net_params, *inputs):
-    if layer.name not in net_params:
-        layer_params = layer.init_params(rng, *inputs)
-        net_params[layer.name] = layer_params
-    return layer.apply(net_params[layer.name], *inputs), net_params
-
-
-def get_primitive_init(primitive):
-    if primitive in init_rules:
-        return init_rules[primitive]
-    elif isinstance(primitive, parametrized):
-        return partial(layer_init, primitive)
-    else:
-        return (lambda _, net_params, *in_vals, **params:
-                (primitive.bind(*in_vals, **params), net_params))
-
-
-def call_init(primitive, rng, net_params, f, *in_vals, **params):
-    return primitive.bind(f, *in_vals, **params), net_params
-
-
-init_rules[xla.xla_call_p] = partial(call_init, xla.xla_call_p)
+init_rules = {xla.xla_call_p: partial(call_init, xla.xla_call_p)}
 
 
 class ApplyTracer(jc.Tracer):
-    __slots__ = ['val', 'net_params']
+    __slots__ = ['val', 'submodule_params_iter']
 
-    def __init__(self, trace, net_params, val):
+    def __init__(self, trace, submodule_params_iter, val):
         super().__init__(trace)
         self.val = val
-        self.net_params = net_params
+        self.submodule_params_iter = submodule_params_iter
 
     @property
     def aval(self):
@@ -95,6 +56,37 @@ class ApplyTracer(jc.Tracer):
 
     def full_lower(self):
         return self
+
+
+def merge(submodule_params_iters):
+    out = None
+
+    for iter in submodule_params_iters:
+        if isinstance(iter, SubmoduleParamsIterator):
+            assert out is None or iter is out
+            out = iter
+        else:
+            assert isinstance(iter, dict)
+            assert len(iter) == 0
+
+    return out
+
+
+class SubmoduleParamsIterator:
+    def __init__(self, submodule_params):
+        self.submodule_params = submodule_params
+        self.index = 0
+        self.submodule_params_by_primitive = {}
+
+    def get_params(self, primitive):
+        params = self.submodule_params_by_primitive.get(primitive)
+        if params is not None:
+            return params
+
+        params = self.submodule_params[self.index]
+        self.index += 1
+        self.submodule_params_by_primitive[primitive] = params
+        return params
 
 
 class ApplyTrace(jc.Trace):
@@ -108,25 +100,29 @@ class ApplyTrace(jc.Trace):
         return ApplyTracer(self, {}, val.val)
 
     def process_primitive(self, primitive, tracers, params):
-        vals_in, net_params = unzip2((t.val, t.net_params) for t in tracers)
-        net_params = merge_params(net_params)
-        val = primitive.apply(net_params[primitive.name], *vals_in) if \
-            isinstance(primitive, parametrized) else primitive.bind(*vals_in, **params)
-        return ApplyTracer(self, net_params, val)
+        vals_in, submodule_params_iters = unzip2((t.val, t.submodule_params_iter) for t in tracers)
+        submodule_params_iter = merge(submodule_params_iters)
+        if isinstance(primitive, parametrized):
+            val = primitive.apply(submodule_params_iter.get_params(primitive), *vals_in)
+        else:
+            val = primitive.bind(*vals_in, **params)
+        return ApplyTracer(self, submodule_params_iter, val)
 
     def process_call(self, call_primitive, f, tracers, params):
-        vals_in, net_params = unzip2((t.val, t.net_params) for t in tracers)
-        net_params = merge_params(net_params)
-        f = apply_subtrace(f, self.master, WrapHashably(net_params))
+        vals_in, submodule_params_iters = unzip2((t.val, t.submodule_params_iter) for t in tracers)
+        assert len(submodule_params_iters) == 1
+        submodule_params_iter = submodule_params_iters[0]
+        f = apply_subtrace(f, self.master, WrapHashably(submodule_params_iter))
         val_out = call_primitive.bind(f, *vals_in, **params)
-        return ApplyTracer(self, net_params, val_out)
+        return ApplyTracer(self, submodule_params_iter, val_out)
 
 
 @lu.transformation
-def apply_transform(net_params, inputs):
+def apply_transform(submodule_params, inputs):
     with jc.new_master(ApplyTrace) as master:
         trace = ApplyTrace(master, jc.cur_sublevel())
-        ans = yield map(partial(ApplyTracer, trace, net_params), inputs), {}
+        ans = yield map(partial(ApplyTracer, trace, SubmoduleParamsIterator(submodule_params)),
+                        inputs), {}
         out_tracer = trace.full_raise(ans)
         out_val = out_tracer.val
         del master, out_tracer
@@ -134,10 +130,10 @@ def apply_transform(net_params, inputs):
 
 
 @lu.transformation
-def apply_subtrace(master, net_params, *vals):
-    net_params = net_params.val
+def apply_subtrace(master, submodule_params, *vals):
+    submodule_params = submodule_params.val
     trace = ApplyTrace(master, jc.cur_sublevel())
-    ans = yield map(partial(ApplyTracer, trace, net_params), vals), {}
+    ans = yield map(partial(ApplyTracer, trace, submodule_params), vals), {}
     out_tracer = trace.full_raise(ans)
     yield out_tracer.val
 
@@ -147,15 +143,14 @@ def _is_parameter_collection(x):
 
 
 class parametrized(jc.Primitive):
-    def __init__(self, fun, append_id=True):
+    def __init__(self, fun):
         self._fun = fun
         self._name = fun.__name__
 
         self._own_params = {k: v.default for k, v in signature(self._fun).parameters.items()
                             if _is_parameter_collection(v.default)}
 
-        super().__init__(self._name + '_' + str(layer_count())
-                         if append_id else self._name)
+        super().__init__(f'{self._name}_{id(self)}')
 
         def layer_abstract_eval(*avals):
             def init_and_apply(rng, *inputs):
@@ -171,13 +166,9 @@ class parametrized(jc.Primitive):
         return self.bind(*inputs)
 
     def init_params(self, rng, *inputs, reuse=None, reuse_only=False):
-        init_layer_counter()
-
         if reuse:
-            reuse_by_name = {module.name: value for module, value in reuse.items()}
-
-            if self.name in reuse_by_name:
-                return reuse_by_name[self.name]
+            if self in reuse:
+                return reuse[self]
 
         own_param_values = self._init_own_params(rng, *inputs, reuse_only=reuse_only)
 
@@ -185,27 +176,40 @@ class parametrized(jc.Primitive):
         if any(own_param_values):
             return namedtuple(self._name, own_param_values.keys())(**own_param_values)
 
-        net_fun = lu.wrap_init(self._fun)
-
         def pv_like(x):
             return pe.PartialVal((get_aval(x), jc.unit))
 
         pvals = map(pv_like, inputs)
-        jaxpr, _, consts = pe.trace_to_jaxpr(net_fun, pvals)
+        jaxpr, _, consts = pe.trace_to_jaxpr(lu.wrap_init(self._fun), pvals)
 
-        param_values = own_param_values
-        submodule_param_values = self._init_interpreter(rng, jaxpr, consts, [], {}, *inputs)
+        submodule_params = self._init_interpreter(rng, jaxpr, consts, [], OrderedDict(), *inputs,
+                                                  reuse=reuse, reuse_only=reuse_only)
+
         if reuse:
-            for submodule in submodule_param_values.keys():
-                if submodule in reuse_by_name:
-                    submodule_param_values[submodule] = reuse_by_name[submodule]
-                else:
-                    if reuse_only:
-                        raise ValueError(f'No values specified for "{submodule}".')
+            for module in submodule_params.keys():
+                if module in reuse:
+                    submodule_params[module] = reuse[module]
 
-        assert param_values.keys().isdisjoint(submodule_param_values.keys())
-        param_values.update(submodule_param_values)
+        return self._params_namedtuple(own_param_values, submodule_params)
 
+    def _params_namedtuple(self, own_param_values, submodule_params):
+        index_by_prefix = defaultdict(lambda: 0)
+
+        prefix_param_pairs = [(module._name, params)
+                              for module, params in submodule_params.items()] + list(
+            own_param_values.items())
+
+        prefix_counter = Counter([prefix for prefix, _ in prefix_param_pairs])
+
+        def next_name(prefix):
+            is_duplicate = prefix_counter[prefix] > 1
+            index = index_by_prefix[prefix]
+            name = prefix + str(index if is_duplicate else '')
+            index_by_prefix[prefix] = index + 1
+            return name
+
+        param_values = OrderedDict([(next_name(prefix), params)
+                                    for prefix, params in prefix_param_pairs])
         Parameters = namedtuple(self._name, param_values.keys())
         return Parameters(**param_values)
 
@@ -223,14 +227,13 @@ class parametrized(jc.Primitive):
                                          pairs, element_types=(ZippedValue, GeneralParam))
             return self._fun(*inputs, **resolved_params)
 
-        init_layer_counter()
         return apply_transform(lu.wrap_init(self._fun), params).call_wrapped(inputs)
 
     def _get_param_value_pairs(self, param_values):
         param_values = param_values._asdict() if isinstance(param_values, tuple) else param_values
         return zip_nested(self._own_params, param_values, element_types=(GeneralParam,))
 
-    def _init_own_params(self, rng, *example_inputs, reuse=None, reuse_only=False):
+    def _init_own_params(self, rng, *example_inputs, reuse=None, reuse_only):
         if isinstance(self, parametrized):
             if reuse and self in reuse:
                 return reuse[self]
@@ -245,13 +248,12 @@ class parametrized(jc.Primitive):
             return param.init_param(rng_param, *example_inputs)
 
         all_param_values = map_nested(
-            lambda param: init_param(param), self._own_params,
-            tuples_to_lists=True, element_types=(GeneralParam,))
+            lambda param: init_param(param), self._own_params, element_types=(GeneralParam,))
 
         return all_param_values
 
     def __str__(self):
-        return f'{self._name}({id(self)})'
+        return self.name
 
     def _expand_reuse_dict(self, reuse):
         r = dict()
@@ -277,7 +279,25 @@ class parametrized(jc.Primitive):
         params = self.params_from(reuse, *example_inputs)
         return (jax.jit(self.apply) if jit else self.apply)(params, *example_inputs)
 
-    def _init_interpreter(self, rng, jaxpr, consts, freevar_vals, net_params, *args):
+    def _get_primitive_init(self, primitive, reuse, reuse_only):
+        if primitive in init_rules:
+            return init_rules[primitive]
+
+        if isinstance(primitive, parametrized):
+            def traced_submodule_init(rng, submodule_param_values, *inputs):
+                if primitive.name not in submodule_param_values:
+                    params = primitive.init_params(rng, *inputs, reuse=reuse, reuse_only=reuse_only)
+                    submodule_param_values[primitive] = params
+                return (primitive.apply(submodule_param_values[primitive], *inputs),
+                        submodule_param_values)
+
+            return traced_submodule_init
+
+        return (lambda _, submodule_params, *in_vals, **params:
+                (primitive.bind(*in_vals, **params), submodule_params))
+
+    def _init_interpreter(self, rng, jaxpr, consts, freevar_vals, submodule_params, *args,
+                          reuse, reuse_only):
         def read(v):
             if type(v) is jc.Literal:
                 return v.val
@@ -305,12 +325,13 @@ class parametrized(jc.Primitive):
                        for subjaxpr, const_bindings, freevar_bindings
                        in eqn.bound_subjaxprs]
             subfuns = map(lu.wrap_init, subfuns)
-            ans, net_params = get_primitive_init(eqn.primitive)(
-                prim_rng, net_params, *(subfuns + in_vals), **eqn.params)
+            ans, submodule_params = self._get_primitive_init(eqn.primitive, reuse=reuse,
+                                                             reuse_only=reuse_only)(
+                prim_rng, submodule_params, *(subfuns + in_vals), **eqn.params)
             outvals = list(ans) if eqn.destructure else [ans]
             map(write, eqn.outvars, outvals)
 
-        return net_params
+        return submodule_params
 
     def __eq__(self, obj):
         return isinstance(obj, parametrized) and self.name == obj.name
@@ -442,13 +463,13 @@ def GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None, padding
         itertools.dropwhile(lambda x: x == 1, [out_chan if c == 'C' else 1 for c in out_spec]))
 
     @parametrized
-    def general_conv(inputs,
-                     kernel=Param(kernel_shape, kernel_init),
-                     bias=Param(lambda _: bias_shape, bias_init)):
+    def conv(inputs,
+             kernel=Param(kernel_shape, kernel_init),
+             bias=Param(lambda _: bias_shape, bias_init)):
         return lax.conv_general_dilated(inputs, kernel, strides, padding, one, dilation,
                                         dimension_numbers) + bias
 
-    return general_conv
+    return conv
 
 
 Conv = functools.partial(GeneralConv, ('NHWC', 'HWIO', 'NHWC'))

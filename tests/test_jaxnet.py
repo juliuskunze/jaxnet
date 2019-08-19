@@ -2,14 +2,9 @@ import pytest
 from jax import numpy as np, jit, random
 from jax.random import PRNGKey
 
-from jaxnet import parametrized, Param, init_layer_counter, Dense, Sequential, relu, Conv, Conv1D, \
+from jaxnet import parametrized, Param, Dense, Sequential, relu, Conv, Conv1D, \
     ConvTranspose, Conv1DTranspose, flatten, MaxPool, zeros, GRUCell, Rnn, softmax, SumPool, \
     AvgPool, Dropout, BatchNorm, save_params, load_params
-
-
-@pytest.fixture(autouse=True)
-def init():
-    init_layer_counter()  # not needed, but decouples tests
 
 
 def random_inputs(input_shape, rng=PRNGKey(0)):
@@ -126,6 +121,7 @@ def test_inline_sequential_submodule():
 
     inputs = np.zeros((1, 2))
     params = outer.init_params(PRNGKey(0), inputs)
+    assert (2,) == params.inner.sequential.dense.bias.shape
     out = outer.apply(params, inputs)
     assert (1, 2) == out.shape
 
@@ -150,11 +146,13 @@ def test_external_submodule2():
 
 
 def test_external_sequential_submodule():
-    layer = Sequential(Dense(2, zeros, zeros), relu)
+    layer = Sequential(Dense(3, zeros, zeros), Dense(2, zeros, zeros), relu)
     inputs = np.zeros((1, 2))
 
     params = layer.init_params(PRNGKey(0), inputs)
-    assert_params_equal(((np.zeros((2, 2)), np.zeros(2)),), params)
+    assert_params_equal(((np.zeros((2, 3)), np.zeros(3)), (np.zeros((3, 2)), np.zeros(2))), params)
+    assert (2, 3) == params.dense0.kernel.shape
+    assert (3, 2) == params.dense1.kernel.shape
 
     out = layer.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
@@ -193,7 +191,6 @@ def test_internal_param_sharing2():
     assert np.array_equal(np.zeros((1, 2)), out)
 
 
-@pytest.mark.skip('TODO repair naming scheme, fix reuse')
 def test_no_reuse():
     inputs = np.zeros((1, 2))
 
@@ -351,7 +348,7 @@ def test_submodule_reuse_top_level():
     assert np.array_equal(out, out_)
 
 
-def test_join_params():
+def test_params_from():
     layer = Dense(2)
     net = Sequential(layer, relu)
     inputs = np.zeros((1, 3))
@@ -369,20 +366,19 @@ def test_join_params():
     assert np.array_equal(out, out_)
 
 
-@pytest.mark.skip('TODO')
-def test_join_params_subsubmodule():
+def test_params_from_subsubmodule():
     subsublayer = Dense(2)
     sublayer = Sequential(subsublayer, relu)
     net = Sequential(sublayer, np.sum)
     inputs = np.zeros((1, 3))
     params = net.init_params(PRNGKey(0), inputs)
-    out = net(params, inputs)
+    out = net.apply(params, inputs)
 
     subsublayer_params = subsublayer.init_params(PRNGKey(0), inputs)
 
-    params_ = net.params_from({subsublayer: subsublayer_params})
-    assert_dense_params_equal(subsublayer_params, params_.layers[0].layers[0])
-    out_ = net(params_, inputs)
+    params_ = net.params_from({subsublayer: subsublayer_params}, inputs)
+    assert_dense_params_equal(subsublayer_params, params_[0][0])
+    out_ = net.apply(params_, inputs)
     assert out.shape == out_.shape
 
     out_ = net.apply_from({subsublayer: subsublayer_params}, inputs)
@@ -392,34 +388,7 @@ def test_join_params_subsubmodule():
     assert out.shape == out_.shape
 
 
-@pytest.mark.skip('TODO redesign API')
-def test_access_submodules():
-    subsublayer = Dense(2)
-    sublayer = Sequential(subsublayer, relu)
-    net = Sequential(sublayer, np.sum)
-
-    assert net.layers[0] is sublayer
-    assert net.layers[0].layers[0] is subsublayer
-
-    inputs = np.zeros((1, 3))
-    params = net.init_params(PRNGKey(0), inputs)
-    out = net(params, inputs)
-
-    subsublayer_params = subsublayer.init_params(PRNGKey(0), inputs)
-
-    params_ = net.params_from({net.layers[0].layers[0]: subsublayer_params})
-    assert_dense_params_equal(subsublayer_params, params_.layers[0].layers[0])
-    out_ = net(params_, inputs)
-    assert out.shape == out_.shape
-
-    out_ = net.apply_from({net.layers[0].layers[0]: subsublayer_params}, inputs)
-    assert out.shape == out_.shape
-
-    out_ = net.apply_from({net.layers[0].layers[0]: subsublayer_params}, inputs, jit=True)
-    assert out.shape == out_.shape
-
-
-def test_join_params_top_level():
+def test_params_from_top_level():
     net = Dense(2)
     inputs = np.zeros((1, 3))
     params = net.init_params(PRNGKey(0), inputs)
@@ -438,7 +407,7 @@ def test_join_params_top_level():
 
 
 @pytest.mark.skip('TODO')
-def test_join_params_shared_submodules():
+def test_params_from_shared_submodules():
     sublayer = Dense(2)
     a = Sequential(sublayer, relu)
     b = Sequential(sublayer, np.sum)
@@ -467,7 +436,8 @@ def test_example():
     net = Sequential(Conv(2, (3, 3)), relu, flatten, Dense(4), softmax)
     batch = np.zeros((3, 5, 5, 1))
     params = net.init_params(PRNGKey(0), batch)
-    print(params[1].bias)
+    assert (2,) == params.conv.bias.shape
+    assert (4,) == params.dense.bias.shape
 
     out = net.apply(params, batch)
     assert (3, 4) == out.shape
@@ -584,7 +554,7 @@ def test_GRUCell_shape():
     assert np.array_equal(np.zeros((2, 10)), out[1])
 
 
-@pytest.mark.skip('TODO')
+@pytest.mark.skip('TODO fix scan')
 def test_Rnn_shape():
     inputs = np.zeros((2, 5, 4))
     rnn = Rnn(*GRUCell(3, zeros))
@@ -600,7 +570,7 @@ def test_Rnn_shape():
     assert np.array_equal(np.zeros((2, 5, 3)), out)
 
 
-@pytest.mark.skip('TODO')
+@pytest.mark.skip('TODO fix scan')
 def test_Rnn_net_shape():
     length = 5
     carry_size = 3
@@ -666,7 +636,6 @@ def test_BatchNorm_shape_NCHW(center, scale):
         assert params.gamma.shape == (5,)
 
 
-@pytest.mark.skip('TODO repair naming scheme, fix reuse')
 def test_reuse_example():
     inputs = np.zeros((1, 2))
     net = Dense(5)
@@ -676,12 +645,7 @@ def test_reuse_example():
 
     transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
 
-    assert transfer_net_params.layers[0] is net_params
-
-    transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs,
-                                                   reuse={transfer_net.layers[0]: net_params})
-
-    assert transfer_net_params.layers[0] is net_params
+    assert transfer_net_params[0] is net_params
 
 
 def test_InputDependent():
@@ -740,3 +704,52 @@ def test_save_and_load_params():
     params_ = load_params(path)
 
     assert_dense_params_equal(params, params_)
+
+
+def test_module_without_inputs():
+    def ParamModule(get_shape, init):
+        @parametrized
+        def param(p=Param(get_shape, init)):
+            return p
+
+        return param
+
+    inputs = np.zeros((1, 3))
+    scalar = ParamModule(lambda _: (), zeros)
+
+    params = scalar.init_params(PRNGKey(0), inputs)
+    assert_params_equal((np.zeros(()),), params)
+
+    out = scalar.apply(params)
+    assert np.array_equal(np.zeros(()), out)
+
+    out_ = jit(scalar.apply)(params)
+    assert np.array_equal(out, out_)
+
+
+@pytest.mark.skip('TODO make parameters modules as well, get rid of default argument parsing.')
+def test_nested_module_without_inputs():
+    def ParamModule(get_shape, init):
+        @parametrized
+        def param(p=Param(get_shape, init)):
+            return p
+
+        return param
+
+    @parametrized
+    def dense(inputs):
+        kernel = ParamModule(lambda _: (inputs.shape[-1], 2), zeros)
+        bias = ParamModule(lambda _: (2,), zeros)
+        return np.dot(inputs, kernel()) + bias()
+
+    inputs = np.zeros((1, 3))
+
+    params = dense.init_params(PRNGKey(0), inputs)
+    assert_params_equal(((np.zeros((3, 2)), np.zeros(2)),), params)
+    assert str(dense).startswith('dense')
+
+    out = dense.apply(params, inputs)
+    assert np.array_equal(np.zeros((1, 2)), out)
+
+    out_ = jit(dense.apply)(params, inputs)
+    assert np.array_equal(out, out_)
