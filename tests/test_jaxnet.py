@@ -850,15 +850,15 @@ def test_save_and_load_params():
 
 
 def test_module_without_inputs():
-    def ParamModule(get_shape, init):
+    def Param_(shape, init):
         @parametrized
-        def param(p=Param(get_shape, init)):
+        def param(p=Param(lambda _: shape, init)):
             return p
 
         return param
 
     inputs = np.zeros((1, 3))
-    scalar = ParamModule(lambda _: (), zeros)
+    scalar = Param_((), zeros)
 
     params = scalar.init_params(PRNGKey(0), inputs)
     assert_params_equal((np.zeros(()),), params)
@@ -872,18 +872,18 @@ def test_module_without_inputs():
 
 @pytest.mark.skip('TODO make parameters modules as well, get rid of default argument parsing.')
 def test_nested_module_without_inputs():
-    def Param_(get_shape, init):
+    def Param_(shape, init):
         @parametrized
-        def param(p=Param(get_shape, init)):
+        def param(p=Param(lambda: shape, init)):
             return p
 
-        return param
+        return param()
 
     @parametrized
     def dense(inputs):
-        kernel = Param_(lambda _: (inputs.shape[-1], 2), zeros)
-        bias = Param_(lambda _: (2,), zeros)
-        return np.dot(inputs, kernel()) + bias()
+        kernel = Param_((inputs.shape[-1], 2), zeros)
+        bias = Param_((2,), zeros)
+        return np.dot(inputs, kernel) + bias
 
     inputs = np.zeros((1, 3))
 
