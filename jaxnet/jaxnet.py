@@ -35,16 +35,16 @@ def to_dict(params):
     return params if isinstance(params, dict) else params._asdict()
 
 
-def call_init(primitive, rng, module_params, params, jaxpr, consts, freevar_vals, in_vals,
+def call_init(primitive, rng, submodule_params, params, jaxpr, consts, freevar_vals, in_vals,
               **kwargs):
     jaxpr, = jaxpr
     consts, = consts
     freevar_vals, = freevar_vals
     f = lu.wrap_init(partial(jc.eval_jaxpr, jaxpr, consts, freevar_vals))
-    return primitive.bind(f, *in_vals, **params), module_params
+    return primitive.bind(f, *in_vals, **params), submodule_params
 
 
-def scan_init(rng, module_params, consts, init, xs, forward, length, jaxpr, reuse, reuse_only):
+def scan_init(rng, submodule_params, consts, init, xs, forward, length, jaxpr, reuse, reuse_only):
     assert len(consts) == 0
 
     _, _, x_aval = jaxpr.in_avals
@@ -52,25 +52,24 @@ def scan_init(rng, module_params, consts, init, xs, forward, length, jaxpr, reus
     ys_aval = _promote_aval_rank(length, y_aval)
 
     x = _index_arrays(0, x_aval, xs)
-    # carry_out, y = _init_interpreter(jaxpr)(consts, carry, x)
-    _, module_params = _init_interpreter(rng, jaxpr.jaxpr, jaxpr.literals, (),
-                                         module_params, consts, init, x,
-                                         reuse=reuse, reuse_only=reuse_only)
+    submodule_params = _init_interpreter(rng, jaxpr.jaxpr, jaxpr.literals, (),
+                                            submodule_params, consts, init, x,
+                                            reuse=reuse, reuse_only=reuse_only)
 
     def body_fun(i, vals):
         idx = i if forward else length - i - 1
         carry, ys = vals
         x = _index_arrays(idx, x_aval, xs)
-        module_params_tuple = tuple(module_params.values())
-        assert len(module_params_tuple) <= 1
-        carry_out, y = parametrized(jc.jaxpr_as_fun(jaxpr)).apply(module_params_tuple, consts,
+        submodule_params_tuple = tuple(submodule_params.values())
+        assert len(submodule_params_tuple) <= 1
+        carry_out, y = parametrized(jc.jaxpr_as_fun(jaxpr)).apply(submodule_params_tuple, consts,
                                                                   carry, x)
         ys_out = _update_arrays(idx, y_aval, ys, y)
         return carry_out, ys_out
 
     ys_init = _empty_arrays(ys_aval)
     carry, ys = fori_loop(0, length, body_fun, (init, ys_init))
-    return jc.pack((carry, ys)), module_params
+    return jc.pack((carry, ys)), submodule_params
 
 
 def scan_apply(submodule_params_iter, consts, init, xs, forward, length, jaxpr):
@@ -120,8 +119,7 @@ def _get_primitive_init(primitive, reuse, reuse_only):
             (primitive.bind(*in_vals, **params), submodule_params))
 
 
-def _init_interpreter(rng, jaxpr, consts, freevar_vals, submodule_params, *args,
-                      reuse, reuse_only):
+def _init_interpreter(rng, jaxpr, consts, freevar_vals, submodule_params, *args, reuse, reuse_only):
     def read(v):
         if type(v) is jc.Literal:
             return v.val
@@ -143,7 +141,7 @@ def _init_interpreter(rng, jaxpr, consts, freevar_vals, submodule_params, *args,
         else:
             in_vals = [jc.pack(map(read, invars)) if type(invars) is tuple
                        else read(invars) for invars in eqn.invars]
-        # Assume no Layers in subjaxprs
+
         primitive_init = _get_primitive_init(eqn.primitive, reuse=reuse, reuse_only=reuse_only)
         if eqn.bound_subjaxprs:
             subjaxprs, sub_consts, sub_freevar_vals = jax.unzip3([(
@@ -161,7 +159,7 @@ def _init_interpreter(rng, jaxpr, consts, freevar_vals, submodule_params, *args,
         outvals = list(ans) if eqn.destructure else [ans]
         map(write, eqn.outvars, outvals)
 
-    return read(jaxpr.outvar), submodule_params
+    return submodule_params
 
 
 class ApplyTracer(jc.Tracer):
@@ -313,7 +311,7 @@ class parametrized(jc.Primitive):
         pvals = map(pv_like, inputs)
         jaxpr, _, consts = pe.trace_to_jaxpr(lu.wrap_init(self._fun), pvals)
 
-        _, submodule_params = _init_interpreter(rng, jaxpr, consts, [], OrderedDict(), *inputs,
+        submodule_params = _init_interpreter(rng, jaxpr, consts, [], OrderedDict(), *inputs,
                                                 reuse=reuse, reuse_only=reuse_only)
 
         if reuse:
@@ -416,6 +414,16 @@ class parametrized(jc.Primitive):
     def __hash__(self):
         return hash(self.name)
 
+    def shaped(self, *inputs):
+        return ShapedParametrized(self, *inputs)
+
+class ShapedParametrized:
+    def __init__(self, parametrized, *inputs):
+        self.parametrized = parametrized
+        self.inputs = inputs
+
+    def submodules(self):
+        return self.parametrized.init_params()
 
 def relu(x):
     return np.maximum(x, 0.)

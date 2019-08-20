@@ -429,6 +429,50 @@ def test_params_from_shared_submodules():
 
     @parametrized
     def net(inputs):
+        return a(inputs) * b(inputs)
+
+    inputs = np.zeros((1, 3))
+    a_params = a.init_params(PRNGKey(0), inputs)
+    out = a.apply(a_params, inputs)
+
+    params = net.params_from({a: a_params}, inputs)
+    assert_params_equal(a_params.dense.kernel, params.a.kernel)
+    out_, _ = net.apply(params, inputs)
+    assert np.array_equal(out, out_)
+
+    out_, _ = net.apply_from({a: a_params}, inputs)
+    assert np.array_equal(out, out_)
+
+    out_, _ = net.apply_from({a: a_params}, inputs, jit=True)
+    assert np.array_equal(out, out_)
+
+    out_, _ = net.apply_from({a.shaped(inputs): a_params}, inputs)
+    assert np.array_equal(out, out_)
+
+    out_, _ = net.apply_from({a.shaped(inputs): a_params}, inputs, jit=True)
+    assert np.array_equal(out, out_)
+
+    out_, _ = net.shaped(inputs).apply_from({inputs: a_params})
+    assert np.array_equal(out, out_)
+
+    out_, _ = net.shaped(inputs).apply_from({inputs: a_params}, jit=True)
+    assert np.array_equal(out, out_)
+
+    out_, _ = net.shaped(inputs).apply_from({a.shaped(inputs): a_params})
+    assert np.array_equal(out, out_)
+
+    out_, _ = net.shaped(inputs).apply_from({a.shaped(inputs): a_params}, jit=True)
+    assert np.array_equal(out, out_)
+
+
+@pytest.mark.skip('TODO')
+def test_params_from_shared_submodules2():
+    sublayer = Dense(2)
+    a = Sequential(sublayer, relu)
+    b = Sequential(sublayer, np.sum)
+
+    @parametrized
+    def net(inputs):
         return a(inputs), b(inputs)
 
     inputs = np.zeros((1, 3))
@@ -436,15 +480,9 @@ def test_params_from_shared_submodules():
     out = a.apply(a_params, inputs)
 
     params = net.params_from({a: a_params}, inputs)
-    assert_params_equal(a_params.sublayer.kernel, params.a.kernel)
-    out_ = net.apply(params, inputs)
-    assert out.shape == out_[0].shape
-
-    out_ = net.apply_from({a: a_params}, inputs)
-    assert out.shape == out_[0].shape
-
-    out_ = net.apply_from({a: a_params}, inputs, jit=True)
-    assert out.shape == out_[0].shape
+    assert_params_equal(a_params.dense.kernel, params.a.kernel)
+    out_, _ = net.apply(params, inputs)
+    assert np.array_equal(out, out_)
 
 
 def test_example():
