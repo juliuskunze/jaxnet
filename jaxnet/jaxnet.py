@@ -52,9 +52,9 @@ def scan_init(rng, submodule_params, consts, init, xs, forward, length, jaxpr, r
     ys_aval = _promote_aval_rank(length, y_aval)
 
     x = _index_arrays(0, x_aval, xs)
-    submodule_params = _init_interpreter(rng, jaxpr.jaxpr, jaxpr.literals, (),
-                                            submodule_params, consts, init, x,
-                                            reuse=reuse, reuse_only=reuse_only)
+    submodule_params = _get_submodule_params(rng, jaxpr.jaxpr, jaxpr.literals, (),
+                                             submodule_params, consts, init, x,
+                                             reuse=reuse, reuse_only=reuse_only)
 
     def body_fun(i, vals):
         idx = i if forward else length - i - 1
@@ -106,12 +106,12 @@ def _get_primitive_init(primitive, reuse, reuse_only):
         return partial(init_rules[primitive], reuse=reuse, reuse_only=reuse_only)
 
     if isinstance(primitive, parametrized):
-        def traced_submodule_init(rng, submodule_param_values, *inputs):
-            if primitive.name not in submodule_param_values:
-                params = primitive.init_params(rng, *inputs, reuse=reuse, reuse_only=reuse_only)
-                submodule_param_values[primitive] = params
-            return (primitive.apply(submodule_param_values[primitive], *inputs),
-                    submodule_param_values)
+        def traced_submodule_init(rng, submodule_params_dicts, *inputs):
+            if primitive.name not in submodule_params_dicts:
+                params_dict = primitive._init_params_dict(rng, *inputs, reuse=reuse, reuse_only=reuse_only)
+                submodule_params_dicts[primitive] = params_dict
+            submodule_params = primitive._params_namedtuple(submodule_params_dicts[primitive])
+            return primitive.apply(submodule_params, *inputs), submodule_params_dicts
 
         return traced_submodule_init
 
@@ -119,7 +119,7 @@ def _get_primitive_init(primitive, reuse, reuse_only):
             (primitive.bind(*in_vals, **params), submodule_params))
 
 
-def _init_interpreter(rng, jaxpr, consts, freevar_vals, submodule_params, *args, reuse, reuse_only):
+def _get_submodule_params(rng, jaxpr, consts, freevar_vals, submodule_params, *args, reuse, reuse_only):
     def read(v):
         if type(v) is jc.Literal:
             return v.val
@@ -294,16 +294,16 @@ class parametrized(jc.Primitive):
     def __call__(self, *inputs):
         return self.bind(*inputs)
 
-    def init_params(self, rng, *inputs, reuse=None, reuse_only=False):
+    def _init_params_dict(self, rng, *inputs, reuse=None, reuse_only=False):
         if reuse:
             if self in reuse:
                 return reuse[self]
 
-        own_param_values = self._init_own_params(rng, *inputs, reuse_only=reuse_only)
+        own_params = self._init_own_params(rng, *inputs, reuse_only=reuse_only)
 
         # TODO allow submodules and param_values at the same time:
-        if any(own_param_values):
-            return namedtuple(self._name, own_param_values.keys())(**own_param_values)
+        if any(own_params):
+            return own_params
 
         def pv_like(x):
             return pe.PartialVal((get_aval(x), jc.unit))
@@ -311,20 +311,33 @@ class parametrized(jc.Primitive):
         pvals = map(pv_like, inputs)
         jaxpr, _, consts = pe.trace_to_jaxpr(lu.wrap_init(self._fun), pvals)
 
-        submodule_params = _init_interpreter(rng, jaxpr, consts, [], OrderedDict(), *inputs,
-                                                reuse=reuse, reuse_only=reuse_only)
+        submodule_params = _get_submodule_params(rng, jaxpr, consts, [], OrderedDict(), *inputs,
+                                                 reuse=reuse, reuse_only=reuse_only)
 
         if reuse:
             for module in submodule_params.keys():
                 if module in reuse:
                     submodule_params[module] = reuse[module]
 
-        return self._params_namedtuple(own_param_values, submodule_params)
+        submodule_params.update(own_params)
+        return submodule_params
 
-    def _params_namedtuple(self, own_param_values, submodule_params):
+    def init_params(self, rng, *inputs, reuse=None, reuse_only=False):
+        d = self._init_params_dict(rng, *inputs, reuse=reuse, reuse_only=reuse_only)
+
+        return self._params_namedtuple(d)
+
+    def _params_namedtuple(self, params_dict):
+        if isinstance(params_dict, tuple):
+            # (happens on reuse)
+            return params_dict
+
+        submodule_params = OrderedDict((module, param) for module, param in params_dict.items() if not isinstance(module, str))
+        own_param_values = OrderedDict((param_name, param) for param_name, param in params_dict.items() if isinstance(param_name, str))
+
         index_by_prefix = defaultdict(lambda: 0)
 
-        prefix_param_pairs = [(module._name, params)
+        prefix_param_pairs = [(module._name, self._params_namedtuple(params))
                               for module, params in submodule_params.items()] + list(
             own_param_values.items())
 
@@ -337,10 +350,9 @@ class parametrized(jc.Primitive):
             index_by_prefix[prefix] = index + 1
             return name
 
-        param_values = OrderedDict([(next_name(prefix), params)
-                                    for prefix, params in prefix_param_pairs])
-        Parameters = namedtuple(self._name, param_values.keys())
-        return Parameters(**param_values)
+        params = OrderedDict((next_name(prefix), params) for prefix, params in prefix_param_pairs)
+        Parameters = namedtuple(self._name, params.keys())
+        return Parameters(**params)
 
     def apply(self, params, *inputs):
         # TODO allow submodules and params at the same time:
@@ -376,10 +388,8 @@ class parametrized(jc.Primitive):
             rng, rng_param = random.split(rng)
             return param.init_param(rng_param, *example_inputs)
 
-        all_param_values = map_nested(
-            lambda param: init_param(param), self._own_params, element_types=(GeneralParam,))
-
-        return all_param_values
+        return map_nested(lambda param: init_param(param), self._own_params,
+                          element_types=(GeneralParam,))
 
     def __str__(self):
         return self.name

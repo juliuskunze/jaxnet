@@ -421,7 +421,6 @@ def test_params_from_top_level():
     assert np.array_equal(out, out_)
 
 
-@pytest.mark.skip('TODO')
 def test_params_from_shared_submodules():
     sublayer = Dense(2)
     a = Sequential(sublayer, relu)
