@@ -8,10 +8,13 @@ import dill
 import jax
 import numpy as onp
 from jax import core as jc, linear_util as lu, numpy as np, random
+from jax import lax
 from jax.abstract_arrays import ShapedArray
 from jax.interpreters import xla, partial_eval as pe
 from jax.interpreters.batching import get_aval
-from jax.lax import lax, scan
+from jax.lax import scan, fori_loop
+from jax.lax.lax_control_flow import _index_arrays, _update_arrays, _empty_arrays, \
+    _promote_aval_rank
 from jax.random import PRNGKey
 from jax.scipy.special import logsumexp, expit
 from jax.util import unzip2, safe_zip, safe_map, partial, WrapHashably
@@ -32,11 +35,133 @@ def to_dict(params):
     return params if isinstance(params, dict) else params._asdict()
 
 
-def call_init(primitive, rng, module_params, f, *in_vals, **params):
+def call_init(primitive, rng, module_params, params, jaxpr, consts, freevar_vals, in_vals,
+              **kwargs):
+    jaxpr, = jaxpr
+    consts, = consts
+    freevar_vals, = freevar_vals
+    f = lu.wrap_init(partial(jc.eval_jaxpr, jaxpr, consts, freevar_vals))
     return primitive.bind(f, *in_vals, **params), module_params
 
 
-init_rules = {xla.xla_call_p: partial(call_init, xla.xla_call_p)}
+def scan_init(rng, module_params, consts, init, xs, forward, length, jaxpr, reuse, reuse_only):
+    assert len(consts) == 0
+
+    _, _, x_aval = jaxpr.in_avals
+    _, y_aval = jaxpr.out_aval
+    ys_aval = _promote_aval_rank(length, y_aval)
+
+    x = _index_arrays(0, x_aval, xs)
+    # carry_out, y = _init_interpreter(jaxpr)(consts, carry, x)
+    _, module_params = _init_interpreter(rng, jaxpr.jaxpr, jaxpr.literals, (),
+                                         module_params, consts, init, x,
+                                         reuse=reuse, reuse_only=reuse_only)
+
+    def body_fun(i, vals):
+        idx = i if forward else length - i - 1
+        carry, ys = vals
+        x = _index_arrays(idx, x_aval, xs)
+        module_params_tuple = tuple(module_params.values())
+        assert len(module_params_tuple) <= 1
+        carry_out, y = parametrized(jc.jaxpr_as_fun(jaxpr)).apply(module_params_tuple, consts,
+                                                                  carry, x)
+        ys_out = _update_arrays(idx, y_aval, ys, y)
+        return carry_out, ys_out
+
+    ys_init = _empty_arrays(ys_aval)
+    carry, ys = fori_loop(0, length, body_fun, (init, ys_init))
+    return jc.pack((carry, ys)), module_params
+
+
+def scan_apply(submodule_params_iter, consts, init, xs, forward, length, jaxpr):
+    assert len(consts) == 0
+
+    _, _, x_aval = jaxpr.in_avals
+    _, y_aval = jaxpr.out_aval
+    ys_aval = _promote_aval_rank(length, y_aval)
+
+    # TODO fix param sharing
+    cell_params = (submodule_params_iter.get_params(None),)
+
+    def body_fun(i, vals):
+        idx = i if forward else length - i - 1
+        carry, ys = vals
+        x = _index_arrays(idx, x_aval, xs)
+        carry_out, y = parametrized(jc.jaxpr_as_fun(jaxpr)).apply(cell_params, consts, carry, x)
+        ys_out = _update_arrays(idx, y_aval, ys, y)
+        return carry_out, ys_out
+
+    ys_init = _empty_arrays(ys_aval)
+    carry, ys = fori_loop(0, length, body_fun, (init, ys_init))
+    return jc.pack((carry, ys))
+
+
+init_rules = {xla.xla_call_p: partial(call_init, xla.xla_call_p),
+              lax.scan_p: scan_init}
+
+apply_rules = {lax.scan_p: scan_apply}
+
+
+def _get_primitive_init(primitive, reuse, reuse_only):
+    if primitive in init_rules:
+        return partial(init_rules[primitive], reuse=reuse, reuse_only=reuse_only)
+
+    if isinstance(primitive, parametrized):
+        def traced_submodule_init(rng, submodule_param_values, *inputs):
+            if primitive.name not in submodule_param_values:
+                params = primitive.init_params(rng, *inputs, reuse=reuse, reuse_only=reuse_only)
+                submodule_param_values[primitive] = params
+            return (primitive.apply(submodule_param_values[primitive], *inputs),
+                    submodule_param_values)
+
+        return traced_submodule_init
+
+    return (lambda _, submodule_params, *in_vals, **params:
+            (primitive.bind(*in_vals, **params), submodule_params))
+
+
+def _init_interpreter(rng, jaxpr, consts, freevar_vals, submodule_params, *args,
+                      reuse, reuse_only):
+    def read(v):
+        if type(v) is jc.Literal:
+            return v.val
+        else:
+            return env[v]
+
+    def write(v, val):
+        env[v] = val
+
+    env = {}
+    write(jc.unitvar, jc.unit)
+    jc.pat_fmap(write, jaxpr.constvars, consts)
+    jc.pat_fmap(write, jaxpr.invars, args)
+    jc.pat_fmap(write, jaxpr.freevars, freevar_vals)
+    for eqn in jaxpr.eqns:
+        rng, prim_rng = random.split(rng)
+        if not eqn.restructure:
+            in_vals = map(read, eqn.invars)
+        else:
+            in_vals = [jc.pack(map(read, invars)) if type(invars) is tuple
+                       else read(invars) for invars in eqn.invars]
+        # Assume no Layers in subjaxprs
+        primitive_init = _get_primitive_init(eqn.primitive, reuse=reuse, reuse_only=reuse_only)
+        if eqn.bound_subjaxprs:
+            subjaxprs, sub_consts, sub_freevar_vals = jax.unzip3([(
+                subjaxpr,
+                map(read, const_vars),
+                map(read, bound_vars))
+                for subjaxpr, const_vars, bound_vars
+                in eqn.bound_subjaxprs])
+            ans, submodule_params = primitive_init(
+                prim_rng, submodule_params, eqn.params, subjaxprs,
+                sub_consts, sub_freevar_vals, in_vals)
+        else:
+            ans, submodule_params = primitive_init(
+                prim_rng, submodule_params, *in_vals, **eqn.params)
+        outvals = list(ans) if eqn.destructure else [ans]
+        map(write, eqn.outvars, outvals)
+
+    return read(jaxpr.outvar), submodule_params
 
 
 class ApplyTracer(jc.Tracer):
@@ -102,7 +227,9 @@ class ApplyTrace(jc.Trace):
     def process_primitive(self, primitive, tracers, params):
         vals_in, submodule_params_iters = unzip2((t.val, t.submodule_params_iter) for t in tracers)
         submodule_params_iter = merge(submodule_params_iters)
-        if isinstance(primitive, parametrized):
+        if primitive in apply_rules:
+            val = apply_rules[primitive](submodule_params_iter, *vals_in, **params)
+        elif isinstance(primitive, parametrized):
             val = primitive.apply(submodule_params_iter.get_params(primitive), *vals_in)
         else:
             val = primitive.bind(*vals_in, **params)
@@ -115,6 +242,10 @@ class ApplyTrace(jc.Trace):
         f = apply_subtrace(f, self.master, WrapHashably(submodule_params_iter))
         val_out = call_primitive.bind(f, *vals_in, **params)
         return ApplyTracer(self, submodule_params_iter, val_out)
+
+    def pack(self, tracers):
+        vals, submodule_params_iters = unzip2((t.val, t.submodule_params_iter) for t in tracers)
+        return ApplyTracer(self, merge(submodule_params_iters), jc.pack(vals))
 
 
 @lu.transformation
@@ -182,8 +313,8 @@ class parametrized(jc.Primitive):
         pvals = map(pv_like, inputs)
         jaxpr, _, consts = pe.trace_to_jaxpr(lu.wrap_init(self._fun), pvals)
 
-        submodule_params = self._init_interpreter(rng, jaxpr, consts, [], OrderedDict(), *inputs,
-                                                  reuse=reuse, reuse_only=reuse_only)
+        _, submodule_params = _init_interpreter(rng, jaxpr, consts, [], OrderedDict(), *inputs,
+                                                reuse=reuse, reuse_only=reuse_only)
 
         if reuse:
             for module in submodule_params.keys():
@@ -278,60 +409,6 @@ class parametrized(jc.Primitive):
     def apply_from(self, reuse, *example_inputs, jit=False):
         params = self.params_from(reuse, *example_inputs)
         return (jax.jit(self.apply) if jit else self.apply)(params, *example_inputs)
-
-    def _get_primitive_init(self, primitive, reuse, reuse_only):
-        if primitive in init_rules:
-            return init_rules[primitive]
-
-        if isinstance(primitive, parametrized):
-            def traced_submodule_init(rng, submodule_param_values, *inputs):
-                if primitive.name not in submodule_param_values:
-                    params = primitive.init_params(rng, *inputs, reuse=reuse, reuse_only=reuse_only)
-                    submodule_param_values[primitive] = params
-                return (primitive.apply(submodule_param_values[primitive], *inputs),
-                        submodule_param_values)
-
-            return traced_submodule_init
-
-        return (lambda _, submodule_params, *in_vals, **params:
-                (primitive.bind(*in_vals, **params), submodule_params))
-
-    def _init_interpreter(self, rng, jaxpr, consts, freevar_vals, submodule_params, *args,
-                          reuse, reuse_only):
-        def read(v):
-            if type(v) is jc.Literal:
-                return v.val
-            else:
-                return env[v]
-
-        def write(v, val):
-            env[v] = val
-
-        env = {}
-        write(jc.unitvar, jc.unit)
-        jc.pat_fmap(write, jaxpr.constvars, consts)
-        jc.pat_fmap(write, jaxpr.invars, args)
-        jc.pat_fmap(write, jaxpr.freevars, freevar_vals)
-        for eqn in jaxpr.eqns:
-            rng, prim_rng = random.split(rng)
-            if not eqn.restructure:
-                in_vals = map(read, eqn.invars)
-            else:
-                in_vals = [jc.pack(map(read, invars)) if type(invars) is tuple
-                           else read(invars) for invars in eqn.invars]
-            # Assume no Layers in subjaxprs
-            subfuns = [partial(jc.eval_jaxpr, subjaxpr, map(read, const_bindings),
-                               map(read, freevar_bindings))
-                       for subjaxpr, const_bindings, freevar_bindings
-                       in eqn.bound_subjaxprs]
-            subfuns = map(lu.wrap_init, subfuns)
-            ans, submodule_params = self._get_primitive_init(eqn.primitive, reuse=reuse,
-                                                             reuse_only=reuse_only)(
-                prim_rng, submodule_params, *(subfuns + in_vals), **eqn.params)
-            outvals = list(ans) if eqn.destructure else [ans]
-            map(write, eqn.outvars, outvals)
-
-        return submodule_params
 
     def __eq__(self, obj):
         return isinstance(obj, parametrized) and self.name == obj.name
@@ -557,7 +634,7 @@ def GRUCell(carry_size, param_init):
         both_reset_carry = np.concatenate((x, reset * carry), axis=1)
         compute = np.tanh(np.dot(both_reset_carry, compute_kernel))
         out = update * compute + (1 - update) * carry
-        return out, out
+        return jax.pack((out, out))
 
     def carry_init(batch_size):
         return np.zeros((batch_size, carry_size))
