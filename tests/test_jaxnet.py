@@ -435,32 +435,32 @@ def test_params_from_shared_submodules():
     out = a.apply(a_params, inputs)
 
     params = net.params_from({a: a_params}, inputs)
-    assert_params_equal(a_params.dense.kernel, params.a.kernel)
-    out_, _ = net.apply(params, inputs)
+    assert_params_equal(a_params.dense.kernel, params.sequential0.dense.kernel)
+    assert_params_equal(a_params.dense.kernel, params.sequential1.dense.kernel)
+    out_ = net.apply(params, inputs)
+
+    out_ = net.apply_from({a: a_params}, inputs)
     assert np.array_equal(out, out_)
 
-    out_, _ = net.apply_from({a: a_params}, inputs)
+    out_ = net.apply_from({a: a_params}, inputs, jit=True)
     assert np.array_equal(out, out_)
 
-    out_, _ = net.apply_from({a: a_params}, inputs, jit=True)
+    out_ = net.apply_from({a.shaped(inputs): a_params}, inputs)
     assert np.array_equal(out, out_)
 
-    out_, _ = net.apply_from({a.shaped(inputs): a_params}, inputs)
+    out_ = net.apply_from({a.shaped(inputs): a_params}, inputs, jit=True)
     assert np.array_equal(out, out_)
 
-    out_, _ = net.apply_from({a.shaped(inputs): a_params}, inputs, jit=True)
+    out_ = net.shaped(inputs).apply_from({a: a_params})
     assert np.array_equal(out, out_)
 
-    out_, _ = net.shaped(inputs).apply_from({inputs: a_params})
+    out_ = net.shaped(inputs).apply_from({a: a_params}, jit=True)
     assert np.array_equal(out, out_)
 
-    out_, _ = net.shaped(inputs).apply_from({inputs: a_params}, jit=True)
+    out_ = net.shaped(inputs).apply_from({a.shaped(inputs): a_params})
     assert np.array_equal(out, out_)
 
-    out_, _ = net.shaped(inputs).apply_from({a.shaped(inputs): a_params})
-    assert np.array_equal(out, out_)
-
-    out_, _ = net.shaped(inputs).apply_from({a.shaped(inputs): a_params}, jit=True)
+    out_ = net.shaped(inputs).apply_from({a.shaped(inputs): a_params}, jit=True)
     assert np.array_equal(out, out_)
 
 

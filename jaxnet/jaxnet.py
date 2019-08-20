@@ -108,7 +108,8 @@ def _get_primitive_init(primitive, reuse, reuse_only):
     if isinstance(primitive, parametrized):
         def traced_submodule_init(rng, submodule_params_dicts, *inputs):
             if primitive.name not in submodule_params_dicts:
-                params_dict = primitive._init_params_dict(rng, *inputs, reuse=reuse, reuse_only=reuse_only)
+                params_dict = primitive._init_params_dict(rng, *inputs, reuse=reuse,
+                                                          reuse_only=reuse_only)
                 submodule_params_dicts[primitive] = params_dict
             submodule_params = primitive._params_namedtuple(submodule_params_dicts[primitive])
             return primitive.apply(submodule_params, *inputs), submodule_params_dicts
@@ -119,7 +120,8 @@ def _get_primitive_init(primitive, reuse, reuse_only):
             (primitive.bind(*in_vals, **params), submodule_params))
 
 
-def _get_submodule_params(rng, jaxpr, consts, freevar_vals, submodule_params, *args, reuse, reuse_only):
+def _get_submodule_params(rng, jaxpr, consts, freevar_vals, submodule_params, *args, reuse,
+                          reuse_only):
     def read(v):
         if type(v) is jc.Literal:
             return v.val
@@ -271,6 +273,21 @@ def _is_parameter_collection(x):
     return nested_any(map_nested(lambda x: isinstance(x, GeneralParam), x, (GeneralParam,)))
 
 
+def _expand_reuse_dict(reuse, *example_inputs):
+    expanded_reuse = {}
+
+    for module, params in reuse.items():
+        if isinstance(module, parametrized):
+            module = module.shaped(*example_inputs)
+
+        if not isinstance(module, ShapedParametrized):
+            raise ValueError('Keys for reuse must be parametrized or ShapedParametrized.')
+
+        expanded_reuse.update(module._get_reuse_dict(params))
+
+    return expanded_reuse
+
+
 class parametrized(jc.Primitive):
     def __init__(self, fun):
         self._fun = fun
@@ -332,12 +349,15 @@ class parametrized(jc.Primitive):
             # (happens on reuse)
             return params_dict
 
-        submodule_params = OrderedDict((module, param) for module, param in params_dict.items() if not isinstance(module, str))
-        own_param_values = OrderedDict((param_name, param) for param_name, param in params_dict.items() if isinstance(param_name, str))
+        submodule_params = OrderedDict(
+            (module, param) for module, param in params_dict.items() if not isinstance(module, str))
+        own_param_values = OrderedDict(
+            (param_name, param) for param_name, param in params_dict.items() if
+            isinstance(param_name, str))
 
         index_by_prefix = defaultdict(lambda: 0)
 
-        prefix_param_pairs = [(module._name, self._params_namedtuple(params))
+        prefix_param_pairs = [(module._name, module._params_namedtuple(params))
                               for module, params in submodule_params.items()] + list(
             own_param_values.items())
 
@@ -351,6 +371,7 @@ class parametrized(jc.Primitive):
             return name
 
         params = OrderedDict((next_name(prefix), params) for prefix, params in prefix_param_pairs)
+        # TODO name:
         Parameters = namedtuple(self._name, params.keys())
         return Parameters(**params)
 
@@ -409,10 +430,11 @@ class parametrized(jc.Primitive):
 
         return r
 
-    def params_from(self, values_by_param, *example_inputs):
+    def params_from(self, reuse, *example_inputs):
+        expanded_reuse = _expand_reuse_dict(reuse, *example_inputs)
+
         # TODO: optimization wrong, duplicate values, needs param adapter
-        # values_by_param = self._expand_reuse_dict(values_by_param)
-        return self.init_params(PRNGKey(0), *example_inputs, reuse=values_by_param, reuse_only=True)
+        return self.init_params(PRNGKey(0), *example_inputs, reuse=expanded_reuse, reuse_only=True)
 
     def apply_from(self, reuse, *example_inputs, jit=False):
         params = self.params_from(reuse, *example_inputs)
@@ -427,13 +449,43 @@ class parametrized(jc.Primitive):
     def shaped(self, *inputs):
         return ShapedParametrized(self, *inputs)
 
-class ShapedParametrized:
-    def __init__(self, parametrized, *inputs):
-        self.parametrized = parametrized
-        self.inputs = inputs
 
-    def submodules(self):
-        return self.parametrized.init_params()
+def _get_reuse_dict(module, params, params_dict):
+    assert len(params_dict) == len(params)
+    d = {module: params}
+
+    for ((module, submodule_params_dict), submodule_params) in zip(params_dict.items(), params):
+        if isinstance(module, parametrized):
+            d[module] = submodule_params
+            reuse_dict = _get_reuse_dict(module, submodule_params,
+                                         params_dict=submodule_params_dict)
+            for module, params in reuse_dict.items():
+                params_ = d.get(module)
+                if params_ is not None and not params is params_:
+                        # TODO: create params_from_overlapping
+                        raise ValueError("Provided reuse params contradict each other."
+                                         "Use params_from_overlapping if intended.")
+
+            d.update(reuse_dict)
+        # TODO allow sharing of Params directly (not only submodules)
+
+    return d
+
+
+class ShapedParametrized:
+    def __init__(self, parametrized, *example_inputs):
+        self.parametrized = parametrized
+        self.example_inputs = example_inputs
+
+    def _get_params_dict(self):
+        return self.parametrized._init_params_dict(PRNGKey(0), *self.example_inputs)
+
+    def _get_reuse_dict(self, params):
+        return _get_reuse_dict(self.parametrized, params, self._get_params_dict())
+
+    def apply_from(self, reuse, jit=False):
+        return self.parametrized.apply_from(reuse, *self.example_inputs, jit=jit)
+
 
 def relu(x):
     return np.maximum(x, 0.)
