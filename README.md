@@ -82,7 +82,7 @@ def encode(input):
     return np.concatenate((mean, variance), axis=1)
 ```
 
-`Sequential` is define like this:
+`Sequential` is defined like this:
 
 ```
 def Sequential(*layers):
@@ -139,7 +139,7 @@ It is a shorthand for:
 
 ```python
 accuracy_params = accuracy.params_from({loss: params}, *test_inputs)
-test_acc = jit(accuracy)(accuracy_params, *test_inputs)
+test_acc = jit(accuracy.apply)(accuracy_params, *test_inputs)
 ```
 
 You can also reuse parts of your network while initializing the rest:
@@ -149,12 +149,12 @@ inputs = np.zeros((1, 2))
 net = Dense(5)
 net_params = net.init_params(PRNGKey(0), inputs)
 
-# train net_params...
+# train net params...
 
 transfer_net = Sequential(net, relu, Dense(2))
 transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
 
-assert transfer_net_params.layers[0] is net_params
+assert transfer_net_params[0] is net_params
 
 # train transfer_net_params...
 ```

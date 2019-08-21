@@ -167,11 +167,11 @@ def test_external_sequential_submodule():
     inputs = np.zeros((1, 5, 5, 2))
 
     params = layer.init_params(PRNGKey(0), inputs)
-    assert (4, ) == params.conv.bias.shape
-    assert (3, ) == params.dense0.bias.shape
+    assert (4,) == params.conv.bias.shape
+    assert (3,) == params.dense0.bias.shape
     assert (3, 2) == params.dense1.kernel.shape
-    assert (2, ) == params.dense1.bias.shape
-    assert (2, ) == params.sequential.dense.bias.shape
+    assert (2,) == params.dense1.bias.shape
+    assert (2,) == params.sequential.dense.bias.shape
 
     out = layer.apply(params, inputs)
     assert (1, 2) == out.shape
@@ -293,6 +293,7 @@ def test_params():
 
     params_ = net.shaped(inputs).init_params(PRNGKey(0))
     assert_params_equal(params, params_)
+
 
 def test_params_list():
     @parametrized
@@ -807,11 +808,14 @@ def test_reuse_example():
     net = Dense(5)
     net_params = net.init_params(PRNGKey(0), inputs)
 
-    transfer_net = Sequential(net, relu, Dense(2))
+    # train net params...
 
+    transfer_net = Sequential(net, relu, Dense(2))
     transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
 
     assert transfer_net_params[0] is net_params
+
+    # train transfer_net_params...
 
 
 def test_InputDependent():

@@ -17,11 +17,11 @@ demos to their original stax implementations (linked in each).
 
 All stax functionality is now in JAXnet. Porting models is straight-forward:
 - Remove `init_params`: Extract `Param`s. Get rid of `output_shape` and `rng` splitting code.
-- Pass these `Param`s into `apply_fun` using default arguments. Do the same for any nested layers you are using.
+- Pass these `Param`s into `apply_fun` using default arguments.
 - Add `@parameterized` to your `apply_fun`, remove the `params` argument, and use layers/params directly.
 - Update `Serial` to `Sequential`.
 - Update parameter-free `stax` layers (`Relu`, `Flatten`, ...) to JAXnet functions (`relu`, `flatten`, ...).
 - If you use `FanInConcat` or `FanInSum`, update to `lambda x: np.concatenate(x, axis=-1)` or `sum`, respectively.
 - If you use `FanOut` or `parallel`, reformulate your code as a custom `@parameterized` function.
-- Update `shape_dependent` to `InputDependent`.
+- If you use `shape_dependent`, define layers inline and makes them depend on the input.
 - Update usage of your model as described in the [overview](README.md#Overview).
