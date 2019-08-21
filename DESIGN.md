@@ -4,7 +4,7 @@ We plan to allow defining parameters as submodules in a future version:
 
 ```python
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
-    @parameterized
+    @parametrized
     def dense(inputs):
         kernel = Param((inputs.shape[-1], out_dim), init=kernel_init)
         bias = Param((out_dim,), init=bias_init)
