@@ -31,9 +31,9 @@ with `Param` as the primitive module.
 ## How are parameters named?
 
 JAXnet does not rely on module or parameter names.
-Parameters are `namedtuple`s only for readability.
-They are named after their defining `@parametrized` function.
-If names clash within the same `@parameterized` function, indices are added in order of execution:
+Parameters are nested `namedtuple`s instead of nested `tuples` only for readability.
+They are named after their defining module (`@parametrized` function).
+If names clash within the same module, indices are added in order of execution:
 
 ```python
 layer = Sequential(Conv(4, (2, 2)), flatten, relu, Dense(3), relu, Dense(2),
@@ -48,7 +48,7 @@ assert (2, ) == params.dense1.bias.shape
 assert (2, ) == params.sequential.dense.bias.shape
 ```
 
-When `init_params` is called on different modules, it can assign different names to parameters corresponding to the same shared module.
+When `init_params` is called on different modules, parameters corresponding to the same shared module can be different (have different indices) between the two calls.
 When `init_params` is called on the same module twice, parameter names are guaranteed to be identical.
 
 Parameter sharing cannot happen accidentally, since module object identity is always unique.
