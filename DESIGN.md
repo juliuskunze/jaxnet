@@ -1,4 +1,4 @@
-## What is primitive module?
+## What is the primitive module?
 
 `parameter` is the primitive module from which all modules are built,
 defined with a name and initialization function:
@@ -14,7 +14,7 @@ param = scalar.init_params(PRNGKey(0))
 assert np.zeros(()) == param
 ```
 
-Independent of any inputs, it returns this parameter values:
+Independent of any inputs, it returns these parameter values:
 
 ```python
 assert param == scalar.apply(param)

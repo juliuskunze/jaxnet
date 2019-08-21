@@ -62,7 +62,7 @@ def encode(input):
 
 `Sequential` is defined as
 
-```
+```python
 def Sequential(*layers):
     @parametrized
     def sequential(inputs):
@@ -87,12 +87,12 @@ This is why `relu`, `flatten`, `softmax`, ... from `jaxnet` are plain Python fun
 Parameters are shared by using the same module object multiple times:
 
 ```python
-shared_net=Sequential(layer, layer)
+shared_net = Sequential(layer, layer)
 ```
 
 JAXnet calls module functions with concrete values (when `jit` is not used),
 allowing step-by-step debugging like any normal Python function.
-All modules are composed in this way from one primitive module, described [here](DESIGN.md).
+All modules are composed in this way from one primitive module, described [here](DESIGN.md#what-is-the-primitive-module).
 
 ## Parameter reuse
 
@@ -141,9 +141,9 @@ assert transfer_net_params[0] is net_params
 # train transfer_net_params...
 ```
 
+The naming of parameters is discussed [here](DESIGN.md#how-are-parameters-named).
+
 ## What about [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
 JAXnet is independent of stax.
 The main motivation over stax is to simplify nesting modules.
 Find details and porting instructions [here](STAX.md).
-
-API design is discussed [here](DESIGN.md).
