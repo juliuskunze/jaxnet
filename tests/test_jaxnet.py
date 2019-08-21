@@ -984,4 +984,9 @@ def test_output_pairs():
     inputs = np.zeros((1, 3))
     params = net.init_params(PRNGKey(0), inputs)
     out = net.apply(params, inputs)
-    assert (1, 2) == out.shape
+
+    # TODO remove ".xs":
+    out1, out2 = out.xs
+
+    assert (1, 2) == out1.shape
+    assert np.array_equal(out1, out2)
