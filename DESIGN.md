@@ -30,7 +30,7 @@ with `Param` as the primitive module.
 
 ## How are parameters named?
 
-Parameters are named after their defining ``@parametrized` function.
+Parameters are named after their defining `@parametrized` function.
 If names clash within the same `@parameterized` function, indices are added in order of execution:
 
 ```python

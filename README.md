@@ -66,7 +66,6 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
 Nested `tuple`s/`list`s/`dict`s of `Param`s work.
 `@parametrized` transforms the function to allow usage as above.
 
-Unlike the session / graphs API from Tensorflow 1,
 JAXnet calls module functions with concrete values (when `jit` is not used),
 allowing step-by-step debugging like any normal Python function.
 
@@ -83,6 +82,19 @@ def encode(input):
     return np.concatenate((mean, variance), axis=1)
 ```
 
+`Sequential` is define like this:
+
+```
+def Sequential(*layers):
+    @parametrized
+    def sequential(inputs):
+        for layer in layers:
+            inputs = layer(inputs)
+        return inputs
+
+    return sequential
+``
+
 Using parameter-free functions is seamless:
 
 ```python
@@ -92,20 +104,12 @@ def relu(x):
 layer = Sequential(Dense(10), relu)
 ```
 
-## Parameter sharing
+This is why `relu`, `flatten`, `softmax`, ... from `jaxnet` are plain Python functions.
 
-Parameters can be shared by using module or parameter objects multiple times:
+Parameters are shared by using module or parameter objects multiple times:
 
 ```python
 shared_net=Sequential(layer, layer)
-```
-
-This is equivalent to:
-
-```python
-@parametrized
-def shared_net(input, layer=layer):
-    return layer(layer(input))
 ```
 
 ## Parameter reuse
@@ -117,11 +121,11 @@ If you want to evaluate parts or extended versions of a trained network
 predict = Sequential(Dense(1024), relu, Dense(10), logsoftmax)
 
 @parametrized
-def loss(inputs, targets, predict=predict):
+def loss(inputs, targets):
     return -np.mean(predict(inputs) * targets)
 
 @parametrized
-def accuracy(inputs, targets, predict=predict):
+def accuracy(inputs, targets):
     return np.mean(np.argmax(targets, axis=1) == np.argmax(predict(inputs), axis=1))
 
 params = loss.init_params(PRNGKey(0), inputs)
