@@ -471,6 +471,28 @@ def test_params_from_shared_submodules():
     assert np.array_equal(out, out_)
 
 
+def test_params_from_shared_submodules2():
+    sublayer = Dense(2)
+    a = Sequential(sublayer, relu)
+    b = Sequential(sublayer, np.sum)
+
+    @parametrized
+    def net(inputs):
+        return a(inputs), b(inputs)
+
+    inputs = np.zeros((1, 3))
+    a_params = a.init_params(PRNGKey(0), inputs)
+    out = a.apply(a_params, inputs)
+
+    params = net.params_from({a: a_params}, inputs)
+    assert_dense_params_equal(a_params.dense, params.sequential0.dense)
+    assert_dense_params_equal(a_params.dense, params.sequential1.dense)
+    # TODO parameters are duplicated, optimization with weight sharing is wrong:
+    # TODO instead: assert 1 == len(params)
+    out_, _ = net.apply(params, inputs)
+    assert np.array_equal(out, out_)
+
+
 def test_example():
     net = Sequential(Conv(2, (3, 3)), relu, flatten, Dense(4), softmax)
     batch = np.zeros((3, 5, 5, 1))
@@ -584,8 +606,9 @@ def test_GRUCell_shape():
     x = np.zeros((2, 3))
     carry = init_carry(batch_size=2)
     params = gru_cell.init_params(PRNGKey(0), carry, x)
-    # TODO remove xs:
-    out = gru_cell.apply(params, carry, x).xs
+    out = gru_cell.apply(params, carry, x)
+    # TODO remove ".xs":
+    out = out.xs
 
     assert (2, 10) == out[0].shape
     assert (2, 10) == out[1].shape
@@ -621,7 +644,10 @@ def test_tuple_input_shape():
     carry = init_carry(batch_size=2)
     inputs = (carry, x)
     params = gru_cell.init_params(PRNGKey(0), inputs)
+
     out = gru_cell.apply(params, inputs)
+    # TODO remove ".xs":
+    out = out.xs
 
     assert isinstance(out, tuple)
     assert len(out) == 2
@@ -661,6 +687,9 @@ def test_dict_input_shape():
     inputs = {'carry': carry, 'x': x}
     params = gru_cell.init_params(PRNGKey(0), inputs)
     out = gru_cell.apply(params, inputs)
+
+    # TODO remove ".xs":
+    out = out.xs
 
     assert isinstance(out, tuple)
     assert len(out) == 2
@@ -925,66 +954,34 @@ def test_nested_module_without_inputs():
     assert np.array_equal(out, out_)
 
 
-def test_vae_example_merged():
-    net = Sequential(Dense(5), relu)
-
-    @parametrized
-    def encode(input):
-        input = net(input)
-        return Dense(20)(input)
-
-    decode = Sequential(Dense(5 * 5))
-
-    @parametrized
-    def elbo(rng, images):
-        """Monte Carlo estimate of the negative evidence lower bound."""
-        mu_z, sigmasq_z = np.split(encode(images), 2, axis=1)
-        logits_x = decode(gaussian_sample(rng, mu_z, sigmasq_z))
-        return bernoulli_logpdf(logits_x, images) - gaussian_kl(mu_z, sigmasq_z)
-
-    init_params = elbo.init_params(PRNGKey(0), PRNGKey(0), np.zeros((32, 5 * 5)))
-
-
-@pytest.mark.skip('TODO output pairs')
 def test_mnist_vae_example():
-    net = Sequential(Dense(5), relu, Dense(5), relu)
-    mean_net = Dense(10)
-    variance_net = Sequential(Dense(10), softplus)
-
     @parametrized
     def encode(input):
-        input = net(input)
-        mean = mean_net(input)
-        variance = variance_net(input)
+        input = Sequential(Dense(5), relu, Dense(5), relu)(input)
+        mean = Dense(10)(input)
+        variance = Sequential(Dense(10), softplus)(input)
         return mean, variance
 
     decode = Sequential(Dense(5), relu, Dense(5), relu, Dense(5 * 5))
 
     @parametrized
     def elbo(rng, images):
-        """Monte Carlo estimate of the negative evidence lower bound."""
         mu_z, sigmasq_z = encode(images)
         logits_x = decode(gaussian_sample(rng, mu_z, sigmasq_z))
         return bernoulli_logpdf(logits_x, images) - gaussian_kl(mu_z, sigmasq_z)
 
-    init_params = elbo.init_params(PRNGKey(0), PRNGKey(0), np.zeros((32, 5 * 5)))
+    params = elbo.init_params(PRNGKey(0), PRNGKey(0), np.zeros((32, 5 * 5)))
+    assert (5, 10) == params.encode.sequential1.dense.kernel.shape
 
 
-@pytest.mark.skip('TODO output pairs')
-def test_params_from_shared_submodules2():
-    sublayer = Dense(2)
-    a = Sequential(sublayer, relu)
-    b = Sequential(sublayer, np.sum)
+def test_output_pairs():
+    a = Sequential(Dense(2), relu)
 
     @parametrized
     def net(inputs):
-        return a(inputs), b(inputs)
+        return a(inputs), a(inputs)
 
     inputs = np.zeros((1, 3))
-    a_params = a.init_params(PRNGKey(0), inputs)
-    out = a.apply(a_params, inputs)
-
-    params = net.params_from({a: a_params}, inputs)
-    assert_params_equal(a_params.dense.kernel, params.a.kernel)
-    out_, _ = net.apply(params, inputs)
-    assert np.array_equal(out, out_)
+    params = net.init_params(PRNGKey(0), inputs)
+    out = net.apply(params, inputs)
+    assert (1, 2) == out.shape

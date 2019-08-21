@@ -292,11 +292,18 @@ def _expand_reuse_dict(reuse, *example_inputs):
 
 class parametrized(jc.Primitive):
     def __init__(self, fun):
-        self._fun = fun
         self._name = fun.__name__
-
-        self._own_params = {k: v.default for k, v in signature(self._fun).parameters.items()
+        self._own_params = {k: v.default for k, v in signature(fun).parameters.items()
                             if _is_parameter_collection(v.default)}
+
+        def packed_fun(*inputs, **kwargs):
+            result = fun(*inputs, **kwargs)
+            if isinstance(result, tuple):
+                return jax.pack(result)
+
+            return result
+
+        self._fun = packed_fun
 
         super().__init__(f'{self._name}_{id(self)}')
 
@@ -320,7 +327,7 @@ class parametrized(jc.Primitive):
 
         own_params = self._init_own_params(rng, *example_inputs, reuse_only=reuse_only)
 
-        # TODO allow submodules and param_values at the same time:
+        # TODO allow submodules and params at the same time:
         if any(own_params):
             return own_params
 
@@ -373,12 +380,12 @@ class parametrized(jc.Primitive):
             return name
 
         params = OrderedDict((next_name(prefix), params) for prefix, params in prefix_param_pairs)
-        # TODO name:
         Parameters = namedtuple(self._name, params.keys())
         return Parameters(**params)
 
     def apply(self, params, *inputs):
         # TODO allow submodules and params at the same time:
+
         if len(self._own_params) > 0:
             def resolve_params(param, param_values):
                 if isinstance(param, GeneralParam):
@@ -714,7 +721,7 @@ def GRUCell(carry_size, param_init):
         both_reset_carry = np.concatenate((x, reset * carry), axis=1)
         compute = np.tanh(np.dot(both_reset_carry, compute_kernel))
         out = update * compute + (1 - update) * carry
-        return jax.pack((out, out))
+        return out, out
 
     def carry_init(batch_size):
         return np.zeros((batch_size, carry_size))

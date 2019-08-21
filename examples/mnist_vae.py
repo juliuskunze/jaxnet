@@ -44,8 +44,7 @@ def encode(input):
     input = Sequential(Dense(512), relu, Dense(512), relu)(input)
     mean = Dense(10)(input)
     variance = Sequential(Dense(10), softplus)(input)
-    # TODO fix tuples:
-    return np.concatenate((mean, variance), axis=1)
+    return mean, variance
 
 
 decode = Sequential(Dense(512), relu, Dense(512), relu, Dense(28 * 28))
@@ -54,7 +53,7 @@ decode = Sequential(Dense(512), relu, Dense(512), relu, Dense(28 * 28))
 @parametrized
 def loss(rng, images):
     """Monte Carlo estimate of the negative evidence lower bound."""
-    mu_z, sigmasq_z = np.split(encode(images), 2, axis=1)
+    mu_z, sigmasq_z = encode(images)
     logits_x = decode(gaussian_sample(rng, mu_z, sigmasq_z))
     return -(bernoulli_logpdf(logits_x, images) - gaussian_kl(mu_z, sigmasq_z)) / images.shape[0]
 
@@ -68,6 +67,22 @@ def image_sample(rng, nrow, ncol):
     return image_grid(nrow, ncol, sampled_images, (28, 28))
 
 
+@parametrized
+def evaluate(images):
+    elbo_rng, data_rng, image_rng = random.split(test_rng, 3)
+    binarized_test = random.bernoulli(data_rng, images)
+    test_elbo = loss(elbo_rng, binarized_test)
+    # TODO: sampled_images = image_sample(image_rng, nrow, ncol)
+    return test_elbo  # , sampled_images
+
+
+@jit
+def binarize_batch(rng, i, images):
+    i = i % num_batches
+    batch = lax.dynamic_slice_in_dim(images, i * batch_size, batch_size)
+    return random.bernoulli(rng, batch)
+
+
 if __name__ == "__main__":
     step_size = 0.001
     num_epochs = 100
@@ -78,24 +93,6 @@ if __name__ == "__main__":
     train_images, test_images = mnist_images()
     num_complete_batches, leftover = divmod(train_images.shape[0], batch_size)
     num_batches = num_complete_batches + bool(leftover)
-
-
-    @jit
-    def binarize_batch(rng, i, images):
-        i = i % num_batches
-        batch = lax.dynamic_slice_in_dim(images, i * batch_size, batch_size)
-        return random.bernoulli(rng, batch)
-
-
-    @parametrized
-    def evaluate(images):
-        elbo_rng, data_rng, image_rng = random.split(test_rng, 3)
-        binarized_test = random.bernoulli(data_rng, images)
-        test_elbo = loss(elbo_rng, binarized_test)
-        # TODO fix: sampled_images = image_sample(image_rng, nrow, ncol)
-        return test_elbo  # , sampled_images
-
-
     opt_init, opt_update, get_params = optimizers.momentum(step_size, mass=0.9)
 
 
@@ -121,6 +118,6 @@ if __name__ == "__main__":
         opt_state = run_epoch(PRNGKey(epoch), opt_state)
         params = get_params(opt_state)
         test_elbo = evaluate.apply_from({shaped_elbo: params}, test_images, jit=True)
-        print("Epoch {: 3d} {} ({:.3f} sec)".format(epoch, test_elbo, time.time() - tic))
-        # TODO fix, see above: plt.imshow(sampled_images, cmap=plt.cm.gray)
+        print(f'Epoch {epoch: 3d} {test_elbo:.3f} ({time.time() - tic:.3f} sec)')
+        # TODO: plt.imshow(samples, cmap=plt.cm.gray)
         # plt.show()

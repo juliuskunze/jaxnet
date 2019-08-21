@@ -119,8 +119,8 @@ def Wavenet(dilations, filter_width, initial_filter_width, out_width,
         hidden = Conv1D(residual_channels, (initial_filter_width,))(inputs)
         out = np.zeros((hidden.shape[0], out_width, residual_channels), 'float32')
         for dilation in dilations:
-            res = ResLayer(dilation_channels, residual_channels, filter_width, dilation,
-                           out_width)(hidden)
+            res = ResLayer(dilation_channels, residual_channels,
+                           filter_width, dilation, out_width)(hidden)
             # TODO fix tuple:
             hidden = res[:, :-out.shape[1]]
             out_partial = res[:, -out.shape[1]:]
