@@ -67,8 +67,7 @@ def skip_slice(inputs, output_width):
     return lax.dynamic_slice(inputs, (0, skip_cut, 0), slice_sizes)
 
 
-def ResLayer(dilation_channels, residual_channels,
-             filter_width, dilation, output_width):
+def ResLayer(dilation_channels, residual_channels, filter_width, dilation, output_width):
     @parametrized
     def res_layer(inputs):
         """

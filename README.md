@@ -93,7 +93,7 @@ def Sequential(*layers):
         return inputs
 
     return sequential
-``
+```
 
 Using parameter-free functions is seamless:
 

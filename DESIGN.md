@@ -30,7 +30,9 @@ with `Param` as the primitive module.
 
 ## How are parameters named?
 
-Parameters are named after their defining `@parametrized` function.
+JAXnet does not rely on module our parameter names.
+Parameters are `namedtuple`s only for readability.
+They are named after their defining `@parametrized` function.
 If names clash within the same `@parameterized` function, indices are added in order of execution:
 
 ```python
@@ -46,19 +48,7 @@ assert (2, ) == params.dense1.bias.shape
 assert (2, ) == params.sequential.dense.bias.shape
 ```
 
-JAXnet does not rely on names in any way. Parameters are `namedtuple`s only for readability.
+When `init_params` is called on different modules, it can assign different names to parameters corresponding to the same shared module.
+When `init_params` is called on the same module twice, parameter names are guaranteed to be identical.
 
-- `init_params` identifies shared modules by object id / submodule path.
-- `apply` resolves submodule parameter values via nesting structure.
-- `params_from` allows access to parameter values of any submodule.
-
-Since naming modules is not required:
-- There is no global state for unique name generation.
-- Parameter sharing cannot happen accidentally due to name clashes.
-  It can only be achieved by reusing `@parametrized` objects.
-
-Naming parameter values is not required.
-- Although nested `tuple`s would suffice, `namedtuple`s can still be used to increase readability.
-- Since there are no constraints on the naming scheme, and it can in fact be optimized solely for readability:
-    - Weight names can be determinstic for a given model.
-    - Names will not have to be consistent between `init_params` calls of different networks reusing the same weights, allowing to avoid name clashes.
+Parameter sharing cannot happen accidentally, since module object identity is always unique.
