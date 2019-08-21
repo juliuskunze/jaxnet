@@ -2,7 +2,6 @@
 
 import time
 
-import matplotlib.pyplot as plt
 from jax import jit, grad, lax, random, numpy as np
 from jax.experimental import optimizers
 from jax.random import PRNGKey
@@ -41,25 +40,27 @@ def image_grid(nrow, ncol, imagevecs, imshape):
 
 
 @parametrized
-def encode(input, net=Sequential(Dense(512), relu, Dense(512), relu),
-           mean_net=Dense(10), variance_net=Sequential(Dense(10), softplus)):
-    input = net(input)
-    return mean_net(input), variance_net(input)
+def encode(input):
+    input = Sequential(Dense(512), relu, Dense(512), relu)(input)
+    mean = Dense(10)(input)
+    variance = Sequential(Dense(10), softplus)(input)
+    # TODO fix tuples:
+    return np.concatenate((mean, variance), axis=1)
 
 
 decode = Sequential(Dense(512), relu, Dense(512), relu, Dense(28 * 28))
 
 
 @parametrized
-def elbo(rng, images, encode=encode, decode=decode):
+def loss(rng, images):
     """Monte Carlo estimate of the negative evidence lower bound."""
-    mu_z, sigmasq_z = encode(images)
+    mu_z, sigmasq_z = np.split(encode(images), 2, axis=1)
     logits_x = decode(gaussian_sample(rng, mu_z, sigmasq_z))
-    return bernoulli_logpdf(logits_x, images) - gaussian_kl(mu_z, sigmasq_z)
+    return -(bernoulli_logpdf(logits_x, images) - gaussian_kl(mu_z, sigmasq_z)) / images.shape[0]
 
 
 @parametrized
-def image_sample(rng, nrow, ncol, decode=decode):
+def image_sample(rng, nrow, ncol):
     """Sample images from the generative model."""
     code_rng, img_rng = random.split(rng)
     logits = decode(random.normal(code_rng, (nrow * ncol, 10)))
@@ -78,41 +79,48 @@ if __name__ == "__main__":
     num_complete_batches, leftover = divmod(train_images.shape[0], batch_size)
     num_batches = num_complete_batches + bool(leftover)
 
+
+    @jit
     def binarize_batch(rng, i, images):
         i = i % num_batches
         batch = lax.dynamic_slice_in_dim(images, i * batch_size, batch_size)
         return random.bernoulli(rng, batch)
 
+
+    @parametrized
+    def evaluate(images):
+        elbo_rng, data_rng, image_rng = random.split(test_rng, 3)
+        binarized_test = random.bernoulli(data_rng, images)
+        test_elbo = loss(elbo_rng, binarized_test)
+        # TODO fix: sampled_images = image_sample(image_rng, nrow, ncol)
+        return test_elbo  # , sampled_images
+
+
     opt_init, opt_update, get_params = optimizers.momentum(step_size, mass=0.9)
-    example_rng = PRNGKey(0)
-    example_batch = binarize_batch(example_rng, 0, images=train_images)
-    init_params = elbo.init_params(PRNGKey(2), example_rng, example_batch)
-    opt_state = opt_init(init_params)
+
 
     @jit
     def run_epoch(rng, opt_state):
         def body_fun(i, opt_state):
             elbo_rng, data_rng = random.split(random.fold_in(rng, i))
             batch = binarize_batch(data_rng, i, train_images)
-            loss = lambda params: -elbo(params, elbo_rng, batch) / batch_size
-            g = grad(loss)(get_params(opt_state))
+            g = grad(loss.apply)(get_params(opt_state), elbo_rng, batch)
             return opt_update(i, g, opt_state)
 
         return lax.fori_loop(0, num_batches, body_fun, opt_state)
 
-    @parametrized
-    def evaluate(images, elbo=elbo, image_sample=image_sample):
-        elbo_rng, data_rng, image_rng = random.split(test_rng, 3)
-        binarized_test = random.bernoulli(data_rng, images)
-        test_elbo = elbo(elbo_rng, binarized_test) / images.shape[0]
-        sampled_images = image_sample(image_rng, nrow, ncol)
-        return test_elbo, sampled_images
+
+    example_rng = PRNGKey(0)
+    example_batch = binarize_batch(example_rng, 0, images=train_images)
+    shaped_elbo = loss.shaped(example_rng, example_batch)
+    init_params = shaped_elbo.init_params(PRNGKey(2))
+    opt_state = opt_init(init_params)
 
     for epoch in range(num_epochs):
         tic = time.time()
         opt_state = run_epoch(PRNGKey(epoch), opt_state)
         params = get_params(opt_state)
-        test_elbo, sampled_images = evaluate.apply_from({elbo: params}, test_images, jit=True)
+        test_elbo = evaluate.apply_from({shaped_elbo: params}, test_images, jit=True)
         print("Epoch {: 3d} {} ({:.3f} sec)".format(epoch, test_elbo, time.time() - tic))
-        plt.imshow(sampled_images, cmap=plt.cm.gray)
-        plt.show()
+        # TODO fix, see above: plt.imshow(sampled_images, cmap=plt.cm.gray)
+        # plt.show()

@@ -5,7 +5,7 @@ from jax import jit, grad, random, numpy as np
 from jax.experimental import optimizers
 
 from jaxnet import Conv, BatchNorm, GeneralConv, MaxPool, Dense, AvgPool, flatten, logsoftmax, \
-    Sequential, relu, parametrized, InputDependent
+    Sequential, relu, parametrized
 
 
 def ConvBlock(kernel_size, filters, strides=(2, 2)):
@@ -13,12 +13,12 @@ def ConvBlock(kernel_size, filters, strides=(2, 2)):
     filters1, filters2, filters3 = filters
 
     @parametrized
-    def conv_block(inputs,
-                   main=Sequential(
-                       Conv(filters1, (1, 1), strides), BatchNorm(), relu,
-                       Conv(filters2, (ks, ks), padding='SAME'), BatchNorm(), relu,
-                       Conv(filters3, (1, 1)), BatchNorm()),
-                   shortcut=Sequential(Conv(filters3, (1, 1), strides), BatchNorm())):
+    def conv_block(inputs):
+        main = Sequential(
+            Conv(filters1, (1, 1), strides), BatchNorm(), relu,
+            Conv(filters2, (ks, ks), padding='SAME'), BatchNorm(), relu,
+            Conv(filters3, (1, 1)), BatchNorm())
+        shortcut = Sequential(Conv(filters3, (1, 1), strides), BatchNorm())
         return relu(sum((main(inputs), shortcut(inputs))))
 
     return conv_block
@@ -28,15 +28,13 @@ def IdentityBlock(kernel_size, filters):
     ks = kernel_size
     filters1, filters2 = filters
 
-    def make_main(inputs):
-        # the number of output channels depends on the number of input channels
-        return Sequential(
+    @parametrized
+    def identity_block(inputs):
+        main = Sequential(
             Conv(filters1, (1, 1)), BatchNorm(), relu,
             Conv(filters2, (ks, ks), padding='SAME'), BatchNorm(), relu,
             Conv(inputs.shape[3], (1, 1)), BatchNorm())
 
-    @parametrized
-    def identity_block(inputs, main=InputDependent(make_main)):
         return relu(sum((main(inputs), inputs)))
 
     return identity_block
@@ -78,13 +76,13 @@ if __name__ == "__main__":
 
 
     @parametrized
-    def loss(inputs, targets, resnet=resnet):
+    def loss(inputs, targets):
         logits = resnet(inputs)
         return np.sum(logits * targets)
 
 
     @parametrized
-    def accuracy(inputs, targets, resnet=resnet):
+    def accuracy(inputs, targets):
         target_class = np.argmax(targets, axis=-1)
         predicted_class = np.argmax(resnet(inputs), axis=-1)
         return np.mean(predicted_class == target_class)
@@ -106,10 +104,11 @@ if __name__ == "__main__":
     @jit
     def update(i, opt_state, inputs, targets):
         params = get_params(opt_state)
-        return opt_update(i, grad(loss)(params, inputs, targets), opt_state)
+        return opt_update(i, grad(loss.apply)(params, inputs, targets), opt_state)
 
 
     opt_state = opt_init(loss.init_params(rng_key, *next(batches)))
     for i in range(num_steps):
+        print(f'Training on batch {i}.')
         opt_state = update(i, opt_state, *next(batches))
     trained_params = get_params(opt_state)

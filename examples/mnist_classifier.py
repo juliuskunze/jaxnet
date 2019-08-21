@@ -33,12 +33,12 @@ predict = Sequential(
 
 
 @parametrized
-def loss(inputs, targets, predict=predict):
+def loss(inputs, targets):
     return -np.mean(predict(inputs) * targets)
 
 
 @parametrized
-def accuracy(inputs, targets, predict=predict):
+def accuracy(inputs, targets):
     target_class = np.argmax(targets, axis=1)
     predicted_class = np.argmax(predict(inputs), axis=1)
     return np.mean(predicted_class == target_class)
@@ -75,7 +75,7 @@ if __name__ == "__main__":
     @jit
     def update(i, opt_state, images, labels):
         params = get_params(opt_state)
-        return opt_update(i, grad(loss)(params, images, labels), opt_state)
+        return opt_update(i, grad(loss.apply)(params, images, labels), opt_state)
 
 
     opt_state = opt_init(loss.init_params(rng, *next(batches)))

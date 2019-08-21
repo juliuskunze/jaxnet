@@ -38,13 +38,13 @@ from jax.random import PRNGKey
 inputs = np.zeros((3, 5, 5, 1))
 params = net.init_params(PRNGKey(0), inputs)
 
-print(params.layers[3].bias) # [0.00212132 0.01169001 0.00331698 0.00460713]
+print(params.dense.bias) # [-0.0178184   0.02460396 -0.00353479  0.00492503]
 ```
 
 Invoke the network with:
 
 ```python
-output = net(params, inputs) # use "jit(net)(params, inputs)" for acceleration
+output = net.apply(params, inputs) # use "jit(net.apply)(params, inputs)" for acceleration
 ```
 
 ## Defining modules
@@ -63,36 +63,25 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
 ```
 
 `Param` specifies parameter shape and initialization.
+Nested `tuple`s/`list`s/`dict`s of `Param`s work.
 `@parametrized` transforms the function to allow usage as above.
+
+Unlike the session / graphs API from Tensorflow 1,
+JAXnet calls module functions with concrete values (when `jit` is not used),
+allowing step-by-step debugging like any normal Python function.
 
 ## Nesting modules
 
-Modules can be used in other modules through default arguments:
+Modules can be used in other modules:
 
 ```python
 @parametrized
-def encode(input, 
-           net=Sequential(Dense(512), relu),
-           mean_net=Dense(10),
-           variance_net=Sequential(Dense(10), softplus)):
-    input = net(input)
-    return mean_net(input), variance_net(input)
+def encode(input):
+    input = Sequential(Dense(512), relu, Dense(512), relu)(input)
+    mean = Dense(10)(input)
+    variance = Sequential(Dense(10), softplus)(input)
+    return np.concatenate((mean, variance), axis=1)
 ```
-
-Use many modules at once with collections:
-
-```python
-def Sequential(*layers):
-    @parametrized
-    def sequential(inputs, layers=layers):
-        for module in layers:
-            inputs = module(inputs)
-        return inputs
-
-    return sequential
-```
-
-Nested `tuple`s/`list`s/`dict`s of modules work. The same is true for `Param`s.
 
 Using parameter-free functions is seamless:
 
@@ -105,13 +94,13 @@ layer = Sequential(Dense(10), relu)
 
 ## Parameter sharing
 
-Parameters can be shared by using module or parameter objects multiple times (**not yet implemented**):
+Parameters can be shared by using module or parameter objects multiple times:
 
 ```python
 shared_net=Sequential(layer, layer)
 ```
 
-This is equivalent to (already implemented):
+This is equivalent to:
 
 ```python
 @parametrized
@@ -122,7 +111,7 @@ def shared_net(input, layer=layer):
 ## Parameter reuse
 
 If you want to evaluate parts or extended versions of a trained network
-(i. e. to get accuracy, generate samples, or do introspection), you can use `apply_from`:
+(get accuracy, generate samples, introspect, ...), you can use `apply_from`:
 
 ```python
 predict = Sequential(Dense(1024), relu, Dense(10), logsoftmax)
@@ -145,7 +134,7 @@ test_acc = accuracy.apply_from({loss: params}, *test_inputs, jit=True)
 It is a shorthand for:
 
 ```python
-accuracy_params = accuracy.params_from({loss: params})
+accuracy_params = accuracy.params_from({loss: params}, *test_inputs)
 test_acc = jit(accuracy)(accuracy_params, *test_inputs)
 ```
 
@@ -166,11 +155,9 @@ assert transfer_net_params.layers[0] is net_params
 # train transfer_net_params...
 ```
 
-If you don't have a reference like `net`, `reuse={transfer_net.layers[0]: net_params}` also works.
-
 ## What about [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
 JAXnet is independent of stax.
 The main motivation over stax is to simplify nesting modules.
 Find details and porting instructions [here](STAX.md).
 
-Alternative design ideas are discussed [here](DESIGN.md).
+API design is discussed [here](DESIGN.md).

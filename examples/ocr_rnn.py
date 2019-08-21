@@ -37,12 +37,12 @@ if __name__ == "__main__":
         lambda x: np.reshape(x, (-1, length, class_count)))
 
     @parametrized
-    def cross_entropy(inputs, targets, net=net):
+    def cross_entropy(inputs, targets):
         prediction = net(inputs)
         return np.mean(-np.sum(targets * np.log(prediction), (1, 2)))
 
     @parametrized
-    def error(inputs, targets, net=net):
+    def error(inputs, targets):
         prediction = net(inputs)
         return np.mean(np.not_equal(np.argmax(targets, 2), np.argmax(prediction, 2)))
 
@@ -51,17 +51,18 @@ if __name__ == "__main__":
     @jit
     def update(i, opt_state, data, target):
         params = get_params(opt_state)
-        return opt_update(i, grad(cross_entropy)(params, data, target), opt_state)
+        return opt_update(i, grad(cross_entropy.apply)(params, data, target), opt_state)
 
     itercount = itertools.count()
     batch = train.sample(batch_size)
     params = cross_entropy.init_params(random.PRNGKey(0), batch.data, batch.target)
     opt_state = opt_init(params)
     for epoch in range(10):
-        e = error.apply_from({cross_entropy: get_params(opt_state)}, test.data, test.target,
-                             jit=True)
+        params = get_params(opt_state)
+        e = error.apply_from({cross_entropy: params}, test.data, test.target, jit=True)
         print(f'Epoch {epoch} error {e * 100:.1f}')
 
+        break # TODO fix: custom scan init differentiation
         for _ in range(100):
             batch = train.sample(batch_size)
             opt_state = update(next(itercount), opt_state, batch.data, batch.target)
