@@ -1,11 +1,11 @@
 import pytest
-from jax import numpy as np, jit, random, lax, pack
+from jax import numpy as np, jit, random, lax
 from jax.random import PRNGKey
 
 from examples.mnist_vae import gaussian_sample, bernoulli_logpdf, gaussian_kl
-from jaxnet import parametrized, Param, Dense, Sequential, relu, Conv, Conv1D, \
+from jaxnet import parametrized, Parameter, Dense, Sequential, relu, Conv, Conv1D, \
     ConvTranspose, Conv1DTranspose, flatten, MaxPool, zeros, GRUCell, Rnn, softmax, SumPool, \
-    AvgPool, Dropout, BatchNorm, save_params, load_params, sigmoid, softplus
+    AvgPool, Dropout, BatchNorm, save_params, load_params, softplus, parameter
 
 
 def random_inputs(input_shape, rng=PRNGKey(0)):
@@ -278,7 +278,7 @@ def test_no_params():
     assert np.array_equal(out, out_)
 
 
-def test_params():
+def test_Dense():
     net = Dense(2, kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 3))
 
@@ -295,38 +295,21 @@ def test_params():
     assert_params_equal(params, params_)
 
 
-def test_params_list():
+def test_param_and_submodule_mixed():
     @parametrized
-    def dense(inputs,
-              params=(Param(lambda inputs: (inputs.shape[-1], 2), zeros),
-                      Param(lambda _: (2,), zeros))):
-        kernel, bias = params
-        return np.dot(inputs, kernel) + bias
+    def linear_map(inputs):
+        kernel = Parameter('kernel', (inputs.shape[-1], 2), zeros, inputs)
+        return np.dot(inputs, kernel)
+
+    @parametrized
+    def dense(inputs):
+        return linear_map(inputs) + Parameter('bias', (2,), zeros, inputs)
 
     inputs = np.zeros((1, 3))
 
     params = dense.init_params(PRNGKey(0), inputs)
-    assert_params_equal(((np.zeros((3, 2)), np.zeros(2)),), params)
-    assert str(dense).startswith('dense')
-
-    out = dense.apply(params, inputs)
-    assert np.array_equal(np.zeros((1, 2)), out)
-
-    out_ = jit(dense.apply)(params, inputs)
-    assert np.array_equal(out, out_)
-
-
-def test_params_dict():
-    @parametrized
-    def dense(inputs,
-              params={'kernel': Param(lambda inputs: (inputs.shape[-1], 2), zeros),
-                      'bias': Param(lambda _: (2,), zeros)}):
-        return np.dot(inputs, params['kernel']) + params['bias']
-
-    inputs = np.zeros((1, 3))
-
-    params = dense.init_params(PRNGKey(0), inputs)
-    assert_params_equal(({'kernel': np.zeros((3, 2)), 'bias': np.zeros(2)},), params)
+    assert (2,) == params.bias.shape
+    assert (3, 2) == params.linear_map.kernel.shape
 
     out = dense.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
@@ -336,19 +319,17 @@ def test_params_dict():
 
 
 @pytest.mark.skip('TODO')
-def test_param_and_submodule_mixed():
+def test_mixed_up_execution_order():
     @parametrized
-    def linear_map(inputs, kernel=Param(lambda inputs: (inputs.shape[-1], 2), zeros)):
-        return np.dot(inputs, kernel)
-
-    @parametrized
-    def dense(inputs, bias=Param(lambda _: (2,), zeros)):
-        return linear_map(inputs) + bias
+    def dense(inputs):
+        bias = Parameter('bias', (2,), zeros, inputs)
+        return np.dot(inputs, Parameter('kernel', (inputs.shape[-1], 2), zeros, inputs)) + bias
 
     inputs = np.zeros((1, 3))
 
     params = dense.init_params(PRNGKey(0), inputs)
-    assert_params_equal(((np.zeros((3, 2)), np.zeros(2)),), params)
+    assert (2,) == params.bias.shape
+    assert (3, 2) == params.kernel.shape
 
     out = dense.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
@@ -444,7 +425,7 @@ def test_params_from_shared_submodules():
     params = net.params_from({a: a_params}, inputs)
     assert_params_equal(a_params.dense.kernel, params.sequential0.dense.kernel)
     assert_params_equal(a_params.dense.kernel, params.sequential1.dense.kernel)
-    out_ = net.apply(params, inputs)
+    out = net.apply(params, inputs)
 
     out_ = net.apply_from({a: a_params}, inputs)
     assert np.array_equal(out, out_)
@@ -614,90 +595,6 @@ def test_GRUCell_shape():
     assert (2, 10) == out[1].shape
 
 
-def test_tuple_input_shape():
-    def GRUCell(carry_size, param_init):
-        def param(): return Param(lambda inputs: (inputs[1].shape[1] + carry_size, carry_size),
-                                  param_init)
-
-        @parametrized
-        def gru_cell(inputs,
-                     update_kernel=param(),
-                     reset_kernel=param(),
-                     compute_kernel=param()):
-            carry, x = inputs
-            both = np.concatenate((x, carry), axis=1)
-            update = sigmoid(np.dot(both, update_kernel))
-            reset = sigmoid(np.dot(both, reset_kernel))
-            both_reset_carry = np.concatenate((x, reset * carry), axis=1)
-            compute = np.tanh(np.dot(both_reset_carry, compute_kernel))
-            out = update * compute + (1 - update) * carry
-            return out, out
-
-        def carry_init(batch_size):
-            return np.zeros((batch_size, carry_size))
-
-        return gru_cell, carry_init
-
-    gru_cell, init_carry = GRUCell(10, zeros)
-
-    x = np.zeros((2, 3))
-    carry = init_carry(batch_size=2)
-    inputs = (carry, x)
-    params = gru_cell.init_params(PRNGKey(0), inputs)
-
-    out = gru_cell.apply(params, inputs)
-    # TODO remove ".xs":
-    out = out.xs
-
-    assert isinstance(out, tuple)
-    assert len(out) == 2
-
-    assert np.array_equal(np.zeros((2, 10)), out[0])
-    assert np.array_equal(np.zeros((2, 10)), out[1])
-
-
-def test_dict_input_shape():
-    def GRUCell(carry_size, param_init):
-        def param(): return Param(lambda inputs: (inputs['x'].shape[1] + carry_size, carry_size),
-                                  param_init)
-
-        @parametrized
-        def gru_cell(inputs,
-                     update_kernel=param(),
-                     reset_kernel=param(),
-                     compute_kernel=param()):
-            carry, x = inputs['carry'], inputs['x']
-            both = np.concatenate((x, carry), axis=1)
-            update = sigmoid(np.dot(both, update_kernel))
-            reset = sigmoid(np.dot(both, reset_kernel))
-            both_reset_carry = np.concatenate((x, reset * carry), axis=1)
-            compute = np.tanh(np.dot(both_reset_carry, compute_kernel))
-            out = update * compute + (1 - update) * carry
-            return out, out
-
-        def carry_init(batch_size):
-            return np.zeros((batch_size, carry_size))
-
-        return gru_cell, carry_init
-
-    gru_cell, init_carry = GRUCell(10, zeros)
-
-    x = np.zeros((2, 3))
-    carry = init_carry(batch_size=2)
-    inputs = {'carry': carry, 'x': x}
-    params = gru_cell.init_params(PRNGKey(0), inputs)
-    out = gru_cell.apply(params, inputs)
-
-    # TODO remove ".xs":
-    out = out.xs
-
-    assert isinstance(out, tuple)
-    assert len(out) == 2
-
-    assert np.array_equal(np.zeros((2, 10)), out[0])
-    assert np.array_equal(np.zeros((2, 10)), out[1])
-
-
 def test_Rnn_shape():
     inputs = np.zeros((2, 5, 4))
     rnn = Rnn(*GRUCell(3, zeros))
@@ -743,10 +640,9 @@ def test_Rnn_net_shape():
     assert np.array_equal(.25 * np.ones((1, 5, 4)), out)
 
 
-@pytest.mark.skip('TODO')
 def test_scan_unparametrized_cell():
     def cell(carry, x):
-        return pack((np.array([2]) * carry * x, np.array([2]) * carry * x))
+        return np.array([2]) * carry * x, np.array([2]) * carry * x
 
     @parametrized
     def rnn(inputs):
@@ -761,11 +657,10 @@ def test_scan_unparametrized_cell():
     assert (3, 2) == outs.shape
 
 
-@pytest.mark.skip('TODO')
 def test_scan_parametrized_cell_without_params():
     @parametrized
     def cell(carry, x):
-        return pack((np.array([2]) * carry * x, np.array([2]) * carry * x))
+        return np.array([2]) * carry * x, np.array([2]) * carry * x
 
     @parametrized
     def rnn(inputs):
@@ -782,8 +677,9 @@ def test_scan_parametrized_cell_without_params():
 
 def test_scan_parametrized_cell():
     @parametrized
-    def cell(carry, x, scale=Param(lambda carry, x: (), zeros)):
-        return pack((scale * np.array([2]) * carry * x, scale * np.array([2]) * carry * x))
+    def cell(carry, x):
+        scale = Parameter('s', (2,), zeros, carry)
+        return scale * np.array([2]) * carry * x, scale * np.array([2]) * carry * x
 
     @parametrized
     def rnn(inputs):
@@ -905,19 +801,14 @@ def test_save_and_load_params():
     assert_dense_params_equal(params, params_)
 
 
-def test_module_without_inputs():
-    def Param_(shape, init):
-        @parametrized
-        def param(p=Param(lambda _: shape, init)):
-            return p
+@pytest.mark.skip('TODO')
+def test_submodule_without_inputs():
+    @parametrized
+    def scalar():
+        return Parameter('scalar', (), zeros, 0)
 
-        return param
-
-    inputs = np.zeros((1, 3))
-    scalar = Param_((), zeros)
-
-    params = scalar.init_params(PRNGKey(0), inputs)
-    assert_params_equal((np.zeros(()),), params)
+    params = scalar.init_params(PRNGKey(0))
+    assert_params_equal((), params)
 
     out = scalar.apply(params)
     assert np.array_equal(np.zeros(()), out)
@@ -926,32 +817,19 @@ def test_module_without_inputs():
     assert np.array_equal(out, out_)
 
 
-@pytest.mark.skip('TODO make parameters modules as well, get rid of default argument parsing.')
 def test_nested_module_without_inputs():
-    def Param_(shape, init):
-        @parametrized
-        def param(p=Param(lambda: shape, init)):
-            return p
-
-        return param()
-
-    @parametrized
-    def dense(inputs):
-        kernel = Param_((inputs.shape[-1], 2), zeros)
-        bias = Param_((2,), zeros)
-        return np.dot(inputs, kernel) + bias
-
+    dense = Dense(2)
     inputs = np.zeros((1, 3))
-
     params = dense.init_params(PRNGKey(0), inputs)
-    assert_params_equal(((np.zeros((3, 2)), np.zeros(2)),), params)
+    assert (3, 2) == params.kernel.shape
+    assert (2,) == params.bias.shape
     assert str(dense).startswith('dense')
 
     out = dense.apply(params, inputs)
-    assert np.array_equal(np.zeros((1, 2)), out)
+    assert (1, 2) == out.shape
 
     out_ = jit(dense.apply)(params, inputs)
-    assert np.array_equal(out, out_)
+    assert np.allclose(out, out_)
 
 
 def test_mnist_vae_example():
@@ -974,7 +852,31 @@ def test_mnist_vae_example():
     assert (5, 10) == params.encode.sequential1.dense.kernel.shape
 
 
-def test_output_pairs():
+@pytest.mark.skip('TODO')
+def test_tuple_input():
+    @parametrized
+    def net(input_dict):
+        return input_dict[0] * input_dict[1] * Parameter('s', (), zeros, input_dict[0])
+
+    inputs = (np.zeros((2,)), np.zeros((2,)))
+    params = net.init_params(PRNGKey(0), inputs)
+    out = net.apply(params, inputs)
+    assert np.array_equal(np.zeros((2, 10)), out)
+
+
+@pytest.mark.skip('TODO')
+def test_dict_input():
+    @parametrized
+    def net(input_dict):
+        return input_dict['a'] * input_dict['b'] * Parameter('s', (), zeros, input_dict['a'])
+
+    inputs = {'a': np.zeros((2,)), 'b': np.zeros((2,))}
+    params = net.init_params(PRNGKey(0), inputs)
+    out = net.apply(params, inputs)
+    assert np.array_equal(np.zeros((2, 10)), out)
+
+
+def test_tuple_output():
     a = Sequential(Dense(2), relu)
 
     @parametrized
@@ -990,3 +892,12 @@ def test_output_pairs():
 
     assert (1, 2) == out1.shape
     assert np.array_equal(out1, out2)
+
+
+def test_parameter():
+    scalar = parameter('scalar', lambda _: np.zeros(()))
+    param = scalar.init_params(PRNGKey(0))
+
+    assert np.zeros(()) == param
+    out = scalar.apply(param)
+    assert param == out

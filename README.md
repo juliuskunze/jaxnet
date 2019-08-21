@@ -49,29 +49,7 @@ output = net.apply(params, inputs) # use "jit(net.apply)(params, inputs)" for ac
 
 ## Defining modules
 
-Modules are functions decorated with `@parametrized`, with parameters defined through default values:
-
-```python
-def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
-    @parametrized
-    def dense(inputs,
-              kernel=Param(lambda inputs: (inputs.shape[-1], out_dim), kernel_init),
-              bias=Param(lambda _: (out_dim,), bias_init)):
-        return np.dot(inputs, kernel) + bias
-
-    return dense
-```
-
-`Param` specifies parameter shape and initialization.
-Nested `tuple`s/`list`s/`dict`s of `Param`s work.
-`@parametrized` transforms the function to allow usage as above.
-
-JAXnet calls module functions with concrete values (when `jit` is not used),
-allowing step-by-step debugging like any normal Python function.
-
-## Nesting modules
-
-Modules can be used in other modules:
+Modules are defined as `@parametrized` functions that can use other modules:
 
 ```python
 @parametrized
@@ -82,7 +60,7 @@ def encode(input):
     return np.concatenate((mean, variance), axis=1)
 ```
 
-`Sequential` is defined like this:
+`Sequential` is defined as
 
 ```
 def Sequential(*layers):
@@ -106,16 +84,20 @@ layer = Sequential(Dense(10), relu)
 
 This is why `relu`, `flatten`, `softmax`, ... from `jaxnet` are plain Python functions.
 
-Parameters are shared by using module or parameter objects multiple times:
+Parameters are shared by using the same module object multiple times:
 
 ```python
 shared_net=Sequential(layer, layer)
 ```
 
+JAXnet calls module functions with concrete values (when `jit` is not used),
+allowing step-by-step debugging like any normal Python function.
+All modules are composed in this way from one primitive module, described [here](DESIGN.md).
+
 ## Parameter reuse
 
 If you want to evaluate parts or extended versions of a trained network
-(get accuracy, generate samples, introspect, ...), you can use `apply_from`:
+(to get accuracy, generate samples, do introspection, ...), you can use `apply_from`:
 
 ```python
 predict = Sequential(Dense(1024), relu, Dense(10), logsoftmax)

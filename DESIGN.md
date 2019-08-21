@@ -1,37 +1,58 @@
-# API Design
+## What is primitive module?
 
-We plan to allow defining parameters as submodules in a future version:
+`parameter` is the primitive module from which all modules are built,
+defined with a name and initialization function:
+
+```python
+scalar = parameter('scalar', lambda _: np.zeros(()))
+```
+
+It has only one parameter that is initialized via the given function:
+
+```python
+param = scalar.init_params(PRNGKey(0))
+assert np.zeros(()) == param
+```
+
+Independent of any inputs, it returns this parameter values:
+
+```python
+assert param == scalar.apply(param)
+```
+
+All other modules are composed from this primitive via `@parametrized` functions:
 
 ```python
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parametrized
     def dense(inputs):
-        kernel = Param((inputs.shape[-1], out_dim), kernel_init)
-        bias = Param((out_dim,), bias_init)
+        kernel = parameter('kernel', lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))(inputs)
+        bias = parameter('bias', lambda rng: bias_init(rng, (out_dim,)))(inputs)
         return np.dot(inputs, kernel) + bias
 
     return dense
 ```
 
-where `Param` has the following meaning (expressed in the current API, doesn't work yet):
+(For technical reasons, `parameter` is required to be called with a dummy argument
+that needs to be (any part of) or depend on the module input.
+This is planned to be removed in a future version.)
+The `Parameter` helper function allows to express the same more concisely:
 
 ```python
-def Param(shape, init):
+def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parametrized
-    def param(p=jaxnet.Param(lambda: shape, init)):
-        return p
+    def dense(inputs):
+        kernel = Parameter('kernel', (inputs.shape[-1], out_dim), kernel_init, inputs)
+        bias = Parameter('bias', (out_dim,), bias_init, inputs)
+        return np.dot(inputs, kernel) + bias
 
-    return param()
+    return dense
 ```
-
-This removes the need for a special semantics of default arguments for `Param`s.
-Nesting modules is then the only mechanism to create new modules,
-with `Param` as the primitive module.
 
 ## How are parameters named?
 
-JAXnet does not rely on module or parameter names.
-Parameters are nested `namedtuple`s instead of nested `tuples` only for readability.
+JAXnet does not rely on module or weight names.
+Parameters are initialized to (nested) `namedtuple`s for readability only.
 They are named after their defining module (`@parametrized` function).
 If names clash within the same module, indices are added in order of execution:
 

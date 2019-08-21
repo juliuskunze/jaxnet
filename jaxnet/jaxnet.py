@@ -1,15 +1,14 @@
 import functools
 import itertools
 from collections import namedtuple, OrderedDict, Counter, defaultdict
-from inspect import signature
 from pathlib import Path
 
 import dill
 import jax
 import numpy as onp
-from jax import core as jc, linear_util as lu, numpy as np, random
-from jax import lax
+from jax import random, lax, core as jc, linear_util as lu, numpy as np
 from jax.abstract_arrays import ShapedArray
+from jax.api_util import flatten_fun
 from jax.interpreters import xla, partial_eval as pe
 from jax.interpreters.batching import get_aval
 from jax.lax import scan, fori_loop
@@ -19,24 +18,12 @@ from jax.random import PRNGKey
 from jax.scipy.special import logsumexp, expit
 from jax.util import unzip2, safe_zip, safe_map, partial, WrapHashably
 
-from jaxnet.tools import zip_nested, map_nested, nested_any, ZippedValue, flatten_nested
-
 zip = safe_zip
 map = safe_map
 
-GeneralParam = namedtuple('Param', ('init_param',))
 
-
-def Param(get_shape, init): return GeneralParam(
-    init_param=lambda rng, *example_inputs: init(rng, get_shape(*example_inputs)))
-
-
-def to_dict(params):
-    return params if isinstance(params, dict) else params._asdict()
-
-
-def call_init(primitive, rng, submodule_params, params, jaxpr, consts, freevar_vals, in_vals,
-              **kwargs):
+def call_init(primitive, rng, submodule_params, params,
+              jaxpr, consts, freevar_vals, in_vals, **kwargs):
     jaxpr, = jaxpr
     consts, = consts
     freevar_vals, = freevar_vals
@@ -44,7 +31,8 @@ def call_init(primitive, rng, submodule_params, params, jaxpr, consts, freevar_v
     return primitive.bind(f, *in_vals, **params), submodule_params
 
 
-def scan_init(rng, submodule_params, consts, init, xs, forward, length, jaxpr, reuse, reuse_only):
+def scan_init(rng, submodule_params_dict, consts, init, xs, forward, length, jaxpr, reuse,
+              reuse_only):
     assert len(consts) == 0
 
     _, _, x_aval = jaxpr.in_avals
@@ -52,41 +40,46 @@ def scan_init(rng, submodule_params, consts, init, xs, forward, length, jaxpr, r
     ys_aval = _promote_aval_rank(length, y_aval)
 
     x = _index_arrays(0, x_aval, xs)
-    submodule_params = _get_submodule_params(rng, jaxpr.jaxpr, jaxpr.literals, (),
-                                             submodule_params, consts, init, x,
-                                             reuse=reuse, reuse_only=reuse_only)
+    submodule_params_dict = _get_submodule_params(rng, jaxpr.jaxpr, jaxpr.literals, (),
+                                                  submodule_params_dict, consts, init, x,
+                                                  reuse=reuse, reuse_only=reuse_only)
+
+    if len(submodule_params_dict) == 0:
+        submodule_params = ()
+    else:
+        primitive, = submodule_params_dict.keys()
+        submodule_params = (primitive._params_namedtuple(submodule_params_dict[primitive]),)
 
     def body_fun(i, vals):
         idx = i if forward else length - i - 1
         carry, ys = vals
         x = _index_arrays(idx, x_aval, xs)
-        submodule_params_tuple = tuple(submodule_params.values())
-        assert len(submodule_params_tuple) <= 1
-        carry_out, y = parametrized(jc.jaxpr_as_fun(jaxpr)).apply(submodule_params_tuple, consts,
-                                                                  carry, x)
+        cell = parametrized(jc.jaxpr_as_fun(jaxpr))
+        carry_out, y = cell.apply(submodule_params, consts,
+                                  carry, x)
         ys_out = _update_arrays(idx, y_aval, ys, y)
         return carry_out, ys_out
 
     ys_init = _empty_arrays(ys_aval)
     carry, ys = fori_loop(0, length, body_fun, (init, ys_init))
-    return jc.pack((carry, ys)), submodule_params
+    return jc.pack((carry, ys)), submodule_params_dict
 
 
 def scan_apply(submodule_params_iter, consts, init, xs, forward, length, jaxpr):
-    assert len(consts) == 0
-
     _, _, x_aval = jaxpr.in_avals
     _, y_aval = jaxpr.out_aval
     ys_aval = _promote_aval_rank(length, y_aval)
 
     # TODO fix param sharing
-    cell_params = (submodule_params_iter.get_params(None),)
+    cell_params = (submodule_params_iter.get_params(None),) if len(
+        submodule_params_iter.submodule_params) > 0 else ()
 
     def body_fun(i, vals):
         idx = i if forward else length - i - 1
         carry, ys = vals
         x = _index_arrays(idx, x_aval, xs)
-        carry_out, y = parametrized(jc.jaxpr_as_fun(jaxpr)).apply(cell_params, consts, carry, x)
+        cell = parametrized(jc.jaxpr_as_fun(jaxpr))
+        carry_out, y = cell.apply(cell_params, consts, carry, x)
         ys_out = _update_arrays(idx, y_aval, ys, y)
         return carry_out, ys_out
 
@@ -106,13 +99,13 @@ def _get_primitive_init(primitive, reuse, reuse_only):
         return partial(init_rules[primitive], reuse=reuse, reuse_only=reuse_only)
 
     if isinstance(primitive, parametrized):
-        def traced_submodule_init(rng, submodule_params_dicts, *inputs):
-            if primitive not in submodule_params_dicts:
-                params_dict = primitive._init_params_dict(rng, *inputs, reuse=reuse,
-                                                          reuse_only=reuse_only)
-                submodule_params_dicts[primitive] = params_dict
-            submodule_params = primitive._params_namedtuple(submodule_params_dicts[primitive])
-            return primitive.apply(submodule_params, *inputs), submodule_params_dicts
+        def traced_submodule_init(rng, submodule_params_dict, *inputs):
+            if primitive not in submodule_params_dict:
+                params_dict = primitive._init_or_reuse_params_dict(rng, *inputs, reuse=reuse,
+                                                                   reuse_only=reuse_only)
+                submodule_params_dict[primitive] = params_dict
+            submodule_params = primitive._params_namedtuple(submodule_params_dict[primitive])
+            return primitive.apply(submodule_params, *inputs), submodule_params_dict
 
         return traced_submodule_init
 
@@ -160,9 +153,6 @@ def _get_submodule_params(rng, jaxpr, consts, freevar_vals, submodule_params, *a
                 prim_rng, submodule_params, *in_vals, **eqn.params)
         outvals = list(ans) if eqn.destructure else [ans]
         map(write, eqn.outvars, outvals)
-
-    # TODO needed?
-    read(jaxpr.outvar)
 
     return submodule_params
 
@@ -271,10 +261,6 @@ def apply_subtrace(master, submodule_params, *vals):
     yield out_tracer.val
 
 
-def _is_parameter_collection(x):
-    return nested_any(map_nested(lambda x: isinstance(x, GeneralParam), x, (GeneralParam,)))
-
-
 def _expand_reuse_dict(reuse, *example_inputs):
     expanded_reuse = {}
 
@@ -291,10 +277,8 @@ def _expand_reuse_dict(reuse, *example_inputs):
 
 
 class parametrized(jc.Primitive):
-    def __init__(self, fun):
-        self._name = fun.__name__
-        self._own_params = {k: v.default for k, v in signature(fun).parameters.items()
-                            if _is_parameter_collection(v.default)}
+    def __init__(self, fun, name=None):
+        self._name = name if name else fun.__name__
 
         def packed_fun(*inputs, **kwargs):
             result = fun(*inputs, **kwargs)
@@ -320,37 +304,33 @@ class parametrized(jc.Primitive):
     def __call__(self, *inputs):
         return self.bind(*inputs)
 
-    def _init_params_dict(self, rng, *example_inputs, reuse=None, reuse_only=False):
+    def _init_or_reuse_params_dict(self, rng, *example_inputs, reuse=None, reuse_only=False):
         if reuse:
-            if self in reuse:
-                return reuse[self]
+            params = reuse.get(self)
+            if params:
+                return params
 
-        own_params = self._init_own_params(rng, *example_inputs, reuse_only=reuse_only)
+        return self._init_params_dict(rng, *example_inputs,
+                                      reuse=reuse, reuse_only=reuse_only)
 
-        # TODO allow submodules and params at the same time:
-        if any(own_params):
-            return own_params
+    def _init_params_dict(self, rng, *example_inputs, reuse, reuse_only):
+        net_fun = lu.wrap_init(self._fun)
+        jax_inputs, in_tree = jax.tree_flatten((example_inputs, {}))
+        net_fun, _ = flatten_fun(net_fun, in_tree)
 
         def pv_like(x):
             return pe.PartialVal((get_aval(x), jc.unit))
 
-        pvals = map(pv_like, example_inputs)
-        jaxpr, _, consts = pe.trace_to_jaxpr(lu.wrap_init(self._fun), pvals)
+        pvals = map(pv_like, jax_inputs)
+        jaxpr, _, consts = pe.trace_to_jaxpr(net_fun, pvals)
 
-        submodule_params = _get_submodule_params(rng, jaxpr, consts, [], OrderedDict(),
-                                                 *example_inputs,
-                                                 reuse=reuse, reuse_only=reuse_only)
-
-        if reuse:
-            for module in submodule_params.keys():
-                if module in reuse:
-                    submodule_params[module] = reuse[module]
-
-        submodule_params.update(own_params)
-        return submodule_params
+        return _get_submodule_params(rng, jaxpr, consts, [], OrderedDict(),
+                                     *example_inputs,
+                                     reuse=reuse, reuse_only=reuse_only)
 
     def init_params(self, rng, *example_inputs, reuse=None, reuse_only=False):
-        d = self._init_params_dict(rng, *example_inputs, reuse=reuse, reuse_only=reuse_only)
+        d = self._init_or_reuse_params_dict(rng, *example_inputs, reuse=reuse,
+                                            reuse_only=reuse_only)
 
         return self._params_namedtuple(d)
 
@@ -358,17 +338,15 @@ class parametrized(jc.Primitive):
         if isinstance(params_dict, tuple):  # happens on reuse
             return params_dict
 
-        submodule_params = OrderedDict(
-            (module, param) for module, param in params_dict.items() if not isinstance(module, str))
-        own_param_values = OrderedDict(
-            (param_name, param) for param_name, param in params_dict.items() if
-            isinstance(param_name, str))
+        if not isinstance(params_dict, dict):
+            assert hasattr(params_dict, 'shape')
+
+            return params_dict
 
         index_by_prefix = defaultdict(lambda: 0)
 
-        prefix_param_pairs = ([(module._name, module._params_namedtuple(params))
-                               for module, params in submodule_params.items()] +
-                              list(own_param_values.items()))
+        prefix_param_pairs = [(module._name, module._params_namedtuple(params))
+                              for module, params in params_dict.items()]
 
         prefix_counter = Counter([prefix for prefix, _ in prefix_param_pairs])
 
@@ -384,60 +362,12 @@ class parametrized(jc.Primitive):
         return Parameters(**params)
 
     def apply(self, params, *inputs):
-        # TODO allow submodules and params at the same time:
-
-        if len(self._own_params) > 0:
-            def resolve_params(param, param_values):
-                if isinstance(param, GeneralParam):
-                    return param_values
-
-                return param
-
-            pairs = self._get_param_value_pairs(params)
-            resolved_params = map_nested(lambda pair: resolve_params(*pair),
-                                         pairs, element_types=(ZippedValue, GeneralParam))
-            return self._fun(*inputs, **resolved_params)
+        assert isinstance(params, tuple)
 
         return apply_transform(lu.wrap_init(self._fun), params).call_wrapped(inputs)
 
-    def _get_param_value_pairs(self, param_values):
-        param_values = param_values._asdict() if isinstance(param_values, tuple) else param_values
-        return zip_nested(self._own_params, param_values, element_types=(GeneralParam,))
-
-    def _init_own_params(self, rng, *example_inputs, reuse=None, reuse_only):
-        if isinstance(self, parametrized):
-            if reuse and self in reuse:
-                return reuse[self]
-
-        def init_param(param):
-            if reuse_only:
-                # TODO: include index path to param in message
-                raise ValueError(f'No param value specified for {param}.')
-
-            nonlocal rng
-            rng, rng_param = random.split(rng)
-            return param.init_param(rng_param, *example_inputs)
-
-        return map_nested(lambda param: init_param(param), self._own_params,
-                          element_types=(GeneralParam,))
-
     def __str__(self):
         return self.name
-
-    def _expand_reuse_dict(self, reuse):
-        r = dict()
-
-        for param, value in reuse.items():
-            r.update({param: value})
-
-            if isinstance(param, parametrized):
-                pairs = param._get_param_value_pairs(value)
-                pairs = flatten_nested(pairs, (ZippedValue,))
-                values_by_submodule = {p: v for (p, v) in pairs}
-
-                r.update(param._expand_reuse_dict(values_by_submodule))
-
-        return r
 
     def params_from(self, reuse, *example_inputs):
         expanded_reuse = _expand_reuse_dict(reuse, *example_inputs)
@@ -459,9 +389,39 @@ class parametrized(jc.Primitive):
         return ShapedParametrized(self, *inputs)
 
 
+def Parameter(name, shape, init, dummy_inputs):
+    return GeneralParameter(
+        name=name,
+        init_param=lambda rng: init(rng, shape),
+        dummy_inputs=dummy_inputs)
+
+
+def GeneralParameter(name, init_param, dummy_inputs):
+    return parameter(name, init_param)(dummy_inputs)
+
+
+class parameter(parametrized):
+    def __init__(self, name, init_param):
+        self._init_param = init_param
+
+        super().__init__(lambda params, *_: params, name=name)
+
+    def apply(self, params, *inputs):
+        return self._fun(params, *inputs)
+
+    def _init_params_dict(self, rng, *example_inputs, reuse, reuse_only):
+        if reuse_only:
+            raise ValueError(f'No param value specified for {self}.')
+
+        rng, rng_param = random.split(rng)
+        return self._init_param(rng_param)
+
+
 def _get_reuse_dict(module, params, params_dict):
     assert len(params_dict) == len(params)
     d = {module: params}
+
+    if not isinstance(params_dict, dict): return d
 
     for ((module, submodule_params_dict), submodule_params) in zip(params_dict.items(), params):
         if isinstance(module, parametrized):
@@ -476,7 +436,6 @@ def _get_reuse_dict(module, params, params_dict):
                                      "Use params_from_overlapping if intended.")
 
             d.update(reuse_dict)
-        # TODO allow sharing of Params directly (not only submodules)
 
     return d
 
@@ -489,8 +448,8 @@ class ShapedParametrized:
 
     def _params_dict(self):
         if self._params_dict_cached is None:
-            self._params_dict_cached = self.parametrized._init_params_dict(PRNGKey(0),
-                                                                           *self.example_inputs)
+            self._params_dict_cached = self.parametrized._init_or_reuse_params_dict(
+                PRNGKey(0), *self.example_inputs)
 
         return self._params_dict_cached
 
@@ -576,9 +535,9 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     """Layer constructor function for a dense (fully-connected) layer."""
 
     @parametrized
-    def dense(inputs,
-              kernel=Param(lambda inputs: (inputs.shape[-1], out_dim), kernel_init),
-              bias=Param(lambda _: (out_dim,), bias_init)):
+    def dense(inputs):
+        kernel = Parameter('kernel', (inputs.shape[-1], out_dim), kernel_init, dummy_inputs=inputs)
+        bias = Parameter('bias', (out_dim,), bias_init, dummy_inputs=inputs)
         return np.dot(inputs, kernel) + bias
 
     return dense
@@ -613,23 +572,20 @@ def GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None, padding
     lhs_spec, rhs_spec, out_spec = dimension_numbers
     one = (1,) * len(filter_shape)
     strides = strides or one
-    dilation = dilation or one
     kernel_init = kernel_init or glorot(rhs_spec.index('O'), rhs_spec.index('I'))
-
-    def kernel_shape(inputs):
-        filter_shape_iter = iter(filter_shape)
-
-        return [out_chan if c == 'O' else
-                inputs.shape[lhs_spec.index('C')] if c == 'I' else
-                next(filter_shape_iter) for c in rhs_spec]
-
-    bias_shape = tuple(
-        itertools.dropwhile(lambda x: x == 1, [out_chan if c == 'C' else 1 for c in out_spec]))
+    dilation = dilation or one
 
     @parametrized
-    def conv(inputs,
-             kernel=Param(kernel_shape, kernel_init),
-             bias=Param(lambda _: bias_shape, bias_init)):
+    def conv(inputs):
+        filter_shape_iter = iter(filter_shape)
+        kernel_shape = [out_chan if c == 'O' else
+                        inputs.shape[lhs_spec.index('C')] if c == 'I' else
+                        next(filter_shape_iter) for c in rhs_spec]
+        bias_shape = tuple(itertools.dropwhile(lambda x: x == 1,
+                                               [out_chan if c == 'C' else 1 for c in out_spec]))
+
+        kernel = Parameter('kernel', kernel_shape, kernel_init, inputs)
+        bias = Parameter('bias', bias_shape, bias_init, inputs)
         return lax.conv_general_dilated(inputs, kernel, strides, padding, one, dilation,
                                         dimension_numbers) + bias
 
@@ -650,20 +606,19 @@ def GeneralConvTranspose(dimension_numbers, out_chan, filter_shape,
     strides = strides or one
     kernel_init = kernel_init or glorot(rhs_spec.index('O'), rhs_spec.index('I'))
 
-    def kernel_shape(inputs):
+    @parametrized
+    def conv_transpose(inputs):
         filter_shape_iter = iter(filter_shape)
 
-        return [out_chan if c == 'O' else
-                inputs.shape[lhs_spec.index('C')] if c == 'I' else
-                next(filter_shape_iter) for c in rhs_spec]
+        kernel_shape = [out_chan if c == 'O' else
+                        inputs.shape[lhs_spec.index('C')] if c == 'I' else
+                        next(filter_shape_iter) for c in rhs_spec]
 
-    bias_shape = tuple(
-        itertools.dropwhile(lambda x: x == 1, [out_chan if c == 'C' else 1 for c in out_spec]))
+        bias_shape = tuple(
+            itertools.dropwhile(lambda x: x == 1, [out_chan if c == 'C' else 1 for c in out_spec]))
 
-    @parametrized
-    def conv_transpose(inputs,
-                       kernel=Param(kernel_shape, kernel_init),
-                       bias=Param(lambda _: bias_shape, bias_init)):
+        kernel = Parameter('kernel', kernel_shape, kernel_init, inputs)
+        bias = Parameter('bias', bias_shape, bias_init, inputs)
         return lax.conv_transpose(inputs, kernel, strides, padding,
                                   dimension_numbers) + bias
 
@@ -708,18 +663,16 @@ AvgPool = _pool(lax.add, 0., _normalize_by_window_size)
 
 
 def GRUCell(carry_size, param_init):
-    def param(): return Param(lambda carry, x: (x.shape[1] + carry_size, carry_size), param_init)
-
     @parametrized
-    def gru_cell(carry, x,
-                 update_kernel=param(),
-                 reset_kernel=param(),
-                 compute_kernel=param()):
+    def gru_cell(carry, x):
+        def param(name):
+            return Parameter(name, (x.shape[1] + carry_size, carry_size), param_init, carry)
+
         both = np.concatenate((x, carry), axis=1)
-        update = sigmoid(np.dot(both, update_kernel))
-        reset = sigmoid(np.dot(both, reset_kernel))
+        update = sigmoid(np.dot(both, param('update_kernel')))
+        reset = sigmoid(np.dot(both, param('reset_kernel')))
         both_reset_carry = np.concatenate((x, reset * carry), axis=1)
-        compute = np.tanh(np.dot(both_reset_carry, compute_kernel))
+        compute = np.tanh(np.dot(both_reset_carry, param('compute_kernel')))
         out = update * compute + (1 - update) * carry
         return out, out
 
@@ -770,20 +723,17 @@ def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,
               beta_init=zeros, gamma_init=ones):
     """Layer construction function for a batch normalization layer."""
 
-    get_shape = lambda input: tuple(d for i, d in enumerate(input.shape) if i not in axis)
     axis = (axis,) if np.isscalar(axis) else axis
 
     @parametrized
-    def batch_norm(x,
-                   beta=Param(get_shape, beta_init) if center else None,
-                   gamma=Param(get_shape, gamma_init) if scale else None):
+    def batch_norm(x):
         ed = tuple(None if i in axis else slice(None) for i in range(np.ndim(x)))
         mean, var = np.mean(x, axis, keepdims=True), fastvar(x, axis, keepdims=True)
         z = (x - mean) / np.sqrt(var + epsilon)
-        if center and scale: return gamma[ed] * z + beta[ed]
-        if center: return z + beta[ed]
-        if scale: return gamma[ed] * z
-        return z
+        shape = tuple(d for i, d in enumerate(x.shape) if i not in axis)
+
+        scaled = z * Parameter('gamma', shape, gamma_init, x)[ed] if scale else z
+        return scaled + Parameter('beta', shape, beta_init, x)[ed] if center else scaled
 
     return batch_norm
 
