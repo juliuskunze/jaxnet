@@ -6,8 +6,8 @@ We plan to allow defining parameters as submodules in a future version:
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parametrized
     def dense(inputs):
-        kernel = Param((inputs.shape[-1], out_dim), init=kernel_init)
-        bias = Param((out_dim,), init=bias_init)
+        kernel = Param((inputs.shape[-1], out_dim), kernel_init)
+        bias = Param((out_dim,), bias_init)
         return np.dot(inputs, kernel) + bias
 
     return dense
@@ -30,7 +30,7 @@ with `Param` as the primitive module.
 
 ## How are parameters named?
 
-JAXnet does not rely on module our parameter names.
+JAXnet does not rely on module or parameter names.
 Parameters are `namedtuple`s only for readability.
 They are named after their defining `@parametrized` function.
 If names clash within the same `@parameterized` function, indices are added in order of execution:
