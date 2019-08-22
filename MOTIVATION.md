@@ -30,9 +30,9 @@ In popular frameworks, you would have resupply get a bunch of latent variable sa
 
 In JAXnet you can simply fix the sampling random seed for this specific part of the network. ([demo](examples/mnist_vae.py#L91))
 
-## What about existing frameworks?
+## What about existing libraries?
 
-Here is a crude comparison of some existing libraries:
+Here is a crude comparison of some popular libraries:
 
 | Deep Learning Library                 | [Tensorflow2/Keras](https://www.tensorflow.org/beta) | [PyTorch](https://pytorch.org)  | [JAXnet](https://github.com/JuliusKunze/jaxnet) |
 |-------------------------|-------------------|----------|--------|

@@ -1,7 +1,7 @@
 # JAXnet [![Build Status](https://travis-ci.org/JuliusKunze/jaxnet.svg?branch=master)](https://travis-ci.org/JuliusKunze/jaxnet) [![PyPI](https://img.shields.io/pypi/v/jaxnet.svg)](https://pypi.python.org/pypi/jaxnet/#history)
 
-JAXnet is a neural net library for [JAX](https://github.com/google/jax).
-Different from popular neural net libraries, it is completely functional:
+JAXnet is a machine learning library for [JAX](https://github.com/google/jax).
+Different from popular alternatives, it is completely functional:
 - No mutable weights in modules
 - No global compute graph
 - No global random key
@@ -15,15 +15,6 @@ pip install jaxnet
 ```
 
 To use GPU, first install the [right version of jaxlib](https://github.com/google/jax#installation).
-
-See JAXnet in action in these demos:
-[Mnist Classifier](https://colab.research.google.com/drive/18kICTUbjqnfg5Lk3xFVQtUj6ahct9Vmv),
-[Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g),
-[OCR with RNNs](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E),
-[ResNet](https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN) and
-[WaveNet](https://colab.research.google.com/drive/111cKRfwYX4YFuPH3FF4V46XLfsPG1icZ).
-
-## Overview
 
 ```python
 from jaxnet import *
@@ -48,6 +39,13 @@ Invoke the network with:
 ```python
 output = net.apply(params, inputs) # use "jit(net.apply)(params, inputs)" for acceleration
 ```
+
+See JAXnet in action in these demos:
+[Mnist Classifier](https://colab.research.google.com/drive/18kICTUbjqnfg5Lk3xFVQtUj6ahct9Vmv),
+[Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g),
+[OCR with RNNs](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E),
+[ResNet](https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN) and
+[WaveNet](https://colab.research.google.com/drive/111cKRfwYX4YFuPH3FF4V46XLfsPG1icZ).
 
 ## Defining modules
 
@@ -84,7 +82,7 @@ def relu(x):
 layer = Sequential(Dense(10), relu)
 ```
 
-This is why `relu`, `flatten`, `softmax`, ... from `jaxnet` are plain Python functions.
+`relu`, `flatten`, `softmax`, ... are plain functions.
 
 Parameters are shared by using the same module object multiple times:
 
@@ -95,6 +93,8 @@ shared_net = Sequential(layer, layer)
 JAXnet calls module functions with concrete values (when `jit` is not used),
 allowing step-by-step debugging like any normal Python function.
 All modules are composed in this way from one primitive module, described [here](DESIGN.md#what-is-the-primitive-module).
+This includes all [predefined JAXnet modules](jaxnet/modules.py).
+The [tests](tests/test_modules.py) show how they can be used.
 
 ## Parameter reuse
 
