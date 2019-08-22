@@ -280,7 +280,7 @@ def test_scan_parametrized_cell_without_params():
 def test_scan_parametrized_cell():
     @parametrized
     def cell(carry, x):
-        scale = Parameter('s', (2,), zeros, carry)
+        scale = Parameter((2,), zeros, carry)
         return scale * np.array([2]) * carry * x, scale * np.array([2]) * carry * x
 
     @parametrized
@@ -328,7 +328,7 @@ def test_input_dependent_nested_modules():
 def test_submodule_without_inputs():
     @parametrized
     def scalar():
-        return parameter('scalar', lambda: np.zeros(()))
+        return parameter(lambda: np.zeros(()))
 
     params = scalar.init_params(PRNGKey(0))
     assert_params_equal((), params)
@@ -358,12 +358,12 @@ def test_nested_module_without_inputs():
 def test_param_and_submodule_mixed():
     @parametrized
     def linear_map(inputs):
-        kernel = Parameter('kernel', (inputs.shape[-1], 2), zeros, inputs)
+        kernel = Parameter((inputs.shape[-1], 2), zeros, inputs, 'kernel')
         return np.dot(inputs, kernel)
 
     @parametrized
     def dense(inputs):
-        return linear_map(inputs) + Parameter('bias', (2,), zeros, inputs)
+        return linear_map(inputs) + Parameter((2,), zeros, inputs, 'bias')
 
     inputs = np.zeros((1, 3))
 
@@ -382,8 +382,8 @@ def test_param_and_submodule_mixed():
 def test_mixed_up_execution_order():
     @parametrized
     def dense(inputs):
-        bias = Parameter('bias', (2,), zeros, inputs)
-        return np.dot(inputs, Parameter('kernel', (inputs.shape[-1], 2), zeros, inputs)) + bias
+        bias = Parameter((2,), zeros, inputs, 'bias')
+        return np.dot(inputs, Parameter((inputs.shape[-1], 2), zeros, inputs), 'kernel') + bias
 
     inputs = np.zeros((1, 3))
 
@@ -538,7 +538,7 @@ def test_params_from_shared_submodules2():
 def test_tuple_input():
     @parametrized
     def net(input_dict):
-        return input_dict[0] * input_dict[1] * Parameter('s', (), zeros, input_dict[0])
+        return input_dict[0] * input_dict[1] * Parameter((), zeros, input_dict[0])
 
     inputs = (np.zeros((2,)), np.zeros((2,)))
     params = net.init_params(PRNGKey(0), inputs)
@@ -550,7 +550,7 @@ def test_tuple_input():
 def test_dict_input():
     @parametrized
     def net(input_dict):
-        return input_dict['a'] * input_dict['b'] * Parameter('s', (), zeros, input_dict['a'])
+        return input_dict['a'] * input_dict['b'] * Parameter((), zeros, input_dict['a'])
 
     inputs = {'a': np.zeros((2,)), 'b': np.zeros((2,))}
     params = net.init_params(PRNGKey(0), inputs)

@@ -5,7 +5,7 @@ from jax.random import PRNGKey
 from examples.mnist_vae import gaussian_sample, bernoulli_logpdf, gaussian_kl
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, Conv1D, \
     ConvTranspose, Conv1DTranspose, flatten, MaxPool, zeros, GRUCell, Rnn, softmax, SumPool, \
-    AvgPool, Dropout, BatchNorm, softplus, parameter
+    AvgPool, Dropout, BatchNorm, softplus, parameter, glorot, randn, Parameter
 from tests.util import random_inputs, assert_params_equal
 
 
@@ -89,27 +89,64 @@ def test_ocr_rnn_example():
 
 
 def test_parameter_example():
-    scalar = parameter('scalar', lambda _: np.zeros(()))
+    scalar = parameter(lambda _: np.zeros(()))
     param = scalar.init_params(PRNGKey(0))
 
     assert np.zeros(()) == param
     out = scalar.apply(param)
     assert param == out
 
+def test_parameter_dense_example():
+    def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
+        @parametrized
+        def dense(inputs):
+            kernel = parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))(inputs)
+            bias = parameter(lambda rng: bias_init(rng, (out_dim,)))(inputs)
+            return np.dot(inputs, kernel) + bias
+
+        return dense
+
+    net = Dense(2)
+    inputs = np.zeros((1, 3))
+    params = net.init_params(PRNGKey(0), inputs)
+    assert (3, 2) == params.parameter0.shape
+    assert (2, ) == params.parameter1.shape
+
+    out = net.apply(params, inputs)
+    assert (1, 2) == out.shape
+
+def test_parameter_dense_example():
+    def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
+        @parametrized
+        def dense(inputs):
+            kernel = Parameter((inputs.shape[-1], out_dim), kernel_init, inputs)
+            bias = Parameter((out_dim,), bias_init, inputs)
+            return np.dot(inputs, kernel) + bias
+
+        return dense
+
+    net = Dense(2)
+    inputs = np.zeros((1, 3))
+    params = net.init_params(PRNGKey(0), inputs)
+    assert (3, 2) == params.parameter0.shape
+    assert (2, ) == params.parameter1.shape
+
+    out = net.apply(params, inputs)
+    assert (1, 2) == out.shape
 
 def test_parameter_simple_class_example():
     class parameter:
-        def __init__(self, name, init_param):
-            self.name = name
-            self._init_param = init_param
+        def __init__(self, init_param):
+            self.init_param = init_param
 
-        def apply(self, params, *inputs): return params
+        def apply(self, params, *inputs):
+            return params
 
         def init_params(self, rng, *example_inputs):
             rng, rng_param = random.split(rng)
-            return self._init_param(rng_param)
+            return self.init_param(rng_param)
 
-    scalar = parameter('scalar', lambda _: np.zeros(()))
+    scalar = parameter(lambda _: np.zeros(()))
     param = scalar.init_params(PRNGKey(0))
 
     assert np.zeros(()) == param

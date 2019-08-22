@@ -41,13 +41,13 @@ shared_net = Sequential(layer, layer)
 ## What is the primitive module?
 
 `parameter` is the primitive module from which all modules are built,
-defined with a name and initialization function:
+defined with an initialization function:
 
 ```python
-scalar = parameter('scalar', lambda _: np.zeros(()))
+scalar = parameter(lambda rng: np.zeros(()))
 ```
 
-It has only one parameter that is initialized via the given function:
+The module has a single parameter that is initialized via the given function:
 
 ```python
 param = scalar.init_params(PRNGKey(0))
@@ -66,8 +66,8 @@ All other modules are composed from this primitive via `@parametrized` functions
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parametrized
     def dense(inputs):
-        kernel = parameter('kernel', lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))(inputs)
-        bias = parameter('bias', lambda rng: bias_init(rng, (out_dim,)))(inputs)
+        kernel = parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))(inputs)
+        bias = parameter(lambda rng: bias_init(rng, (out_dim,)))(inputs)
         return np.dot(inputs, kernel) + bias
 
     return dense
@@ -82,11 +82,17 @@ The `Parameter` helper function allows to express the same more concisely:
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parametrized
     def dense(inputs):
-        kernel = Parameter('kernel', (inputs.shape[-1], out_dim), kernel_init, inputs)
-        bias = Parameter('bias', (out_dim,), bias_init, inputs)
+        kernel = Parameter((inputs.shape[-1], out_dim), kernel_init, inputs)
+        bias = Parameter((out_dim,), bias_init, inputs)
         return np.dot(inputs, kernel) + bias
 
     return dense
+```
+
+Parameters can optionally be named (see next section for effect):
+
+```
+        kernel = Parameter((inputs.shape[-1], out_dim), kernel_init, inputs, 'kernel')
 ```
 
 ## How are parameters named?
@@ -94,6 +100,7 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
 JAXnet does not rely on module or weight names.
 Parameters are initialized to (nested) `namedtuple`s for readability only.
 They are named after their defining module (`@parametrized` function).
+If it is a parameter, it's named `parameter` by default, with the specified name.
 If names clash within the same module, indices are added in order of execution:
 
 ```python

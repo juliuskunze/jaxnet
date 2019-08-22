@@ -1,6 +1,6 @@
 # JAXnet [![Build Status](https://travis-ci.org/JuliusKunze/jaxnet.svg?branch=master)](https://travis-ci.org/JuliusKunze/jaxnet) [![PyPI](https://img.shields.io/pypi/v/jaxnet.svg)](https://pypi.python.org/pypi/jaxnet/#history)
 
-JAXnet is a machine learning library for [JAX](https://github.com/google/jax).
+JAXnet is a neural net library built with [JAX](https://github.com/google/jax).
 Different from popular alternatives, it is completely functional:
 - No mutable weights in modules
 - No global compute graph

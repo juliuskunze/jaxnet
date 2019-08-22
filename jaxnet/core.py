@@ -409,10 +409,10 @@ class parametrized(jc.Primitive):
 
 
 class parameter(parametrized):
-    def __init__(self, name, init_param):
+    def __init__(self, init_param, name=None):
         self._init_param = init_param
 
-        super().__init__(lambda params, *_: params, name=name)
+        super().__init__(lambda params, *_: params, name=name if name else 'parameter')
 
     def apply(self, params, *inputs):
         return self._fun(params, *inputs)

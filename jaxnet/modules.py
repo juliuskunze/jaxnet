@@ -47,7 +47,7 @@ def fastvar(x, axis, keepdims):
     return np.mean(x ** 2, axis, keepdims=keepdims) - np.mean(x, axis, keepdims=keepdims) ** 2
 
 
-def Parameter(name, shape, init, dummy_inputs):
+def Parameter(shape, init, dummy_inputs, name=None):
     return GeneralParameter(
         name=name,
         init_param=lambda rng: init(rng, shape),
@@ -55,7 +55,7 @@ def Parameter(name, shape, init, dummy_inputs):
 
 
 def GeneralParameter(name, init_param, dummy_inputs):
-    return parameter(name, init_param)(dummy_inputs)
+    return parameter(init_param, name)(dummy_inputs)
 
 
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
@@ -63,8 +63,9 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
 
     @parametrized
     def dense(inputs):
-        kernel = Parameter('kernel', (inputs.shape[-1], out_dim), kernel_init, dummy_inputs=inputs)
-        bias = Parameter('bias', (out_dim,), bias_init, dummy_inputs=inputs)
+        kernel = Parameter((inputs.shape[-1], out_dim), kernel_init, dummy_inputs=inputs,
+                           name='kernel')
+        bias = Parameter((out_dim,), bias_init, dummy_inputs=inputs, name='bias')
         return np.dot(inputs, kernel) + bias
 
     return dense
@@ -111,8 +112,8 @@ def GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None, padding
         bias_shape = tuple(itertools.dropwhile(lambda x: x == 1,
                                                [out_chan if c == 'C' else 1 for c in out_spec]))
 
-        kernel = Parameter('kernel', kernel_shape, kernel_init, inputs)
-        bias = Parameter('bias', bias_shape, bias_init, inputs)
+        kernel = Parameter(kernel_shape, kernel_init, inputs, 'kernel')
+        bias = Parameter(bias_shape, bias_init, inputs, 'bias')
         return lax.conv_general_dilated(inputs, kernel, strides, padding, one, dilation,
                                         dimension_numbers) + bias
 
@@ -144,8 +145,8 @@ def GeneralConvTranspose(dimension_numbers, out_chan, filter_shape,
         bias_shape = tuple(
             itertools.dropwhile(lambda x: x == 1, [out_chan if c == 'C' else 1 for c in out_spec]))
 
-        kernel = Parameter('kernel', kernel_shape, kernel_init, inputs)
-        bias = Parameter('bias', bias_shape, bias_init, inputs)
+        kernel = Parameter(kernel_shape, kernel_init, inputs, 'kernel')
+        bias = Parameter(bias_shape, bias_init, inputs, 'bias')
         return lax.conv_transpose(inputs, kernel, strides, padding,
                                   dimension_numbers) + bias
 
@@ -193,7 +194,7 @@ def GRUCell(carry_size, param_init):
     @parametrized
     def gru_cell(carry, x):
         def param(name):
-            return Parameter(name, (x.shape[1] + carry_size, carry_size), param_init, carry)
+            return Parameter((x.shape[1] + carry_size, carry_size), param_init, carry, name)
 
         both = np.concatenate((x, carry), axis=1)
         update = sigmoid(np.dot(both, param('update_kernel')))
@@ -259,7 +260,7 @@ def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,
         z = (x - mean) / np.sqrt(var + epsilon)
         shape = tuple(d for i, d in enumerate(x.shape) if i not in axis)
 
-        scaled = z * Parameter('gamma', shape, gamma_init, x)[ed] if scale else z
-        return scaled + Parameter('beta', shape, beta_init, x)[ed] if center else scaled
+        scaled = z * Parameter(shape, gamma_init, x, 'gamma')[ed] if scale else z
+        return scaled + Parameter(shape, beta_init, x, 'beta')[ed] if center else scaled
 
     return batch_norm
