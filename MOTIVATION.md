@@ -24,11 +24,10 @@ All network definitions and weights are contained in (read-only) objects.
 This encourages code that is easy to reuse.
 
 ### Global random state is inflexible.
-Example: While trained a VAE, you might want to see how reconstructions for a fixed latent variable sample improves over time.
-In popular frameworks, you would have resupply get a bunch of latent variable samples and resupply them to the network, requiring some extra code.
+Example: While trained a VAE, you might want to see how reconstructions for a fixed latent variable sample improve over time.
+In popular frameworks, the easiest solution is typically to sample a latent variable and resupply it to the network, requiring some extra code.
 
-
-In JAXnet you can simply fix the sampling random seed for this specific part of the network. ([demo](examples/mnist_vae.py#L91))
+In JAXnet you can fix the sampling random seed for this specific part of the network. ([demo](examples/mnist_vae.py#L91))
 
 ## What about existing libraries?
 
