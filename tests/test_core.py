@@ -355,6 +355,185 @@ def test_nested_module_without_inputs():
     assert np.allclose(out, out_)
 
 
+def test_param_and_submodule_mixed():
+    @parametrized
+    def linear_map(inputs):
+        kernel = Parameter('kernel', (inputs.shape[-1], 2), zeros, inputs)
+        return np.dot(inputs, kernel)
+
+    @parametrized
+    def dense(inputs):
+        return linear_map(inputs) + Parameter('bias', (2,), zeros, inputs)
+
+    inputs = np.zeros((1, 3))
+
+    params = dense.init_params(PRNGKey(0), inputs)
+    assert (2,) == params.bias.shape
+    assert (3, 2) == params.linear_map.kernel.shape
+
+    out = dense.apply(params, inputs)
+    assert np.array_equal(np.zeros((1, 2)), out)
+
+    out_ = jit(dense.apply)(params, inputs)
+    assert np.array_equal(out, out_)
+
+
+@pytest.mark.skip('TODO')
+def test_mixed_up_execution_order():
+    @parametrized
+    def dense(inputs):
+        bias = Parameter('bias', (2,), zeros, inputs)
+        return np.dot(inputs, Parameter('kernel', (inputs.shape[-1], 2), zeros, inputs)) + bias
+
+    inputs = np.zeros((1, 3))
+
+    params = dense.init_params(PRNGKey(0), inputs)
+    assert (2,) == params.bias.shape
+    assert (3, 2) == params.kernel.shape
+
+    out = dense.apply(params, inputs)
+    assert np.array_equal(np.zeros((1, 2)), out)
+
+    out_ = jit(dense.apply)(params, inputs)
+    assert np.array_equal(out, out_)
+
+
+def test_submodule_reuse_top_level():
+    net = Dense(2)
+    inputs = np.zeros((1, 3))
+    params = net.init_params(PRNGKey(0), inputs)
+    out = net.apply(params, inputs)
+
+    params_ = net.init_params(PRNGKey(1), inputs, reuse={net: params})
+    assert_dense_params_equal(params, params_)
+
+    out_ = net.apply(params_, inputs)
+    assert np.array_equal(out, out_)
+
+
+def test_params_from():
+    layer = Dense(2)
+    net = Sequential(layer, relu)
+    inputs = np.zeros((1, 3))
+    layer_params = layer.init_params(PRNGKey(0), inputs)
+
+    params_ = net.params_from({layer: layer_params}, inputs)
+    assert_params_equal((layer_params,), params_)
+
+    out = net.apply(params_, inputs)
+
+    out_ = net.apply_from({layer: layer_params}, inputs)
+    assert np.array_equal(out, out_)
+
+    out_ = net.apply_from({layer: layer_params}, inputs, jit=True)
+    assert np.array_equal(out, out_)
+
+
+def test_params_from_subsubmodule():
+    subsublayer = Dense(2)
+    sublayer = Sequential(subsublayer, relu)
+    net = Sequential(sublayer, np.sum)
+    inputs = np.zeros((1, 3))
+    params = net.init_params(PRNGKey(0), inputs)
+    out = net.apply(params, inputs)
+
+    subsublayer_params = subsublayer.init_params(PRNGKey(0), inputs)
+
+    params_ = net.params_from({subsublayer: subsublayer_params}, inputs)
+    assert_dense_params_equal(subsublayer_params, params_[0][0])
+    out_ = net.apply(params_, inputs)
+    assert out.shape == out_.shape
+
+    out_ = net.apply_from({subsublayer: subsublayer_params}, inputs)
+    assert out.shape == out_.shape
+
+    out_ = net.apply_from({subsublayer: subsublayer_params}, inputs, jit=True)
+    assert out.shape == out_.shape
+
+
+def test_params_from_top_level():
+    net = Dense(2)
+    inputs = np.zeros((1, 3))
+    params = net.init_params(PRNGKey(0), inputs)
+    out = net.apply(params, inputs)
+
+    params_ = net.params_from({net: params}, inputs)
+    assert_dense_params_equal(params, params_)
+    out_ = net.apply(params_, inputs)
+    assert np.array_equal(out, out_)
+
+    out_ = net.apply_from({net: params}, inputs)
+    assert np.array_equal(out, out_)
+
+    out_ = net.apply_from({net: params}, inputs, jit=True)
+    assert np.array_equal(out, out_)
+
+
+def test_params_from_shared_submodules():
+    sublayer = Dense(2)
+    a = Sequential(sublayer, relu)
+    b = Sequential(sublayer, np.sum)
+
+    @parametrized
+    def net(inputs):
+        return a(inputs) * b(inputs)
+
+    inputs = np.zeros((1, 3))
+    a_params = a.init_params(PRNGKey(0), inputs)
+    out = a.apply(a_params, inputs)
+
+    params = net.params_from({a: a_params}, inputs)
+    assert_params_equal(a_params.dense.kernel, params.sequential0.dense.kernel)
+    assert_params_equal(a_params.dense.kernel, params.sequential1.dense.kernel)
+    out = net.apply(params, inputs)
+
+    out_ = net.apply_from({a: a_params}, inputs)
+    assert np.array_equal(out, out_)
+
+    out_ = net.apply_from({a: a_params}, inputs, jit=True)
+    assert np.array_equal(out, out_)
+
+    out_ = net.apply_from({a.shaped(inputs): a_params}, inputs)
+    assert np.array_equal(out, out_)
+
+    out_ = net.apply_from({a.shaped(inputs): a_params}, inputs, jit=True)
+    assert np.array_equal(out, out_)
+
+    out_ = net.shaped(inputs).apply_from({a: a_params})
+    assert np.array_equal(out, out_)
+
+    out_ = net.shaped(inputs).apply_from({a: a_params}, jit=True)
+    assert np.array_equal(out, out_)
+
+    out_ = net.shaped(inputs).apply_from({a.shaped(inputs): a_params})
+    assert np.array_equal(out, out_)
+
+    out_ = net.shaped(inputs).apply_from({a.shaped(inputs): a_params}, jit=True)
+    assert np.array_equal(out, out_)
+
+
+def test_params_from_shared_submodules2():
+    sublayer = Dense(2)
+    a = Sequential(sublayer, relu)
+    b = Sequential(sublayer, np.sum)
+
+    @parametrized
+    def net(inputs):
+        return a(inputs), b(inputs)
+
+    inputs = np.zeros((1, 3))
+    a_params = a.init_params(PRNGKey(0), inputs)
+    out = a.apply(a_params, inputs)
+
+    params = net.params_from({a: a_params}, inputs)
+    assert_dense_params_equal(a_params.dense, params.sequential0.dense)
+    assert_dense_params_equal(a_params.dense, params.sequential1.dense)
+    # TODO parameters are duplicated, optimization with weight sharing is wrong:
+    # TODO instead: assert 1 == len(params)
+    out_, _ = net.apply(params, inputs)
+    assert np.array_equal(out, out_)
+
+
 @pytest.mark.skip('TODO')
 def test_tuple_input():
     @parametrized
