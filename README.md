@@ -8,14 +8,6 @@ Different from popular alternatives, it is completely functional:
 
 This encourages robust code and allows new ways of optimization ([detailed motivation here](MOTIVATION.md)).
 
-**This is an early version. Expect breaking changes!** Install with
-
-```
-pip install jaxnet
-```
-
-To use GPU, first install the [right version of jaxlib](https://github.com/google/jax#installation).
-
 ```python
 from jaxnet import *
 
@@ -40,15 +32,6 @@ Invoke the network with:
 output = net.apply(params, inputs) # use "jit(net.apply)(params, inputs)" for acceleration
 ```
 
-See JAXnet in action in these demos:
-[Mnist Classifier](https://colab.research.google.com/drive/18kICTUbjqnfg5Lk3xFVQtUj6ahct9Vmv),
-[Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g),
-[OCR with RNNs](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E),
-[ResNet](https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN) and
-[WaveNet](https://colab.research.google.com/drive/111cKRfwYX4YFuPH3FF4V46XLfsPG1icZ).
-
-## Defining modules
-
 Modules are defined as `@parametrized` functions that can use other modules:
 
 ```python
@@ -57,90 +40,29 @@ def encode(input):
     input = Sequential(Dense(512), relu, Dense(512), relu)(input)
     mean = Dense(10)(input)
     variance = Sequential(Dense(10), softplus)(input)
-    return np.concatenate((mean, variance), axis=1)
+    return mean, variance
 ```
 
-`Sequential` is defined as
+All modules are composed in this way. Find more details on the API [here](API.md).
+JAXnet allows step-by-step debugging with concrete numpy arrays like any Python function
+(when [`jit`](https://github.com/google/jax#compilation-with-jit) compilation is not used).
 
-```python
-def Sequential(*layers):
-    @parametrized
-    def sequential(inputs):
-        for layer in layers:
-            inputs = layer(inputs)
-        return inputs
+See JAXnet in action in these demos:
+[Mnist Classifier](https://colab.research.google.com/drive/18kICTUbjqnfg5Lk3xFVQtUj6ahct9Vmv),
+[Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g),
+[OCR with RNNs](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E),
+[ResNet](https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN) and
+[WaveNet](https://colab.research.google.com/drive/111cKRfwYX4YFuPH3FF4V46XLfsPG1icZ).
 
-    return sequential
+## Installation
+
+```
+pip3 install jaxnet
 ```
 
-Using parameter-free functions is seamless:
+**This is an early version. Expect breaking changes!**
+Python 3 is required. To use GPU, first install the [right version of jaxlib](https://github.com/google/jax#installation).
 
-```python
-def relu(x):
-    return np.maximum(x, 0)
+## Questions
 
-layer = Sequential(Dense(10), relu)
-```
-
-`relu`, `flatten`, `softmax`, ... are plain functions.
-
-Parameters are shared by using the same module object multiple times:
-
-```python
-shared_net = Sequential(layer, layer)
-```
-
-JAXnet calls module functions with concrete values (when `jit` is not used),
-allowing step-by-step debugging like any normal Python function.
-All modules are composed in this way from one primitive module, described [here](DESIGN.md#what-is-the-primitive-module).
-This includes all [predefined JAXnet modules](jaxnet/modules.py).
-The [tests](tests/test_modules.py) show how they can be used.
-
-## Parameter reuse
-
-If you want to evaluate parts or extended versions of a trained network
-(to get accuracy, generate samples, do introspection, ...), you can use `apply_from`:
-
-```python
-predict = Sequential(Dense(1024), relu, Dense(10), logsoftmax)
-
-@parametrized
-def loss(inputs, targets):
-    return -np.mean(predict(inputs) * targets)
-
-@parametrized
-def accuracy(inputs, targets):
-    return np.mean(np.argmax(targets, axis=1) == np.argmax(predict(inputs), axis=1))
-
-params = loss.init_params(PRNGKey(0), inputs)
-
-# train params...
-
-test_acc = accuracy.apply_from({loss: params}, *test_inputs, jit=True)
-```
-
-It is a shorthand for:
-
-```python
-accuracy_params = accuracy.params_from({loss: params}, *test_inputs)
-test_acc = jit(accuracy.apply)(accuracy_params, *test_inputs)
-```
-
-If you want to reuse parts of your network while initializing the rest, use `init_params` with `reuse`:
-
-```python
-inputs = np.zeros((1, 2))
-net = Dense(5)
-net_params = net.init_params(PRNGKey(0), inputs)
-
-# train net params...
-
-transfer_net = Sequential(net, relu, Dense(2))
-transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
-
-assert transfer_net_params[0] is net_params
-
-# train transfer_net_params...
-```
-
-The naming of parameters is discussed [here](DESIGN.md#how-are-parameters-named).
+Feel free to create an issue on GitHub.
