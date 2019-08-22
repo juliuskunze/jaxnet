@@ -901,3 +901,23 @@ def test_parameter():
     assert np.zeros(()) == param
     out = scalar.apply(param)
     assert param == out
+
+
+def test_parameter_simple_class():
+    class parameter:
+        def __init__(self, name, init_param):
+            self.name = name
+            self._init_param = init_param
+
+        def apply(self, params, *inputs): return params
+
+        def init_params(self, rng, *example_inputs):
+            rng, rng_param = random.split(rng)
+            return self._init_param(rng_param)
+
+    scalar = parameter('scalar', lambda _: np.zeros(()))
+    param = scalar.init_params(PRNGKey(0))
+
+    assert np.zeros(()) == param
+    out = scalar.apply(param)
+    assert param == out

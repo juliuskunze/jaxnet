@@ -6,6 +6,8 @@ Different from popular neural net libraries, it is completely functional:
 - No global compute graph
 - No global random key
 
+This encourages robust code and allows new ways of optimization ([detailed motivation here](MOTIVATION.md)).
+
 **This is an early version. Expect breaking changes!** Install with
 
 ```
@@ -124,7 +126,7 @@ accuracy_params = accuracy.params_from({loss: params}, *test_inputs)
 test_acc = jit(accuracy.apply)(accuracy_params, *test_inputs)
 ```
 
-You can also reuse parts of your network while initializing the rest:
+If you want to reuse parts of your network while initializing the rest, use `init_params` with `reuse`:
 
 ```python
 inputs = np.zeros((1, 2))
@@ -142,8 +144,3 @@ assert transfer_net_params[0] is net_params
 ```
 
 The naming of parameters is discussed [here](DESIGN.md#how-are-parameters-named).
-
-## What about [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
-JAXnet is independent of stax.
-The main motivation over stax is to simplify nesting modules.
-Find details and porting instructions [here](STAX.md).
