@@ -100,7 +100,7 @@ Parameters can optionally be named (see next section for effect):
 JAXnet does not rely on module or weight names.
 Parameters are initialized to (nested) `namedtuple`s for readability only.
 They are named after their defining module (`@parametrized` function).
-If it is a parameter, it's named `parameter` by default, with the specified name.
+Parameters are named `parameter` unless a name is specified as above.
 If names clash within the same module, indices are added in order of execution:
 
 ```python
