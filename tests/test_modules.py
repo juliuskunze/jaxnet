@@ -96,45 +96,8 @@ def test_parameter_example():
     out = scalar.apply(param)
     assert param == out
 
-def test_parameter_dense_example():
-    def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
-        @parametrized
-        def dense(inputs):
-            kernel = parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))(inputs)
-            bias = parameter(lambda rng: bias_init(rng, (out_dim,)))(inputs)
-            return np.dot(inputs, kernel) + bias
 
-        return dense
-
-    net = Dense(2)
-    inputs = np.zeros((1, 3))
-    params = net.init_params(PRNGKey(0), inputs)
-    assert (3, 2) == params.parameter0.shape
-    assert (2, ) == params.parameter1.shape
-
-    out = net.apply(params, inputs)
-    assert (1, 2) == out.shape
-
-def test_parameter_dense_example():
-    def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
-        @parametrized
-        def dense(inputs):
-            kernel = Parameter((inputs.shape[-1], out_dim), kernel_init, inputs)
-            bias = Parameter((out_dim,), bias_init, inputs)
-            return np.dot(inputs, kernel) + bias
-
-        return dense
-
-    net = Dense(2)
-    inputs = np.zeros((1, 3))
-    params = net.init_params(PRNGKey(0), inputs)
-    assert (3, 2) == params.parameter0.shape
-    assert (2, ) == params.parameter1.shape
-
-    out = net.apply(params, inputs)
-    assert (1, 2) == out.shape
-
-def test_parameter_simple_class_example():
+def test_parameter_simplified_example():
     class parameter:
         def __init__(self, init_param):
             self.init_param = init_param
@@ -152,6 +115,46 @@ def test_parameter_simple_class_example():
     assert np.zeros(()) == param
     out = scalar.apply(param)
     assert param == out
+
+
+def test_parameter_dense_example():
+    def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
+        @parametrized
+        def dense(inputs):
+            kernel = parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))(inputs)
+            bias = parameter(lambda rng: bias_init(rng, (out_dim,)))(inputs)
+            return np.dot(inputs, kernel) + bias
+
+        return dense
+
+    net = Dense(2)
+    inputs = np.zeros((1, 3))
+    params = net.init_params(PRNGKey(0), inputs)
+    assert (3, 2) == params.parameter0.shape
+    assert (2,) == params.parameter1.shape
+
+    out = net.apply(params, inputs)
+    assert (1, 2) == out.shape
+
+
+def test_Parameter_dense_example():
+    def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
+        @parametrized
+        def dense(inputs):
+            kernel = Parameter((inputs.shape[-1], out_dim), kernel_init, inputs)
+            bias = Parameter((out_dim,), bias_init, inputs)
+            return np.dot(inputs, kernel) + bias
+
+        return dense
+
+    net = Dense(2)
+    inputs = np.zeros((1, 3))
+    params = net.init_params(PRNGKey(0), inputs)
+    assert (3, 2) == params.parameter0.shape
+    assert (2,) == params.parameter1.shape
+
+    out = net.apply(params, inputs)
+    assert (1, 2) == out.shape
 
 
 def test_Dense_shape():

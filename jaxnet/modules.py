@@ -48,6 +48,10 @@ def fastvar(x, axis, keepdims):
 
 
 def Parameter(shape, init, dummy_inputs, name=None):
+    """
+    :param dummy_inputs: If called as a submodule, dummy_inputs needs to depend on an input.
+    See https://github.com/JuliusKunze/jaxnet/issues/1 for details.
+    """
     return GeneralParameter(
         name=name,
         init_param=lambda rng: init(rng, shape),

@@ -5,6 +5,7 @@ import time
 from jax import jit, grad, lax, random, numpy as np
 from jax.experimental import optimizers
 from jax.random import PRNGKey
+from matplotlib import pyplot as plt
 
 from jaxnet import Sequential, Dense, relu, softplus, parametrized
 
@@ -59,7 +60,7 @@ def loss(rng, images):
 
 
 @parametrized
-def image_sample(rng, nrow, ncol):
+def image_sample_grid(rng, nrow=10, ncol=10):
     """Sample images from the generative model."""
     code_rng, img_rng = random.split(rng)
     logits = decode(random.normal(code_rng, (nrow * ncol, 10)))
@@ -68,12 +69,11 @@ def image_sample(rng, nrow, ncol):
 
 
 @parametrized
-def evaluate(images):
+def evaluate(test_rng, images):
     elbo_rng, data_rng, image_rng = random.split(test_rng, 3)
     binarized_test = random.bernoulli(data_rng, images)
     test_elbo = loss(elbo_rng, binarized_test)
-    # TODO: sampled_images = image_sample(image_rng, nrow, ncol)
-    return test_elbo  # , sampled_images
+    return test_elbo, image_sample_grid(image_rng)
 
 
 @jit
@@ -87,8 +87,7 @@ if __name__ == "__main__":
     step_size = 0.001
     num_epochs = 100
     batch_size = 32
-    nrow, ncol = 10, 10  # sampled image grid size
-    test_rng = PRNGKey(1)  # fixed prng key for evaluation
+    test_rng = PRNGKey(1)  # fixed for evaluation
 
     train_images, test_images = mnist_images()
     num_complete_batches, leftover = divmod(train_images.shape[0], batch_size)
@@ -117,7 +116,8 @@ if __name__ == "__main__":
         tic = time.time()
         opt_state = run_epoch(PRNGKey(epoch), opt_state)
         params = get_params(opt_state)
-        test_elbo = evaluate.apply_from({shaped_elbo: params}, test_images, jit=True)
+        test_elbo, samples = evaluate.apply_from({shaped_elbo: params}, test_rng, test_images,
+                                                 jit=True)
         print(f'Epoch {epoch: 3d} {test_elbo:.3f} ({time.time() - tic:.3f} sec)')
-        # TODO: plt.imshow(samples, cmap=plt.cm.gray)
-        # plt.show()
+        plt.imshow(samples, cmap=plt.cm.gray)
+        plt.show()
