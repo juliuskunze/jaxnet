@@ -131,7 +131,7 @@ def Wavenet(dilations, filter_width, initial_filter_width, out_width,
     return wavenet
 
 
-if __name__ == '__main__':
+def main():
     filter_width = 2
     initial_filter_width = 32
     residual_channels = 32
@@ -146,13 +146,10 @@ if __name__ == '__main__':
     receptive_field = calculate_receptive_field(filter_width, dilations,
                                                 initial_filter_width)
 
-
     def get_batches(batches=100, sequence_length=1000, rng=PRNGKey(0)):
         for _ in range(batches):
             rng, rng_now = random.split(rng)
-            yield random.normal(rng_now,
-                                (1, receptive_field + sequence_length, 1))
-
+            yield random.normal(rng_now, (1, receptive_field + sequence_length, 1))
 
     batches = get_batches()
     init_batch = next(batches)
@@ -161,7 +158,6 @@ if __name__ == '__main__':
     wavenet = Wavenet(dilations, filter_width, initial_filter_width,
                       output_width, residual_channels, dilation_channels,
                       skip_channels, nr_mix)
-
 
     @parametrized
     def loss(batch):
@@ -172,10 +168,8 @@ if __name__ == '__main__':
             theta, sliced_batch, num_class=1 << 16), axis=0)
                 * np.log2(np.e) / (output_width - 1))
 
-
     opt_init, opt_update, get_params = optimizers.adam(
         optimizers.exponential_decay(1e-3, decay_steps=1, decay_rate=0.999995))
-
 
     @jit
     def update(i, opt_state, batch):
@@ -183,8 +177,11 @@ if __name__ == '__main__':
         train_loss, gradient = value_and_grad(loss.apply)(params, batch)
         return opt_update(i, gradient, opt_state), train_loss
 
-
     opt_state = opt_init(loss.init_params(PRNGKey(0), next(batches)))
     for i, batch in enumerate(batches):
         print(f'Training on batch {i}.')
         opt_state, loss = update(i, opt_state, batch)
+
+
+if __name__ == '__main__':
+    main()

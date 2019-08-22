@@ -63,7 +63,7 @@ def ResNet50(num_classes):
         AvgPool((7, 7)), flatten, Dense(num_classes), logsoftmax)
 
 
-if __name__ == "__main__":
+def main():
     rng_key = random.PRNGKey(0)
 
     batch_size = 8
@@ -74,19 +74,16 @@ if __name__ == "__main__":
 
     resnet = ResNet50(num_classes)
 
-
     @parametrized
     def loss(inputs, targets):
         logits = resnet(inputs)
         return np.sum(logits * targets)
-
 
     @parametrized
     def accuracy(inputs, targets):
         target_class = np.argmax(targets, axis=-1)
         predicted_class = np.argmax(resnet(inputs), axis=-1)
         return np.mean(predicted_class == target_class)
-
 
     def synth_batches():
         rng = npr.RandomState(0)
@@ -96,19 +93,20 @@ if __name__ == "__main__":
             onehot_labels = labels == np.arange(num_classes)
             yield images, onehot_labels
 
-
     opt_init, opt_update, get_params = optimizers.momentum(step_size, mass=0.9)
     batches = synth_batches()
-
 
     @jit
     def update(i, opt_state, inputs, targets):
         params = get_params(opt_state)
         return opt_update(i, grad(loss.apply)(params, inputs, targets), opt_state)
 
-
     opt_state = opt_init(loss.init_params(rng_key, *next(batches)))
     for i in range(num_steps):
         print(f'Training on batch {i}.')
         opt_state = update(i, opt_state, *next(batches))
     trained_params = get_params(opt_state)
+
+
+if __name__ == '__main__':
+    main()

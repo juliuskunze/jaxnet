@@ -5,7 +5,6 @@ import time
 from jax import jit, grad, lax, random, numpy as np
 from jax.experimental import optimizers
 from jax.random import PRNGKey
-from matplotlib import pyplot as plt
 
 from jaxnet import Sequential, Dense, relu, softplus, parametrized
 
@@ -41,11 +40,11 @@ def image_grid(nrow, ncol, imagevecs, imshape):
 
 
 @parametrized
-def encode(input):
-    input = Sequential(Dense(512), relu, Dense(512), relu)(input)
-    mean = Dense(10)(input)
-    variance = Sequential(Dense(10), softplus)(input)
-    return mean, variance
+def encode(images):
+    hidden = Sequential(Dense(512), relu, Dense(512), relu)(images)
+    means = Dense(10)(hidden)
+    variances = Sequential(Dense(10), softplus)(hidden)
+    return means, variances
 
 
 decode = Sequential(Dense(512), relu, Dense(512), relu, Dense(28 * 28))
@@ -83,7 +82,7 @@ def binarize_batch(rng, i, images):
     return random.bernoulli(rng, batch)
 
 
-if __name__ == "__main__":
+def main():
     step_size = 0.001
     num_epochs = 100
     batch_size = 32
@@ -94,7 +93,6 @@ if __name__ == "__main__":
     num_batches = num_complete_batches + bool(leftover)
     opt_init, opt_update, get_params = optimizers.momentum(step_size, mass=0.9)
 
-
     @jit
     def run_epoch(rng, opt_state):
         def body_fun(i, opt_state):
@@ -104,7 +102,6 @@ if __name__ == "__main__":
             return opt_update(i, g, opt_state)
 
         return lax.fori_loop(0, num_batches, body_fun, opt_state)
-
 
     example_rng = PRNGKey(0)
     example_batch = binarize_batch(example_rng, 0, images=train_images)
@@ -119,5 +116,10 @@ if __name__ == "__main__":
         test_elbo, samples = evaluate.apply_from({shaped_elbo: params}, test_rng, test_images,
                                                  jit=True)
         print(f'Epoch {epoch: 3d} {test_elbo:.3f} ({time.time() - tic:.3f} sec)')
+        from matplotlib import pyplot as plt
         plt.imshow(samples, cmap=plt.cm.gray)
         plt.show()
+
+
+if __name__ == '__main__':
+    main()

@@ -44,7 +44,7 @@ def accuracy(inputs, targets):
     return np.mean(predicted_class == target_class)
 
 
-if __name__ == "__main__":
+def main():
     rng = random.PRNGKey(0)
 
     step_size = 0.001
@@ -57,7 +57,6 @@ if __name__ == "__main__":
     num_complete_batches, leftover = divmod(num_train, batch_size)
     num_batches = num_complete_batches + bool(leftover)
 
-
     def data_stream():
         rng = npr.RandomState(0)
         while True:
@@ -66,17 +65,14 @@ if __name__ == "__main__":
                 batch_idx = perm[i * batch_size:(i + 1) * batch_size]
                 yield train_images[batch_idx], train_labels[batch_idx]
 
-
     batches = data_stream()
 
     opt_init, opt_update, get_params = optimizers.momentum(step_size, mass=momentum_mass)
-
 
     @jit
     def update(i, opt_state, images, labels):
         params = get_params(opt_state)
         return opt_update(i, grad(loss.apply)(params, images, labels), opt_state)
-
 
     opt_state = opt_init(loss.init_params(rng, *next(batches)))
     itercount = itertools.count()
@@ -94,3 +90,7 @@ if __name__ == "__main__":
         print("Epoch {} in {:0.2f} sec".format(epoch, epoch_time))
         print("Training set accuracy {:.4f}".format(train_acc))
         print("Test set accuracy {:.4f}".format(test_acc))
+
+
+if __name__ == '__main__':
+    main()

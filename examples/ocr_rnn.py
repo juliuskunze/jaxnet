@@ -16,7 +16,7 @@ def read_dataset():
     return sets.Split(0.66)(dataset)
 
 
-if __name__ == "__main__":
+def main():
     train, test = read_dataset()
     _, length, x_size = train.data.shape
     class_count = train.target.shape[2]
@@ -62,7 +62,11 @@ if __name__ == "__main__":
         e = error.apply_from({cross_entropy: params}, test.data, test.target, jit=True)
         print(f'Epoch {epoch} error {e * 100:.1f}')
 
-        break # TODO https://github.com/JuliusKunze/jaxnet/issues/2
+        break  # TODO https://github.com/JuliusKunze/jaxnet/issues/2
         for _ in range(100):
             batch = train.sample(batch_size)
             opt_state = update(next(itercount), opt_state, batch.data, batch.target)
+
+
+if __name__ == '__main__':
+    main()

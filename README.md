@@ -36,15 +36,15 @@ Modules are defined as `@parametrized` functions that can use other modules:
 
 ```python
 @parametrized
-def encode(input):
-    input = Sequential(Dense(512), relu, Dense(512), relu)(input)
-    mean = Dense(10)(input)
-    variance = Sequential(Dense(10), softplus)(input)
-    return mean, variance
+def encode(images):
+    hidden = Sequential(Dense(512), relu, Dense(512), relu)(images)
+    means = Dense(10)(hidden)
+    variances = Sequential(Dense(10), softplus)(hidden)
+    return means, variances
 ```
 
 All modules are composed in this way. Find more details on the API [here](API.md).
-JAXnet allows step-by-step debugging with concrete numpy arrays like any Python function
+JAXnet allows step-by-step debugging with concrete values like any plain Python function
 (when [`jit`](https://github.com/google/jax#compilation-with-jit) compilation is not used).
 
 See JAXnet in action in these demos:
