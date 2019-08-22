@@ -3,7 +3,7 @@
 Side effects / mutable state come at a cost.
 Machine learning is no exception.
 
-#### Functional code allows new ways of optimization.
+### Functional code allows new ways of optimization.
 JAX allows funcitonal `numpy` code to be accelerated with `jit` and run on GPU. 
 Here are two use cases:
 - In JAXnet, weights are explicitely initialized into an object controlled by the user. 
@@ -12,7 +12,7 @@ This allows whole training loops to be compiled / run on GPU ([demo](examples/mn
 - If you use functional `numpy/scipy` for pre-/postprocessing, replacing `numpy` with `jax.numpy` in your import allows you to compile it / run it on GPU. 
 ([demo](examples/mnist_classifier.py#79)).
 
-#### Reusing code relying on a global compute graph can be a hassle.
+### Reusing code relying on a global compute graph can be a hassle.
 This is particularly true for more advanced use cases, say:
 You want to use existing TensorFlow code that manipulates variables by using their global name. 
 You need to instantiate this network with two different sets of weights, and combine their output.
@@ -23,14 +23,14 @@ JAXnet has no global compute graph.
 All network definitions and weights are contained in (read-only) objects.
 This encourages code that is easy to reuse.
 
-#### Global random state is inflexible.
+### Global random state is inflexible.
 Example: While trained a VAE, you might want to see how reconstructions for a fixed latent variable sample improves over time.
 In popular frameworks, you would have resupply get a bunch of latent variable samples and resupply them to the network, requiring some extra code.
 
 
 In JAXnet you can simply fix the sampling random seed for this specific part of the network. ([demo](examples/mnist_vae.py#L91))
 
-### What about existing frameworks?
+## What about existing frameworks?
 
 Here is a crude comparison of some existing libraries:
 
