@@ -378,12 +378,12 @@ def test_param_and_submodule_mixed():
     assert np.array_equal(out, out_)
 
 
-@pytest.mark.skip('TODO')
 def test_mixed_up_execution_order():
     @parametrized
     def dense(inputs):
         bias = Parameter((2,), zeros, inputs, 'bias')
-        return np.dot(inputs, Parameter((inputs.shape[-1], 2), zeros, inputs), 'kernel') + bias
+        kernel = Parameter((inputs.shape[-1], 2), zeros, inputs, 'kernel')
+        return np.dot(inputs, kernel) + bias
 
     inputs = np.zeros((1, 3))
 
@@ -574,6 +574,25 @@ def test_tuple_output():
 
     assert (1, 2) == out1.shape
     assert np.array_equal(out1, out2)
+
+
+@pytest.mark.skip('TODO')
+def test_tuple_output_nested():
+    @parametrized
+    def fanout(x):
+        return x, x
+
+    @parametrized
+    def inner(x):
+        x, _ = fanout(x)
+        x, _ = fanout(x)
+        return x
+
+    @parametrized
+    def outer(batch):
+        return inner(batch)
+
+    outer.init_params(PRNGKey(0), np.zeros(()))
 
 
 def test_save_and_load_params():
