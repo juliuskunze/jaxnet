@@ -16,8 +16,8 @@ This allows whole training loops to be compiled / run on GPU ([demo](examples/mn
 This is particularly true for more advanced use cases, say:
 You want to use existing TensorFlow code that manipulates variables by using their global name. 
 You need to instantiate this network with two different sets of weights, and combine their output.
-Since you want your code to be fast, you'd like to run both on GPU and code on GPU.
-While solutions exists, code like this is brittle and hard to maintain.
+Since you want your code to be fast, you'd like run the combined network to GPU.
+While solutions exist, code like this is typically brittle and hard to maintain.
 
 JAXnet has no global compute graph.
 All network definitions and weights are contained in (read-only) objects.
