@@ -1,6 +1,6 @@
-# Why functional API?
+# Why is JAXnet functional?
 
-Side effects / mutable state come at a cost.
+Side effects and mutable state come at a cost.
 Machine learning is no exception.
 
 ### Functional code allows new ways of optimization.
