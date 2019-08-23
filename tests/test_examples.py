@@ -159,11 +159,11 @@ def test_ocr_rnn():
 
 def test_wavenet():
     filter_width = 2
-    initial_filter_width = 32
-    residual_channels = 32
-    dilation_channels = 32
-    skip_channels = 512
-    dilations = [1, 2, 4, 8]
+    initial_filter_width = 3
+    residual_channels = 4
+    dilation_channels = 5
+    skip_channels = 6
+    dilations = [1, 2]
     nr_mix = 10
     receptive_field = calculate_receptive_field(filter_width, dilations,
                                                 initial_filter_width)

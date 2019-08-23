@@ -3,7 +3,7 @@ from jax import numpy as np, jit, lax
 from jax.random import PRNGKey
 
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, save_params, \
-    load_params, Parameter, parameter
+    load_params, Parameter, parameter, scan_wrapped
 from tests.util import random_inputs, assert_params_equal, assert_dense_params_equal
 
 
@@ -266,12 +266,14 @@ def test_scan_parametrized_cell_without_params():
 
     @parametrized
     def rnn(inputs):
-        _, outs = lax.scan(cell, np.zeros((2,)), inputs)
+        _, outs = scan_wrapped(cell, np.zeros((2,)), inputs)
         return outs
 
     inputs = np.zeros((3,))
 
     params = rnn.init_params(PRNGKey(0), inputs)
+    assert_params_equal(((), ), params)
+
     outs = rnn.apply(params, inputs)
 
     assert (3, 2) == outs.shape
@@ -285,12 +287,13 @@ def test_scan_parametrized_cell():
 
     @parametrized
     def rnn(inputs):
-        _, outs = lax.scan(cell, np.zeros((2,)), inputs)
+        _, outs = scan_wrapped(cell, np.zeros((2,)), inputs)
         return outs
 
     inputs = np.zeros((3,))
 
     params = rnn.init_params(PRNGKey(0), inputs)
+
     outs = rnn.apply(params, inputs)
 
     assert (3, 2) == outs.shape

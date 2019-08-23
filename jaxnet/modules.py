@@ -3,7 +3,7 @@ import itertools
 
 from jax import random, lax, numpy as np, scipy
 
-from jaxnet.core import parametrized, parameter
+from jaxnet.core import parametrized, parameter, scan_wrapped
 from jaxnet.initializers import glorot, randn, zeros, ones
 
 
@@ -222,7 +222,7 @@ def Rnn(cell, carry_init):
     @parametrized
     def rnn(xs):
         xs = np.swapaxes(xs, 0, 1)
-        _, ys = lax.scan(cell, carry_init(xs.shape[1]), xs)
+        _, ys = scan_wrapped(cell, carry_init(xs.shape[1]), xs)
         return np.swapaxes(ys, 0, 1)
 
     return rnn

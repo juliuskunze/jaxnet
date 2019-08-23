@@ -26,6 +26,11 @@ def _call_init(primitive, rng, submodule_params, params,
     return primitive.bind(f, *in_vals, **params), submodule_params
 
 
+# TODO allow direct use of lax.scan
+def scan_wrapped(*args):
+    return _submodule_tracing.resume_while(lambda: lax.scan(*args))
+
+
 def _scan_init(rng, submodule_params_dict, consts, init, xs, forward, length, jaxpr, reuse,
                reuse_only):
     assert len(consts) == 0
@@ -50,8 +55,7 @@ def _scan_init(rng, submodule_params_dict, consts, init, xs, forward, length, ja
         carry, ys = vals
         x = _index_arrays(idx, x_aval, xs)
         cell = parametrized(jc.jaxpr_as_fun(jaxpr))
-        carry_out, y = cell.apply(submodule_params, consts,
-                                  carry, x)
+        carry_out, y = cell.apply(submodule_params, consts, carry, x)
         ys_out = _update_arrays(idx, y_aval, ys, y)
         return carry_out, ys_out
 
@@ -295,14 +299,17 @@ class ApplyTrace(jc.Trace):
 
 
 class SubmoduleTracing:
-    """Needed to map execution order of submodules to order of appearance in jaxpr."""
+    """Used to trace submodule call order during trace_to_jaxpr.
+    Needed to supply parameter values (in order of appearance in jaxpr) to the right submodule.
+    This is done by reordering submodules to match the jaxpr order."""
 
     def __init__(self):
         self._disable_stack = []
         self._callstack = []
 
     def is_enabled(self):
-        return len(self._disable_stack) == 0
+        return (len(self._callstack) > 0 and
+                (len(self._disable_stack) == 0 or self._disable_stack[-1] is None))
 
     def disable_while(self, primitive, body):
         self._disable_stack.append(primitive)
@@ -311,6 +318,14 @@ class SubmoduleTracing:
             return body()
         finally:
             assert primitive == self._disable_stack.pop()
+
+    def resume_while(self, body):
+        self._disable_stack.append(None)
+
+        try:
+            return body()
+        finally:
+            assert self._disable_stack.pop() is None
 
     def traced(self, primitive, body):
         self._callstack.append((primitive, OrderedDict()))
@@ -324,7 +339,7 @@ class SubmoduleTracing:
         return result, list(submodules.keys())
 
     def trace_call(self, submodule):
-        if _submodule_tracing.is_enabled():
+        if self.is_enabled():
             _, submodules = self._callstack[-1]
             if submodule not in submodules:
                 # used as ordered set:
@@ -404,6 +419,13 @@ class parametrized(jc.Primitive):
         submodule_params = _get_submodule_params(rng, jaxpr, consts, [], OrderedDict(),
                                                  *example_inputs,
                                                  reuse=reuse, reuse_only=reuse_only)
+
+        # TODO cleanup, needed whenever parent of scan is used as submodule,
+        # since cell tracing is leaking into modules above:
+        submodules_in_execution_order = list(
+            filter(lambda x: x in submodule_params, submodules_in_execution_order))
+
+        assert len(submodule_params) == len(submodules_in_execution_order)
 
         if len(submodule_params) <= 1:
             return submodule_params
