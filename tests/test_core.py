@@ -562,21 +562,19 @@ def test_dict_input():
 
 
 def test_tuple_output():
-    a = Sequential(Dense(2), relu)
-
     @parametrized
     def net(inputs):
-        return a(inputs), a(inputs)
+        return inputs, inputs # * Parameter((), zeros, inputs)
 
     inputs = np.zeros((1, 3))
     params = net.init_params(PRNGKey(0), inputs)
     out = net.apply(params, inputs)
 
     # TODO remove ".xs":
-    out1, out2 = out.xs
+    out1, out2 = out
 
-    assert (1, 2) == out1.shape
-    assert np.array_equal(out1, out2)
+    assert (1, 3) == out1.shape
+    assert np.array_equal(out1.val, out2.val)
 
 
 @pytest.mark.skip('TODO')

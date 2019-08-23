@@ -43,7 +43,7 @@ def test_parameter():
     param = scalar.init_params(PRNGKey(0))
 
     assert np.zeros(()) == param
-    out = scalar.apply(param)
+    out, = scalar.apply(param)
     assert param == out
 
 
@@ -71,9 +71,9 @@ def test_parameter_dense():
     def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
         @parametrized
         def dense(inputs):
-            kernel = parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))(inputs)
-            bias = parameter(lambda rng: bias_init(rng, (out_dim,)))(inputs)
-            return np.dot(inputs, kernel) + bias
+            kernel,  = parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))(inputs)
+            bias, = parameter(lambda rng: bias_init(rng, (out_dim,)))(inputs)
+            return np.dot(inputs, kernel) + bias,
 
         return dense
 
@@ -83,7 +83,7 @@ def test_parameter_dense():
     assert (3, 2) == params.parameter0.shape
     assert (2,) == params.parameter1.shape
 
-    out = net.apply(params, inputs)
+    out,  = net.apply(params, inputs)
     assert (1, 2) == out.shape
 
 

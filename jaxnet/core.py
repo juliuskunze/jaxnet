@@ -4,13 +4,10 @@ from pathlib import Path
 import dill
 import jax
 from jax import lax, random, core as jc, linear_util as lu, \
-    unzip2, unzip3, safe_zip, safe_map, partial, WrapHashably, pack, tree_flatten
+    unzip2, unzip3, safe_zip, safe_map, partial, WrapHashably, tree_util, api_util
 from jax.abstract_arrays import ShapedArray
-from jax.api_util import flatten_fun
 from jax.interpreters import xla, partial_eval as pe
-from jax.interpreters.batching import get_aval
-from jax.lax.lax_control_flow import _promote_aval_rank, _index_arrays, _update_arrays, \
-    _empty_arrays
+from jax.lax.lax_control_flow import _promote_aval_rank
 from jax.random import PRNGKey
 
 zip = safe_zip
@@ -119,16 +116,12 @@ def _get_submodule_params(rng, jaxpr, consts, freevar_vals, submodule_params, *a
 
     env = {}
     write(jc.unitvar, jc.unit)
-    jc.pat_fmap(write, jaxpr.constvars, consts)
-    jc.pat_fmap(write, jaxpr.invars, args)
-    jc.pat_fmap(write, jaxpr.freevars, freevar_vals)
+    map(write, jaxpr.constvars, consts)
+    map(write, jaxpr.invars, args)
+    map(write, jaxpr.freevars, freevar_vals)
     for eqn in jaxpr.eqns:
         rng, prim_rng = random.split(rng)
-        if not eqn.restructure:
-            in_vals = map(read, eqn.invars)
-        else:
-            in_vals = [jc.pack(map(read, invars)) if type(invars) is tuple
-                       else read(invars) for invars in eqn.invars]
+        in_vals = map(read, eqn.invars)
 
         primitive_init = _get_primitive_init(eqn.primitive, reuse=reuse, reuse_only=reuse_only)
         if eqn.bound_subjaxprs:
@@ -144,8 +137,10 @@ def _get_submodule_params(rng, jaxpr, consts, freevar_vals, submodule_params, *a
         else:
             ans, submodule_params = primitive_init(
                 prim_rng, submodule_params, *in_vals, **eqn.params)
-        outvals = list(ans) if eqn.destructure else [ans]
-        map(write, eqn.outvars, outvals)
+        if eqn.primitive.multiple_results:
+            map(write, eqn.outvars, ans)
+        else:
+            write(eqn.outvars[0], ans)
 
     return submodule_params
 
@@ -164,25 +159,22 @@ def _merge(submodule_params_iters):
     return out
 
 
-@lu.transformation
-def _apply_transform(submodule_params, inputs):
+def _apply_transform(fun, submodule_params, inputs):
     with jc.new_master(ApplyTrace) as master:
-        trace = ApplyTrace(master, jc.cur_sublevel())
-        ans = yield map(partial(ApplyTracer, trace, SubmoduleParamsIterator(submodule_params)),
-                        inputs), {}
-        out_tracer = trace.full_raise(ans)
-        out_val = out_tracer.val
-        del master, out_tracer
-    yield out_val
+        fun = _apply_subtrace(fun, master, WrapHashably(SubmoduleParamsIterator(submodule_params)))
+        out_val = fun.call_wrapped(*inputs)
+        del master
+    return out_val
 
 
 @lu.transformation
 def _apply_subtrace(master, submodule_params, *vals):
     submodule_params = submodule_params.val
     trace = ApplyTrace(master, jc.cur_sublevel())
-    ans = yield map(partial(ApplyTracer, trace, submodule_params), vals), {}
-    out_tracer = trace.full_raise(ans)
-    yield out_tracer.val
+    outs = yield map(partial(ApplyTracer, trace, SubmoduleParamsIterator(submodule_params)),
+                     vals), {}
+    out_tracers = map(trace.full_raise, outs)
+    yield [t.val for t in out_tracers]
 
 
 def _expand_reuse_dict(reuse, *example_inputs):
@@ -227,6 +219,7 @@ class ApplyTracer(jc.Tracer):
     __slots__ = ['val', 'submodule_params_iter']
 
     def __init__(self, trace, submodule_params_iter, val):
+        assert isinstance(submodule_params_iter, SubmoduleParamsIterator)
         super().__init__(trace)
         self.val = val
         self.submodule_params_iter = submodule_params_iter
@@ -234,9 +227,6 @@ class ApplyTracer(jc.Tracer):
     @property
     def aval(self):
         return jc.get_aval(self.val)
-
-    def unpack(self):
-        return tuple(self.val)
 
     def full_lower(self):
         return self
@@ -279,23 +269,33 @@ class ApplyTrace(jc.Trace):
         vals_in, submodule_params_iters = unzip2((t.val, t.submodule_params_iter) for t in tracers)
         submodule_params_iter = _merge(submodule_params_iters)
         if primitive in apply_rules:
-            val = apply_rules[primitive](submodule_params_iter, *vals_in, **params)
+            out = apply_rules[primitive](submodule_params_iter, *vals_in, **params)
         elif isinstance(primitive, parametrized):
-            val = primitive.apply(submodule_params_iter.get_params(primitive), *vals_in)
+            out = primitive.apply(submodule_params_iter.get_params(primitive), *vals_in)
         else:
-            val = primitive.bind(*vals_in, **params)
-        return ApplyTracer(self, submodule_params_iter, val)
+            out = primitive.bind(*vals_in, **params)
+        if primitive.multiple_results:
+            return map(partial(ApplyTracer, self, submodule_params_iter), out)
+        else:
+            return ApplyTracer(self, submodule_params_iter, out)
 
     def process_call(self, call_primitive, f, tracers, params):
-        vals_in, submodule_params_iters = unzip2((t.val, t.submodule_params_iter) for t in tracers)
+        vals, submodule_params_iters = unzip2((t.val, t.submodule_params_iter) for t in tracers)
         submodule_params_iter = _merge(submodule_params_iters)
         f = _apply_subtrace(f, self.master, WrapHashably(submodule_params_iter))
-        val_out = call_primitive.bind(f, *vals_in, **params)
-        return ApplyTracer(self, submodule_params_iter, val_out)
+        vals_out = call_primitive.bind(f, *vals, **params)
+        return map(partial(ApplyTracer, self, submodule_params_iter), vals_out)
 
-    def pack(self, tracers):
-        vals, submodule_params_iters = unzip2((t.val, t.submodule_params_iter) for t in tracers)
-        return ApplyTracer(self, _merge(submodule_params_iters), jc.pack(vals))
+    def post_process_call(self, call_primitive, out_tracers, params):
+        vals, submodule_params_iters = unzip2((t.val, t.net_params) for t in out_tracers)
+        submodule_params_iters = _merge(submodule_params_iters)
+        master = self.master
+
+        def todo(x):
+            trace = ApplyTrace(master, jc.cur_sublevel())
+            return map(partial(ApplyTracer, trace, submodule_params_iters), x)
+
+        return vals, todo
 
 
 class SubmoduleTracing:
@@ -368,15 +368,8 @@ def _permutation_to_jaxpr_order(jaxpr, submodules_in_execution_order):
 class parametrized(jc.Primitive):
     def __init__(self, fun, name=None):
         self._name = name if name else fun.__name__
-
-        def packed_fun(*inputs, **kwargs):
-            result = fun(*inputs, **kwargs)
-            if isinstance(result, tuple):
-                return pack(result)
-
-            return result
-
-        self._fun = packed_fun
+        self._fun = fun
+        self.multiple_results = True
 
         super().__init__(f'{self._name}_{id(self)}')
 
@@ -405,13 +398,14 @@ class parametrized(jc.Primitive):
 
     def _init_params_dict(self, rng, *example_inputs, reuse, reuse_only):
         net_fun = lu.wrap_init(self._fun)
-        jax_inputs, in_tree = tree_flatten((example_inputs, {}))
-        net_fun, _ = flatten_fun(net_fun, in_tree)
+        jax_args, in_tree = tree_util.tree_flatten(example_inputs)
+        net_fun, out_tree = api_util.flatten_fun_nokwargs(net_fun, in_tree)
 
         def pv_like(x):
-            return pe.PartialVal((get_aval(x), jc.unit))
+            return pe.PartialVal((xla.abstractify(x), jc.unit))
 
-        pvals = map(pv_like, jax_inputs)
+        pvals = map(pv_like, jax_args)
+        # jaxpr, _, consts = pe.trace_to_jaxpr(net_fun, pvals)
 
         (jaxpr, _, consts), submodules_in_execution_order = _submodule_tracing.traced(
             self, lambda: pe.trace_to_jaxpr(net_fun, pvals))
@@ -473,8 +467,17 @@ class parametrized(jc.Primitive):
     def apply(self, params, *inputs):
         assert isinstance(params, tuple)
 
-        return _submodule_tracing.disable_while(
-            self, lambda: _apply_transform(lu.wrap_init(self._fun), params).call_wrapped(inputs))
+        def inner():
+            inputs_flat, in_tree = tree_util.tree_flatten(inputs)
+            net_fun = lu.wrap_init(self._fun)
+            net_fun, out_tree = api_util.flatten_fun_nokwargs(net_fun, in_tree)
+            with jc.new_master(ApplyTrace) as master:
+                net_fun = _apply_subtrace(net_fun, master, WrapHashably(params))
+                out_flat = net_fun.call_wrapped(*inputs)
+                del master
+            return tree_util.tree_unflatten(out_tree(), out_flat)
+
+        return _submodule_tracing.disable_while(self, inner)
 
     def __str__(self):
         return self.name
@@ -503,7 +506,7 @@ class parameter(parametrized):
     def __init__(self, init_param, name=None):
         self._init_param = init_param
 
-        super().__init__(lambda params, *_: params, name=name if name else 'parameter')
+        super().__init__(lambda params, *_: (params,), name=name if name else 'parameter')
 
     def apply(self, params, *inputs):
         return self._fun(params, *inputs)
