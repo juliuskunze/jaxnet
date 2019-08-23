@@ -7,6 +7,7 @@ from jax import lax, random, core as jc, linear_util as lu, \
     unzip2, unzip3, safe_zip, safe_map, partial, WrapHashably, tree_util, api_util
 from jax.abstract_arrays import ShapedArray
 from jax.interpreters import xla, partial_eval as pe
+from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal
 from jax.lax.lax_control_flow import _promote_aval_rank
 from jax.random import PRNGKey
 
@@ -95,7 +96,8 @@ def _get_primitive_init(primitive, reuse, reuse_only):
                                                                    reuse_only=reuse_only)
                 submodule_params_dict[primitive] = params_dict
             submodule_params = primitive._params_namedtuple(submodule_params_dict[primitive])
-            return primitive.apply(submodule_params, *inputs), submodule_params_dict
+            out, _ = jax.tree_flatten(primitive.apply(submodule_params, *inputs))
+            return out, submodule_params_dict
 
         return traced_submodule_init
 
@@ -272,6 +274,7 @@ class ApplyTrace(jc.Trace):
             out = apply_rules[primitive](submodule_params_iter, *vals_in, **params)
         elif isinstance(primitive, parametrized):
             out = primitive.apply(submodule_params_iter.get_params(primitive), *vals_in)
+            out, _ = jax.tree_flatten(out)
         else:
             out = primitive.bind(*vals_in, **params)
         if primitive.multiple_results:
@@ -373,19 +376,37 @@ class parametrized(jc.Primitive):
 
         super().__init__(f'{self._name}_{id(self)}')
 
-        def layer_abstract_eval(*avals):
-            def init_and_apply(rng, *inputs):
-                params = self.init_params(rng, *inputs)
-                return self.apply(params, *inputs)
+        def init_and_apply(rng, *inputs):
+            params = self.init_params(rng, *inputs)
+            return self.apply(params, *inputs)
 
-            akey = ShapedArray((2,), 'uint32')
-            return pe.abstract_eval_fun(init_and_apply, akey, *avals)
+        self._init_and_apply = init_and_apply
+
+        def layer_abstract_eval(*avals):
+            avals = (ShapedArray((2,), 'uint32'),) + avals
+            avals, in_tree = jax.tree_flatten(avals)
+            flat_fun, out_tree = jax.flatten_fun_nokwargs(lu.wrap_init(init_and_apply), in_tree)
+            pvals_in = [PartialVal((a, jc.unit)) for a in avals]
+            _, pvals_out, _ = trace_to_jaxpr(flat_fun, pvals_in, instantiate=True)
+            avals_out, _ = unzip2(pvals_out)
+            return avals_out
 
         self.def_abstract_eval(layer_abstract_eval)
 
     def __call__(self, *inputs):
         _submodule_tracing.trace_call(self)
-        return self.bind(*inputs)
+        args_flat, in_tree = jax.tree_flatten(inputs)
+
+        # Need to abstract eval in order to build out tree:
+        avals = (PRNGKey(0),) + inputs
+        key_and_args_flat, in_tree_with_key = jax.tree_flatten(avals)
+        flat_fun, out_tree = jax.flatten_fun_nokwargs(lu.wrap_init(self._init_and_apply), in_tree_with_key)
+        in_pvals = [pe.PartialVal((jax.raise_to_shaped(jc.get_aval(x)), jc.unit))
+                    for x in key_and_args_flat]
+        pe.trace_to_jaxpr(flat_fun, in_pvals, instantiate=True)
+
+        flat_outs = self.bind(*args_flat)
+        return jax.tree_unflatten(out_tree(), flat_outs)
 
     def _init_or_reuse_params_dict(self, rng, *example_inputs, reuse=None, reuse_only=False):
         if reuse:
@@ -506,7 +527,7 @@ class parameter(parametrized):
     def __init__(self, init_param, name=None):
         self._init_param = init_param
 
-        super().__init__(lambda params, *_: (params,), name=name if name else 'parameter')
+        super().__init__(lambda params, *_: params, name=name if name else 'parameter')
 
     def apply(self, params, *inputs):
         return self._fun(params, *inputs)
