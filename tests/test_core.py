@@ -378,7 +378,6 @@ def test_param_and_submodule_mixed():
     assert np.array_equal(out, out_)
 
 
-@pytest.mark.skip('TODO')
 def test_mixed_up_execution_order():
     @parametrized
     def dense(inputs):

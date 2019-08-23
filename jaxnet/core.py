@@ -3,7 +3,6 @@ from pathlib import Path
 
 import dill
 import jax
-import pytest
 from jax import lax, random, core as jc, linear_util as lu, \
     unzip2, unzip3, safe_zip, safe_map, partial, WrapHashably, pack, tree_flatten
 from jax.abstract_arrays import ShapedArray
@@ -295,6 +294,62 @@ class ApplyTrace(jc.Trace):
         return ApplyTracer(self, _merge(submodule_params_iters), jc.pack(vals))
 
 
+class SubmoduleTracing:
+    """Needed to map execution order of submodules to order of appearance in jaxpr."""
+
+    def __init__(self):
+        self._disable_stack = []
+        self._callstack = []
+
+    def is_enabled(self):
+        return len(self._disable_stack) == 0
+
+    def disable_while(self, primitive, body):
+        self._disable_stack.append(primitive)
+
+        try:
+            return body()
+        finally:
+            assert primitive == self._disable_stack.pop()
+
+    def traced(self, primitive, body):
+        self._callstack.append((primitive, OrderedDict()))
+
+        try:
+            result = body()
+        finally:
+            module, submodules = self._callstack.pop()
+
+        assert module == primitive
+        return result, list(submodules.keys())
+
+    def trace_call(self, submodule):
+        if _submodule_tracing.is_enabled():
+            _, submodules = self._callstack[-1]
+            if submodule not in submodules:
+                # used as ordered set:
+                submodules[submodule] = None
+
+
+_submodule_tracing = SubmoduleTracing()
+
+
+def _permutation_to_jaxpr_order(jaxpr, submodules_in_execution_order):
+    permutation = []
+    submodule_execution_index_by_name = {submodule.name: index for index, submodule in
+                                         enumerate(submodules_in_execution_order)}
+
+    for eqn in jaxpr.eqns:
+        execution_index = submodule_execution_index_by_name.pop(eqn.primitive.name, None)
+        if execution_index is not None:
+            permutation.append(execution_index)
+
+    assert len(submodule_execution_index_by_name) == 0
+    assert len(permutation) == len(submodules_in_execution_order)
+
+    return permutation
+
+
 class parametrized(jc.Primitive):
     def __init__(self, fun, name=None):
         self._name = name if name else fun.__name__
@@ -321,6 +376,7 @@ class parametrized(jc.Primitive):
         self.def_abstract_eval(layer_abstract_eval)
 
     def __call__(self, *inputs):
+        _submodule_tracing.trace_call(self)
         return self.bind(*inputs)
 
     def _init_or_reuse_params_dict(self, rng, *example_inputs, reuse=None, reuse_only=False):
@@ -341,11 +397,23 @@ class parametrized(jc.Primitive):
             return pe.PartialVal((get_aval(x), jc.unit))
 
         pvals = map(pv_like, jax_inputs)
-        jaxpr, _, consts = pe.trace_to_jaxpr(net_fun, pvals)
 
-        return _get_submodule_params(rng, jaxpr, consts, [], OrderedDict(),
-                                     *example_inputs,
-                                     reuse=reuse, reuse_only=reuse_only)
+        (jaxpr, _, consts), submodules_in_execution_order = _submodule_tracing.traced(
+            self, lambda: pe.trace_to_jaxpr(net_fun, pvals))
+
+        submodule_params = _get_submodule_params(rng, jaxpr, consts, [], OrderedDict(),
+                                                 *example_inputs,
+                                                 reuse=reuse, reuse_only=reuse_only)
+
+        if len(submodule_params) <= 1:
+            return submodule_params
+
+        permutation = _permutation_to_jaxpr_order(jaxpr, submodules_in_execution_order)
+        assert len(submodule_params) == len(permutation)
+        submodule_param_pairs_in_execution_order = list(submodule_params.items())
+        submodule_param_pairs_in_jaxpr_order = (submodule_param_pairs_in_execution_order[i]
+                                                for i in permutation)
+        return OrderedDict(submodule_param_pairs_in_jaxpr_order)
 
     def init_params(self, rng, *example_inputs, reuse=None, reuse_only=False):
         d = self._init_or_reuse_params_dict(rng, *example_inputs, reuse=reuse,
@@ -383,7 +451,8 @@ class parametrized(jc.Primitive):
     def apply(self, params, *inputs):
         assert isinstance(params, tuple)
 
-        return _apply_transform(lu.wrap_init(self._fun), params).call_wrapped(inputs)
+        return _submodule_tracing.disable_while(
+            self, lambda: _apply_transform(lu.wrap_init(self._fun), params).call_wrapped(inputs))
 
     def __str__(self):
         return self.name
