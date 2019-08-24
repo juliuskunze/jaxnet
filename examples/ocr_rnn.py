@@ -17,6 +17,9 @@ def read_dataset():
 
 
 def main():
+    print("Sorry, this example does not work yet work with the new jax version.")
+    return
+
     train, test = read_dataset()
     _, length, x_size = train.data.shape
     class_count = train.target.shape[2]
