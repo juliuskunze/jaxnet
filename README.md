@@ -14,7 +14,7 @@ This allows code to be more concise, robust and optimized ([motivation below](#w
 pip3 install jaxnet
 ```
 
-To use GPU/TPU, first install the [right version of jaxlib](https://github.com/google/jax#installation).
+To use GPU, first install the [right version of jaxlib](https://github.com/google/jax#installation).
 
 
 ## API overview
