@@ -155,7 +155,7 @@ assert (2, ) == params.sequential.dense.bias.shape
 When `init_params` is called on different modules, parameters corresponding to the same shared module can be different (have different indices) between the two calls.
 When `init_params` is called on the same module twice, resulting parameter names are identical.
 
-## Regularization and reparameterization
+## Regularization and reparametrization
 
 JAXnet allows parameter regularization for a whole model with unusual conciseness:
 
@@ -183,7 +183,7 @@ In this example, every weight vector/matrix is multiplied by a learnable scalar.
 Variational inference can be implemented as a combination of `Reparametrization` and `Regularization`.
 (Example will be added soon.)
 
-Since `Reparametrized` just returns another module, you can apply it to any part of your network:
+Since `Reparametrized` just returns another module, it can be applied to any part of your network:
 
 ```python
 net = Sequential(Conv(20, (3, 3)), relu, Conv(20, (3, 3)), relu,
