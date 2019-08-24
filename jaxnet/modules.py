@@ -1,7 +1,7 @@
 import functools
 import itertools
 
-from jax import random, lax, numpy as np, scipy
+from jax import random, lax, numpy as np, scipy, partial
 
 from jaxnet.core import parametrized, parameter
 from jaxnet.initializers import glorot, randn, zeros, ones
@@ -271,8 +271,10 @@ def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,
 
 
 def sum_over_parameters(params, transform):
-    # TODO generalize to nested / dict, ...
-    return sum(map(transform, params))
+    if isinstance(params, tuple):
+        return sum(map(partial(sum_over_parameters, transform=transform), params))
+
+    return transform(params)
 
 
 def Regularized(loss_model, parameter_regularizer):
@@ -283,6 +285,10 @@ def Regularized(loss_model, parameter_regularizer):
             params, transform=parameter_regularizer)
 
     return regularized
+
+
+def L2Regularized(loss_model, scale):
+    return Regularized(loss_model=loss_model, parameter_regularizer=lambda x: .5 * x * x * scale)
 
 
 def Reparametrized(model, parameter_transform_factory, param_init_mapping=lambda x: x):

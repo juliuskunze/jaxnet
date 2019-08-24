@@ -157,14 +157,13 @@ When `init_params` is called on the same module twice, resulting parameter names
 
 ## Regularization and reparametrization
 
-JAXnet allows parameter regularization for a whole model with unusual conciseness:
+JAXnet allows concise regularization for a given loss network:
 
 ```python
-loss = Sequential(Dense(4), relu)
-loss_with_l2 = Regularized(loss, regularizer=lambda x: .5 * x * x)
+reg_loss_net = L2Regularized(loss_net, scale=.1)
 ```
 
-`loss_with_l2` is a module that you can now use like any other.
+`reg_loss_net` now is a module usable like any other.
 
 Reparametrization is similarly simple:
 
@@ -180,10 +179,10 @@ Reparametrization is similarly simple:
 ```
 
 In this example, every weight vector/matrix is multiplied by a learnable scalar.
-Variational inference can be implemented as a combination of `Reparametrization` and `Regularization`.
+Variational inference can be implemented as a combination of `Reparametrized` and `Regularized`.
 (Example will be added soon.)
 
-Since `Reparametrized` just returns another module, it can be applied to any part of your network:
+Since `Reparametrized` just returns another module, it can be applied to parts of your network:
 
 ```python
 net = Sequential(Conv(20, (3, 3)), relu, Conv(20, (3, 3)), relu,
@@ -235,4 +234,20 @@ transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs, reuse={net: n
 assert transfer_net_params[0] is net_params
 
 # train transfer_net_params...
+```
+
+## Parameter storage
+
+Store parameters with `save_params` and `load_params`:
+
+```python
+from pathlib import Path
+
+params = Dense(2).init_params(PRNGKey(0), np.zeros((1, 2)))
+
+path = Path('/') / 'tmp' / 'net.params'
+save_params(params, path)
+params = load_params(path)
+
+print(params.dense.kernel)
 ```

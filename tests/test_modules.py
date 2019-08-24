@@ -4,7 +4,7 @@ from jax.random import PRNGKey
 
 from jaxnet import Dense, Sequential, relu, Conv, Conv1D, ConvTranspose, Conv1DTranspose, flatten, \
     MaxPool, AvgPool, zeros, GRUCell, Rnn, SumPool, Dropout, BatchNorm, parametrized, Parameter, \
-    Regularized, ones, Reparametrized
+    Regularized, ones, Reparametrized, L2Regularized
 from tests.util import random_inputs, assert_params_equal
 
 
@@ -196,7 +196,7 @@ def test_Sequential_graceful_update_message():
         assert message == str(e)
 
 
-def test_L2_regularization():
+def test_Regularized():
     @parametrized
     def loss(inputs):
         a = Parameter((), ones, inputs, 'a')
@@ -215,6 +215,38 @@ def test_L2_regularization():
 
     assert 1 + 2 + 1 + 4 == reg_loss_out
 
+def test_L2Regularized():
+    @parametrized
+    def loss(inputs):
+        a = Parameter((), ones, inputs, 'a')
+        b = Parameter((), lambda rng, shape: 2 * np.ones(shape), inputs, 'b')
+
+        return a + b
+
+    reg_loss = L2Regularized(loss, scale=2)
+
+    inputs = np.zeros(())
+    params = reg_loss.init_params(PRNGKey(0), inputs)
+    assert np.array_equal(np.ones(()), params.loss.a)
+    assert np.array_equal(2 * np.ones(()), params.loss.b)
+
+    reg_loss_out = reg_loss.apply(params, inputs)
+
+    assert 1 + 2 + 1 + 4 == reg_loss_out
+
+def test_L2Regularized_sequential():
+    loss = Sequential(Dense(1, ones, ones), relu, Dense(1, ones, ones), sum)
+
+    reg_loss = L2Regularized(loss, scale=2)
+
+    inputs = np.ones(1)
+    params = reg_loss.init_params(PRNGKey(0), inputs)
+    assert np.array_equal(np.ones((1, 1)), params.loss.dense0.kernel)
+    assert np.array_equal(np.ones((1, 1)), params.loss.dense1.kernel)
+
+    reg_loss_out = reg_loss.apply(params, inputs)
+
+    assert 7 == reg_loss_out
 
 def test_unparametrized_reparameterization():
     def doubled(params):

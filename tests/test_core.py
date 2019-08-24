@@ -617,13 +617,10 @@ def test_submodule_init_params_is_random():
 
 
 def test_save_and_load_params():
+    params = Dense(2).init_params(PRNGKey(0), np.zeros((1, 2)))
+
     from pathlib import Path
-
-    path = Path('/') / 'tmp' / 'net.params4'
-
-    inputs = np.zeros((1, 2))
-    net = Dense(5)
-    params = net.init_params(PRNGKey(0), inputs)
+    path = Path('/') / 'tmp' / 'net.params'
     save_params(params, path)
     params_ = load_params(path)
 

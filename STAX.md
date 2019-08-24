@@ -16,8 +16,7 @@ demos to their original stax implementations (linked in each).
 ### Porting from stax
 
 All stax functionality is now in JAXnet. Porting models is straight-forward:
-- Remove `init_params`: Extract `Param`s. Get rid of `output_shape` and `rng` splitting code.
-- Pass these `Param`s into `apply_fun` using default arguments.
+- Remove `init_params`: Extract parameters. Get rid of `output_shape` and `rng` splitting code.
 - Add `@parameterized` to your `apply_fun`, remove the `params` argument, and use layers/params directly.
 - Update `Serial` to `Sequential`.
 - Update parameter-free `stax` layers (`Relu`, `Flatten`, ...) to JAXnet functions (`relu`, `flatten`, ...).
