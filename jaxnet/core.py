@@ -24,13 +24,9 @@ def _call_init(primitive, rng, submodule_params, params,
     return primitive.bind(f, *in_vals, **params), submodule_params
 
 
-# TODO allow direct use of lax.scan
-def scan_wrapped(*args):
-    return _submodule_tracing.resume_while(lambda: lax.scan(*args))
-
-
 def _scan_init(rng, submodule_params_dict, consts, init, xs, forward, length, jaxpr, reuse,
                reuse_only):
+    # TODO update to jax==0.1.42
     assert len(consts) == 0
 
     _, _, x_aval = jaxpr.in_avals
@@ -63,6 +59,7 @@ def _scan_init(rng, submodule_params_dict, consts, init, xs, forward, length, ja
 
 
 def _scan_apply(submodule_params_iter, consts, init, xs, forward, length, jaxpr):
+    # TODO update to jax==0.1.42
     _, _, x_aval = jaxpr.in_avals
     _, y_aval = jaxpr.out_aval
     ys_aval = _promote_aval_rank(length, y_aval)
@@ -147,266 +144,150 @@ def _get_submodule_params(rng, jaxpr, consts, freevar_vals, submodule_params, *a
     return submodule_params
 
 
-def _merge(submodule_params_iters):
-    out = None
-
-    for iter in submodule_params_iters:
-        if isinstance(iter, SubmoduleParamsIterator):
-            assert out is None or iter is out
-            out = iter
-        else:
-            assert isinstance(iter, dict)
-            assert len(iter) == 0
-
-    return out
-
-
-def _apply_transform(fun, submodule_params, inputs):
-    with jc.new_master(ApplyTrace) as master:
-        fun = _apply_subtrace(fun, master, WrapHashably(SubmoduleParamsIterator(submodule_params)))
-        out_val = fun.call_wrapped(*inputs)
-        del master
-    return out_val
-
-
-@lu.transformation
-def _apply_subtrace(master, submodule_params, *vals):
-    submodule_params = submodule_params.val
-    trace = ApplyTrace(master, jc.cur_sublevel())
-    outs = yield map(partial(ApplyTracer, trace, SubmoduleParamsIterator(submodule_params)),
-                     vals), {}
-    out_tracers = map(trace.full_raise, outs)
-    yield [t.val for t in out_tracers]
-
-
-def _expand_reuse_dict(reuse, *example_inputs):
-    expanded_reuse = {}
-
-    for module, params in reuse.items():
-        if isinstance(module, parametrized):
-            module = module.shaped(*example_inputs)
-
-        if not isinstance(module, ShapedParametrized):
-            raise ValueError('Keys for reuse must be parametrized or ShapedParametrized.')
-
-        expanded_reuse.update(module._get_reuse_dict(params))
-
-    return expanded_reuse
-
-
-def _get_reuse_dict(module, params, params_dict):
-    assert len(params_dict) == len(params)
-    d = {module: params}
-
-    if not isinstance(params_dict, dict): return d
-
-    for ((module, submodule_params_dict), submodule_params) in zip(params_dict.items(), params):
-        if isinstance(module, parametrized):
-            d[module] = submodule_params
-            reuse_dict = _get_reuse_dict(module, submodule_params,
-                                         params_dict=submodule_params_dict)
-            for module, params in reuse_dict.items():
-                params_ = d.get(module)
-                if params_ is not None and not params is params_:
-                    # TODO: create params_from_overlapping
-                    raise ValueError("Provided reuse params contradict each other."
-                                     "Use params_from_overlapping if intended.")
-
-            d.update(reuse_dict)
-
-    return d
-
-
-class ApplyTracer(jc.Tracer):
-    __slots__ = ['val', 'submodule_params_iter']
-
-    def __init__(self, trace, submodule_params_iter, val):
-        assert isinstance(submodule_params_iter, SubmoduleParamsIterator)
-        super().__init__(trace)
-        self.val = val
-        self.submodule_params_iter = submodule_params_iter
-
-    @property
-    def aval(self):
-        return jc.get_aval(self.val)
-
-    def full_lower(self):
-        return self
-
-
 init_rules = {xla.xla_call_p: partial(_call_init, xla.xla_call_p),
               lax.scan_p: _scan_init}
 
 apply_rules = {lax.scan_p: _scan_apply}
 
 
-class SubmoduleParamsIterator:
-    def __init__(self, submodule_params):
-        self.submodule_params = submodule_params
-        self.index = 0
-        self.submodule_params_by_primitive = {}
+class ApplyTrace(jc.Trace):
+    class SubmoduleParamsIterator:
+        def __init__(self, submodule_params):
+            self.submodule_params = submodule_params
+            self.index = 0
+            self.submodule_params_by_primitive = {}
 
-    def get_params(self, primitive):
-        params = self.submodule_params_by_primitive.get(primitive)
-        if params is not None:
+        def get_params(self, primitive):
+            params = self.submodule_params_by_primitive.get(primitive)
+            if params is not None:
+                return params
+
+            params = self.submodule_params[self.index]
+            self.index += 1
+            self.submodule_params_by_primitive[primitive] = params
             return params
 
-        params = self.submodule_params[self.index]
-        self.index += 1
-        self.submodule_params_by_primitive[primitive] = params
-        return params
+    class Tracer(jc.Tracer):
+        __slots__ = ['val', 'submodule_params_iter']
 
+        def __init__(self, trace, submodule_params_iter, val):
+            super().__init__(trace)
+            self.val = val
+            self.submodule_params_iter = submodule_params_iter
 
-class ApplyTrace(jc.Trace):
+        @property
+        def aval(self):
+            return jc.get_aval(self.val)
+
+        def full_lower(self):
+            return self
+
+        @staticmethod
+        def merge(tracers):
+            flat_inputs, submodule_params_iters = unzip2((t.val, t.submodule_params_iter)
+                                                         for t in tracers)
+
+            submodule_param_iter = None
+            for iter in submodule_params_iters:
+                if isinstance(iter, ApplyTrace.SubmoduleParamsIterator):
+                    assert submodule_param_iter is None or iter is submodule_param_iter
+                    submodule_param_iter = iter
+                else:
+                    assert isinstance(iter, dict)
+                    assert len(iter) == 0
+
+            return flat_inputs, submodule_param_iter
+
     def pure(self, val):
-        return ApplyTracer(self, {}, val)
+        return ApplyTrace.Tracer(self, {}, val)
 
     def lift(self, val):
-        return ApplyTracer(self, {}, val)
+        return ApplyTrace.Tracer(self, {}, val)
 
     def sublift(self, val):
-        return ApplyTracer(self, {}, val.val)
+        return ApplyTrace.Tracer(self, {}, val.val)
 
     def process_primitive(self, primitive, tracers, params):
-        vals_in, submodule_params_iters = unzip2((t.val, t.submodule_params_iter) for t in tracers)
-        submodule_params_iter = _merge(submodule_params_iters)
+        flat_inputs, submodule_params_iter = ApplyTrace.Tracer.merge(tracers)
         if primitive in apply_rules:
-            out = apply_rules[primitive](submodule_params_iter, *vals_in, **params)
+            out = apply_rules[primitive](submodule_params_iter, *flat_inputs, **params)
         elif isinstance(primitive, parametrized):
-            out = primitive.apply(submodule_params_iter.get_params(primitive), *vals_in)
+            out = primitive.apply(submodule_params_iter.get_params(primitive), *flat_inputs)
             out, _ = jax.tree_flatten(out)
         else:
-            out = primitive.bind(*vals_in, **params)
+            out = primitive.bind(*flat_inputs, **params)
         if primitive.multiple_results:
-            return map(partial(ApplyTracer, self, submodule_params_iter), out)
+            return map(partial(ApplyTrace.Tracer, self, submodule_params_iter), out)
         else:
-            return ApplyTracer(self, submodule_params_iter, out)
+            return ApplyTrace.Tracer(self, submodule_params_iter, out)
 
     def process_call(self, call_primitive, f, tracers, params):
-        vals, submodule_params_iters = unzip2((t.val, t.submodule_params_iter) for t in tracers)
-        submodule_params_iter = _merge(submodule_params_iters)
-        f = _apply_subtrace(f, self.master, WrapHashably(submodule_params_iter))
-        vals_out = call_primitive.bind(f, *vals, **params)
-        return map(partial(ApplyTracer, self, submodule_params_iter), vals_out)
+        flat_inputs, submodule_params_iter = ApplyTrace.Tracer.merge(tracers)
+        f = ApplyTrace._apply_subtrace(f, self.master, WrapHashably(submodule_params_iter))
+        flat_outs = call_primitive.bind(f, *flat_inputs, **params)
+        return map(partial(ApplyTrace.Tracer, self, submodule_params_iter), flat_outs)
 
-    def post_process_call(self, call_primitive, out_tracers, params):
-        vals, submodule_params_iters = unzip2((t.val, t.net_params) for t in out_tracers)
-        submodule_params_iters = _merge(submodule_params_iters)
-        master = self.master
-
-        def todo(x):
-            trace = ApplyTrace(master, jc.cur_sublevel())
-            return map(partial(ApplyTracer, trace, submodule_params_iters), x)
-
-        return vals, todo
-
-
-class SubmoduleTracing:
-    """Used to trace submodule call order during trace_to_jaxpr.
-    Needed to supply parameter values (in order of appearance in jaxpr) to the right submodule.
-    This is done by reordering submodules to match the jaxpr order."""
-
-    def __init__(self):
-        self._disable_stack = []
-        self._callstack = []
-
-    def is_enabled(self):
-        return (len(self._callstack) > 0 and
-                (len(self._disable_stack) == 0 or self._disable_stack[-1] is None))
-
-    def disable_while(self, primitive, body):
-        self._disable_stack.append(primitive)
-
-        try:
-            return body()
-        finally:
-            assert primitive == self._disable_stack.pop()
-
-    def resume_while(self, body):
-        self._disable_stack.append(None)
-
-        try:
-            return body()
-        finally:
-            assert self._disable_stack.pop() is None
-
-    def traced(self, primitive, body):
-        self._callstack.append((primitive, OrderedDict()))
-
-        try:
-            result = body()
-        finally:
-            module, submodules = self._callstack.pop()
-
-        assert module == primitive
-        return result, list(submodules.keys())
-
-    def trace_call(self, submodule):
-        if self.is_enabled():
-            _, submodules = self._callstack[-1]
-            if submodule not in submodules:
-                # used as ordered set:
-                submodules[submodule] = None
-
-
-_submodule_tracing = SubmoduleTracing()
-
-
-def _permutation_to_jaxpr_order(jaxpr, submodules_in_execution_order):
-    permutation = []
-    submodule_execution_index_by_name = {submodule.name: index for index, submodule in
-                                         enumerate(submodules_in_execution_order)}
-
-    for eqn in jaxpr.eqns:
-        execution_index = submodule_execution_index_by_name.pop(eqn.primitive.name, None)
-        if execution_index is not None:
-            permutation.append(execution_index)
-
-    assert len(submodule_execution_index_by_name) == 0
-    assert len(permutation) == len(submodules_in_execution_order)
-
-    return permutation
+    @staticmethod
+    @lu.transformation
+    def _apply_subtrace(master, submodule_params, *vals):
+        submodule_params = submodule_params.val
+        trace = ApplyTrace(master, jc.cur_sublevel())
+        outs = yield map(partial(ApplyTrace.Tracer, trace,
+                                 ApplyTrace.SubmoduleParamsIterator(submodule_params)), vals), {}
+        out_tracers = map(trace.full_raise, outs)
+        yield [t.val for t in out_tracers]
 
 
 class parametrized(jc.Primitive):
     def __init__(self, fun, name=None):
         self._name = name if name else fun.__name__
         self._fun = fun
+        self._wrapped_fun = lu.wrap_init(self._fun)
         self.multiple_results = True
 
         super().__init__(f'{self._name}_{id(self)}')
 
+        @lu.wrap_init
         def init_and_apply(rng, *inputs):
             params = self.init_params(rng, *inputs)
             return self.apply(params, *inputs)
 
         self._init_and_apply = init_and_apply
+        # Avoids running trace_to_jaxpr twice during initialization just for out_tree:
+        self._cached_out_tree = None
 
-        def layer_abstract_eval(*avals):
-            avals = (ShapedArray((2,), 'uint32'),) + avals
-            avals, in_tree = jax.tree_flatten(avals)
-            flat_fun, out_tree = jax.flatten_fun_nokwargs(lu.wrap_init(init_and_apply), in_tree)
-            pvals_in = [PartialVal((a, jc.unit)) for a in avals]
-            _, pvals_out, _ = trace_to_jaxpr(flat_fun, pvals_in, instantiate=True)
-            avals_out, _ = unzip2(pvals_out)
-            return avals_out
+        def abstract_call(*inputs):
+            key_and_inputs = (ShapedArray((2,), 'uint32'),) + inputs
+            flat_rng_and_inputs, in_tree_with_rng = jax.tree_flatten(key_and_inputs)
+            flat_fun, self._cached_out_tree = jax.flatten_fun_nokwargs(self._init_and_apply,
+                                                                       in_tree_with_rng)
+            flat_partial_inputs = [PartialVal((a, jc.unit)) for a in flat_rng_and_inputs]
+            _, flat_partial_outs, _ = trace_to_jaxpr(
+                flat_fun, flat_partial_inputs, instantiate=True)
+            flat_outs, _ = unzip2(flat_partial_outs)
+            return flat_outs
 
-        self.def_abstract_eval(layer_abstract_eval)
+        self.def_abstract_eval(abstract_call)
+
+    dummy_rng = PRNGKey(0)
+
+    def _out_tree(self, *inputs):
+        if self._cached_out_tree is not None:
+            result = self._cached_out_tree()
+            self._cached_out_tree = None
+            return result
+
+        flat_rng_and_inputs, in_tree_with_rng = jax.tree_flatten((parametrized.dummy_rng,) + inputs)
+        flat_fun, out_tree = jax.flatten_fun_nokwargs(self._init_and_apply, in_tree_with_rng)
+        # Need to abstract eval in order to build out tree:
+        pe.trace_to_jaxpr(flat_fun, parametrized._partialize(flat_rng_and_inputs), instantiate=True)
+        return out_tree()
 
     def __call__(self, *inputs):
-        _submodule_tracing.trace_call(self)
-        args_flat, in_tree = jax.tree_flatten(inputs)
-
-        # Need to abstract eval in order to build out tree:
-        avals = (PRNGKey(0),) + inputs
-        key_and_args_flat, in_tree_with_key = jax.tree_flatten(avals)
-        flat_fun, out_tree = jax.flatten_fun_nokwargs(lu.wrap_init(self._init_and_apply), in_tree_with_key)
-        in_pvals = [pe.PartialVal((jax.raise_to_shaped(jc.get_aval(x)), jc.unit))
-                    for x in key_and_args_flat]
-        pe.trace_to_jaxpr(flat_fun, in_pvals, instantiate=True)
-
-        flat_outs = self.bind(*args_flat)
-        return jax.tree_unflatten(out_tree(), flat_outs)
+        parametrized._submodule_call_order_tracing.trace(self)
+        flat_inputs, _ = jax.tree_flatten(inputs)
+        flat_outs = self.bind(*flat_inputs)
+        return jax.tree_unflatten(self._out_tree(*inputs), flat_outs)
 
     def _init_or_reuse_params_dict(self, rng, *example_inputs, reuse=None, reuse_only=False):
         if reuse:
@@ -418,37 +299,31 @@ class parametrized(jc.Primitive):
                                       reuse=reuse, reuse_only=reuse_only)
 
     def _init_params_dict(self, rng, *example_inputs, reuse, reuse_only):
-        net_fun = lu.wrap_init(self._fun)
-        jax_args, in_tree = tree_util.tree_flatten(example_inputs)
-        net_fun, out_tree = api_util.flatten_fun_nokwargs(net_fun, in_tree)
+        flat_inputs, in_tree = tree_util.tree_flatten(example_inputs)
+        flat_fun, _ = api_util.flatten_fun_nokwargs(self._wrapped_fun, in_tree)
+        (jaxpr, _, consts), submodules_in_call_order = \
+            parametrized._submodule_call_order_tracing.nested(
+                self, lambda: pe.trace_to_jaxpr(flat_fun, parametrized._partialize(flat_inputs)),
+                do_trace_submodules=True)
 
-        def pv_like(x):
-            return pe.PartialVal((xla.abstractify(x), jc.unit))
-
-        pvals = map(pv_like, jax_args)
-        # jaxpr, _, consts = pe.trace_to_jaxpr(net_fun, pvals)
-
-        (jaxpr, _, consts), submodules_in_execution_order = _submodule_tracing.traced(
-            self, lambda: pe.trace_to_jaxpr(net_fun, pvals))
-
-        submodule_params = _get_submodule_params(rng, jaxpr, consts, [], OrderedDict(),
-                                                 *example_inputs,
-                                                 reuse=reuse, reuse_only=reuse_only)
+        submodule_params = _get_submodule_params(
+            rng, jaxpr, consts, [], OrderedDict(), *example_inputs,
+            reuse=reuse, reuse_only=reuse_only)
 
         # TODO cleanup, needed whenever parent of scan is used as submodule,
         # since cell tracing is leaking into modules above:
-        submodules_in_execution_order = list(
-            filter(lambda x: x in submodule_params, submodules_in_execution_order))
+        # submodules_in_execution_order = list(
+        #    filter(lambda x: x in submodule_params, submodules_in_execution_order))
 
-        assert len(submodule_params) == len(submodules_in_execution_order)
+        assert len(submodule_params) == len(submodules_in_call_order)
 
         if len(submodule_params) <= 1:
             return submodule_params
 
-        permutation = _permutation_to_jaxpr_order(jaxpr, submodules_in_execution_order)
+        permutation = parametrized._permutation_to_jaxpr_order(jaxpr, submodules_in_call_order)
         assert len(submodule_params) == len(permutation)
-        submodule_param_pairs_in_execution_order = list(submodule_params.items())
-        submodule_param_pairs_in_jaxpr_order = (submodule_param_pairs_in_execution_order[i]
+        submodule_param_pairs_in_call_order = list(submodule_params.items())
+        submodule_param_pairs_in_jaxpr_order = (submodule_param_pairs_in_call_order[i]
                                                 for i in permutation)
         return OrderedDict(submodule_param_pairs_in_jaxpr_order)
 
@@ -486,25 +361,39 @@ class parametrized(jc.Primitive):
         return Parameters(**params)
 
     def apply(self, params, *inputs):
-        assert isinstance(params, tuple)
+        # assert isinstance(params, tuple)
 
         def inner():
-            inputs_flat, in_tree = tree_util.tree_flatten(inputs)
-            net_fun = lu.wrap_init(self._fun)
-            net_fun, out_tree = api_util.flatten_fun_nokwargs(net_fun, in_tree)
+            flat_inputs, in_tree = tree_util.tree_flatten(inputs)
+            flat_fun, out_tree = api_util.flatten_fun_nokwargs(self._wrapped_fun, in_tree)
             with jc.new_master(ApplyTrace) as master:
-                net_fun = _apply_subtrace(net_fun, master, WrapHashably(params))
-                out_flat = net_fun.call_wrapped(*inputs)
+                flat_fun = ApplyTrace._apply_subtrace(flat_fun, master, WrapHashably(params))
+                flat_outputs = flat_fun.call_wrapped(*inputs)
                 del master
-            return tree_util.tree_unflatten(out_tree(), out_flat)
+            return tree_util.tree_unflatten(out_tree(), flat_outputs)
 
-        return _submodule_tracing.disable_while(self, inner)
+        return parametrized._submodule_call_order_tracing.nested(self, inner)
 
     def __str__(self):
         return self.name
 
+    @staticmethod
+    def _expand_reuse_dict(reuse, *example_inputs):
+        expanded_reuse = {}
+
+        for module, params in reuse.items():
+            if isinstance(module, parametrized):
+                module = module.shaped(*example_inputs)
+
+            if not isinstance(module, ShapedParametrized):
+                raise ValueError('Keys for reuse must be parametrized or ShapedParametrized.')
+
+            expanded_reuse.update(module._get_reuse_dict(params))
+
+        return expanded_reuse
+
     def params_from(self, reuse, *example_inputs):
-        expanded_reuse = _expand_reuse_dict(reuse, *example_inputs)
+        expanded_reuse = parametrized._expand_reuse_dict(reuse, *example_inputs)
 
         # TODO: optimization wrong, duplicate values, needs param adapter
         return self.init_params(PRNGKey(0), *example_inputs, reuse=expanded_reuse, reuse_only=True)
@@ -522,6 +411,61 @@ class parametrized(jc.Primitive):
     def shaped(self, *inputs):
         return ShapedParametrized(self, *inputs)
 
+    class SubmoduleCallOrderTracing:
+        """Used to trace submodule call order during trace_to_jaxpr."""
+
+        def __init__(self):
+            self._submodules_by_module = []
+
+        def nested(self, primitive, body, do_trace_submodules=False):
+            submodules_init = OrderedDict() if do_trace_submodules else None
+            self._submodules_by_module.append((primitive, submodules_init))
+
+            try:
+                result = body()
+            finally:
+                module, submodules = self._submodules_by_module.pop()
+
+            assert module == primitive
+            return (result, list(submodules.keys())) if do_trace_submodules else result
+
+        def trace(self, submodule):
+            _, submodules = self._submodules_by_module[-1]
+            do_trace_submodules = submodules is not None
+            if not do_trace_submodules:
+                return
+
+            if submodule not in submodules:
+                # used as ordered set:
+                submodules[submodule] = None
+
+    _submodule_call_order_tracing = SubmoduleCallOrderTracing()
+
+    @staticmethod
+    def _permutation_to_jaxpr_order(jaxpr, submodules_in_call_order):
+        """
+        Needed to supply parameter values (in order of appearance in jaxpr) to the right submodule.
+        This is done by reordering submodules from call order to jaxpr order.
+        """
+        permutation = []
+        submodule_execution_index_by_name = {submodule.name: index for index, submodule in
+                                             enumerate(submodules_in_call_order)}
+
+        for eqn in jaxpr.eqns:
+            execution_index = submodule_execution_index_by_name.pop(eqn.primitive.name, None)
+            if execution_index is not None:
+                permutation.append(execution_index)
+
+        assert len(submodule_execution_index_by_name) == 0
+        assert len(permutation) == len(submodules_in_call_order)
+
+        return permutation
+
+    @staticmethod
+    def _partialize(flat_inputs):
+        return map(lambda x: pe.PartialVal((jax.raise_to_shaped(jc.get_aval(x)), jc.unit)),
+                   flat_inputs)
+
 
 class parameter(parametrized):
     def __init__(self, init_param, name=None):
@@ -536,25 +480,48 @@ class parameter(parametrized):
         if reuse_only:
             raise ValueError(f'No param value specified for {self}.')
 
-        rng, rng_param = random.split(rng)
-        return self._init_param(rng_param)
+        return self._init_param(rng)
 
 
 class ShapedParametrized:
     def __init__(self, parametrized, *example_inputs):
         self.parametrized = parametrized
         self.example_inputs = example_inputs
-        self._params_dict_cached = None
+        self._cached_params_dict = None
 
     def _params_dict(self):
-        if self._params_dict_cached is None:
-            self._params_dict_cached = self.parametrized._init_or_reuse_params_dict(
+        if self._cached_params_dict is None:
+            self._cached_params_dict = self.parametrized._init_or_reuse_params_dict(
                 PRNGKey(0), *self.example_inputs)
 
-        return self._params_dict_cached
+        return self._cached_params_dict
+
+    @staticmethod
+    def _get_reuse_dict_form(module, params, params_dict):
+        assert len(params_dict) == len(params)
+        d = {module: params}
+
+        if not isinstance(params_dict, dict): return d
+
+        for ((module, submodule_params_dict), submodule_params) in zip(params_dict.items(), params):
+            if isinstance(module, parametrized):
+                d[module] = submodule_params
+                reuse_dict = ShapedParametrized._get_reuse_dict_form(
+                    module, submodule_params, params_dict=submodule_params_dict)
+                for module, params in reuse_dict.items():
+                    params_ = d.get(module)
+                    if params_ is not None and not params is params_:
+                        # TODO: create params_from_overlapping
+                        raise ValueError("Provided reuse params contradict each other."
+                                         "Use params_from_overlapping if intended.")
+
+                d.update(reuse_dict)
+
+        return d
 
     def _get_reuse_dict(self, params):
-        return _get_reuse_dict(self.parametrized, params, self._params_dict())
+        return ShapedParametrized._get_reuse_dict_form(self.parametrized, params,
+                                                       self._params_dict())
 
     def apply_from(self, reuse, jit=False):
         return self.parametrized.apply_from(reuse, *self.example_inputs, jit=jit)

@@ -1,12 +1,17 @@
-from jax import numpy as np, jit, random, value_and_grad, lax
+from collections import namedtuple
+
+import pytest
+from jax import numpy as np, jit, random, value_and_grad
 from jax.experimental import optimizers
 from jax.random import PRNGKey
 
 from examples.mnist_vae import gaussian_sample, bernoulli_logpdf, gaussian_kl
-from examples.wavenet import calculate_receptive_field, discretized_mix_logistic_loss, skip_slice, \
-    Wavenet
-from jaxnet import parametrized, Dense, Sequential, relu, Conv, Conv1D, \
-    flatten, zeros, GRUCell, Rnn, softmax, softplus, parameter, glorot, randn, Parameter, sigmoid
+from examples.wavenet import calculate_receptive_field, discretized_mix_logistic_loss, Wavenet
+from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, GRUCell, Rnn, \
+    softmax, softplus, parameter, glorot, randn, Parameter
+from jaxnet.core import ShapedParametrized
+from tests.test_core import test_parameter
+from tests.test_modules import test_Dense_shape
 
 
 def test_readme():
@@ -38,36 +43,18 @@ def test_reuse_api():
     # train transfer_net_params...
 
 
-def test_parameter():
-    scalar = parameter(lambda _: np.zeros(()))
-    param = scalar.init_params(PRNGKey(0))
-
-    assert np.zeros(()) == param
-    out = scalar.apply(param)
-    assert param == out
-
-
-def test_parameter_simplified():
+def test_parameter_simplified_equivalent():
     class parameter:
-        def __init__(self, init_param):
-            self.init_param = init_param
+        def __init__(self, init_param): self.init_param = init_param
 
-        def apply(self, params, *inputs):
-            return params
+        def apply(self, params, *inputs): return params
 
-        def init_params(self, rng, *example_inputs):
-            rng, rng_param = random.split(rng)
-            return self.init_param(rng_param)
+        def init_params(self, rng, *example_inputs): return self.init_param(rng)
 
-    scalar = parameter(lambda _: np.zeros(()))
-    param = scalar.init_params(PRNGKey(0))
-
-    assert np.zeros(()) == param
-    out = scalar.apply(param)
-    assert param == out
+    test_parameter(parameter)
 
 
-def test_parameter_dense():
+def test_parameter_Dense_equivalent():
     def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
         @parametrized
         def dense(inputs):
@@ -77,14 +64,31 @@ def test_parameter_dense():
 
         return dense
 
-    net = Dense(2)
-    inputs = np.zeros((1, 3))
-    params = net.init_params(PRNGKey(0), inputs)
-    assert (3, 2) == params.parameter0.shape
-    assert (2,) == params.parameter1.shape
+    test_Dense_shape(Dense)
 
-    out = net.apply(params, inputs)
-    assert (1, 2) == out.shape
+
+def test_Dense_equivalent():
+    class Dense:
+        Params = namedtuple('dense', ['kernel', 'bias'])
+
+        def __init__(self, out_dim, kernel_init=glorot(), bias_init=randn()):
+            self.bias_init = bias_init
+            self.kernel_init = kernel_init
+            self.out_dim = out_dim
+
+        def apply(self, params, inputs):
+            kernel, bias = params
+            return np.dot(inputs, kernel) + bias
+
+        def init_params(self, rng, example_inputs):
+            rng_kernel, rng_bias = random.split(rng, 2)
+            kernel = self.kernel_init(rng_kernel, (example_inputs.shape[-1], self.out_dim))
+            bias = self.bias_init(rng_bias, (self.out_dim,))
+            return Dense.Params(kernel=kernel, bias=bias)
+
+        def shaped(self, example_inputs): return ShapedParametrized(self, example_inputs)
+
+    test_Dense_shape(Dense)
 
 
 def test_Parameter_dense():
@@ -127,6 +131,7 @@ def test_mnist_vae():
     assert (5, 10) == params.encode.sequential1.dense.kernel.shape
 
 
+@pytest.mark.skip('TODO')
 def test_ocr_rnn():
     length = 5
     carry_size = 3
@@ -157,6 +162,7 @@ def test_ocr_rnn():
     assert np.array_equal(.25 * np.ones((1, 5, 4)), out)
 
 
+@pytest.mark.skip('TODO too slow, make test or implementation faster')
 def test_wavenet():
     filter_width = 2
     initial_filter_width = 3

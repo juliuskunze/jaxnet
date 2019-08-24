@@ -2,7 +2,7 @@
 
 ## JAXnet modules
 
-JAXnet comes some [predefined modules](jaxnet/modules.py).
+JAXnet comes with some [predefined modules](jaxnet/modules.py).
 The [tests](tests/test_modules.py) shows how modules can be used.
 For example, `Sequential` is defined as
 
@@ -38,10 +38,10 @@ Parameters are shared by using the same module object multiple times:
 shared_net = Sequential(layer, layer)
 ```
 
-## What is the primitive module?
+## How do modules work?
 
-`parameter` is the primitive module from which all modules are built,
-defined with an initialization function:
+`parameter` is the primitive module from which all modules are built.
+It is created from an initialization function:
 
 ```python
 scalar = parameter(lambda rng: np.zeros(()))
@@ -60,6 +60,17 @@ Independent of any inputs, it returns these parameter values:
 assert param == scalar.apply(param)
 ```
 
+The `parameter` module is roughly equivalent to:
+
+```python
+class parameter:
+    def __init__(self, init_param): self.init_param = init_param
+
+    def apply(self, params, *inputs): return params
+
+    def init_params(self, rng, *example_inputs): return self.init_param(rng)
+```
+
 All other modules are composed from this primitive via `@parametrized` functions:
 
 ```python
@@ -73,10 +84,10 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     return dense
 ```
 
-(For technical reasons, `parameter` is required to be called with a dummy argument
-that needs to be (any part of) or depend on the module input.
+(For technical reasons, `parameter` is required to be called with any dummy argument
+that depends on the module input.
 This is planned to be removed in a future version.)
-The `Parameter` helper function allows to express the same more concisely:
+The `Parameter` function allows to express the same more concisely:
 
 ```python
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
@@ -89,10 +100,34 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     return dense
 ```
 
-Parameters can optionally be named (see next section for effect):
+`@parameterized` transforms this function into an equivalent of:
 
+```python
+class Dense:
+    Params = namedtuple('dense', ['kernel', 'bias'])
+
+    def __init__(self, out_dim, kernel_init=glorot(), bias_init=randn()):
+        self.bias_init = bias_init
+        self.kernel_init = kernel_init
+        self.out_dim = out_dim
+
+    def apply(self, params, inputs):
+        kernel, bias = params
+        return np.dot(inputs, kernel) + bias
+
+    def init_params(self, rng, example_inputs):
+        rng_kernel, rng_bias = random.split(rng, 2)
+        kernel = self.kernel_init(rng_kernel, (example_inputs.shape[-1], self.out_dim))
+        bias = self.bias_init(rng_bias, (self.out_dim,))
+        return Dense.Params(kernel=kernel, bias=bias)
+```
+
+This allows creation and usage of models as described in the [readme](README.md).
+
+Parameters can optionally be named (see next section for effect):
 ```
         kernel = Parameter((inputs.shape[-1], out_dim), kernel_init, inputs, 'kernel')
+        bias = Parameter((out_dim,), bias_init, inputs, 'name')
 ```
 
 ## How are parameters named?
@@ -101,7 +136,7 @@ JAXnet does not rely on module or weight names.
 Parameters are initialized to (nested) `namedtuple`s for readability only.
 They are named after their defining module (`@parametrized` function).
 Parameters are named `parameter` unless a name is specified as above.
-If names clash within the same module, indices are added in order of execution:
+If names clash within the same module, indices are added in a fixed order:
 
 ```python
 layer = Sequential(Conv(4, (2, 2)), flatten, relu, Dense(3), relu, Dense(2),
@@ -117,9 +152,7 @@ assert (2, ) == params.sequential.dense.bias.shape
 ```
 
 When `init_params` is called on different modules, parameters corresponding to the same shared module can be different (have different indices) between the two calls.
-When `init_params` is called on the same module twice, parameter names are guaranteed to be identical.
-
-Parameter sharing cannot happen accidentally, since module object identity is always unique.
+When `init_params` is called on the same module twice, resulting parameter names are identical.
 
 ## Parameter reuse
 

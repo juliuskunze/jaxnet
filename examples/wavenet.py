@@ -97,8 +97,7 @@ def ResLayer(dilation_channels, residual_channels, filter_width, dilation, outpu
             [inputs.shape[0], out.shape[1], inputs.shape[2]])
         new_out = sum(out, sliced_inputs)
         skip = Conv1D(residual_channels, (1,), padding='SAME')(skip_slice(inputs, output_width))
-        # TODO fix tuple:
-        return np.concatenate((new_out, skip), axis=1)
+        return new_out, skip
 
     return res_layer
 
@@ -121,9 +120,7 @@ def Wavenet(dilations, filter_width, initial_filter_width, out_width,
         for dilation in dilations:
             res = ResLayer(dilation_channels, residual_channels,
                            filter_width, dilation, out_width)(hidden)
-            # TODO fix tuple:
-            hidden = res[:, :-out.shape[1]]
-            out_partial = res[:, -out.shape[1]:]
+            hidden, out_partial = res
             out += out_partial
         return Sequential(relu, Conv1D(skip_channels, (1,)),
                           relu, Conv1D(3 * nr_mix, (1,)))(out)
@@ -177,6 +174,7 @@ def main():
         train_loss, gradient = value_and_grad(loss.apply)(params, batch)
         return opt_update(i, gradient, opt_state), train_loss
 
+    print(f'Initializing parameters.')
     opt_state = opt_init(loss.init_params(PRNGKey(0), next(batches)))
     for i, batch in enumerate(batches):
         print(f'Training on batch {i}.')
