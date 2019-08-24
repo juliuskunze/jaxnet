@@ -268,3 +268,30 @@ def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,
         return scaled + Parameter(shape, beta_init, x, 'beta')[ed] if center else scaled
 
     return batch_norm
+
+
+def sum_over_parameters(params, transform):
+    # TODO generalize to nested / dict, ...
+    return sum(map(transform, params))
+
+
+def Regularized(loss_model, parameter_regularizer):
+    @parametrized
+    def regularized(*inputs):
+        params = parameter(lambda rng: loss_model.init_params(rng, *inputs), 'loss')(inputs)
+        return loss_model.apply(params, *inputs) + sum_over_parameters(
+            params, transform=parameter_regularizer)
+
+    return regularized
+
+
+def Reparametrized(model, parameter_transform_factory, param_init_mapping=lambda x: x):
+    @parametrized
+    def reparametrized(*inputs):
+        params = parameter(lambda rng: param_init_mapping(model.init_params(rng, *inputs)),
+                           'params')(*inputs)
+        # TODO generalize to nested / dict, ...
+        mapped_params = list(map(lambda param: parameter_transform_factory()(param), params))
+        return model.apply(mapped_params, *inputs)
+
+    return reparametrized

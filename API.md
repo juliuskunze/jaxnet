@@ -3,7 +3,7 @@
 ## JAXnet modules
 
 JAXnet comes with some [predefined modules](jaxnet/modules.py).
-The [tests](tests/test_modules.py) shows how modules can be used.
+The [tests](tests/test_modules.py) show how modules can be used.
 For example, `Sequential` is defined as
 
 ```python
@@ -125,7 +125,8 @@ class Dense:
 This allows creation and usage of models as described in the [readme](README.md).
 
 Parameters can optionally be named (see next section for effect):
-```
+
+```python
         kernel = Parameter((inputs.shape[-1], out_dim), kernel_init, inputs, 'kernel')
         bias = Parameter((out_dim,), bias_init, inputs, 'name')
 ```
@@ -153,6 +154,41 @@ assert (2, ) == params.sequential.dense.bias.shape
 
 When `init_params` is called on different modules, parameters corresponding to the same shared module can be different (have different indices) between the two calls.
 When `init_params` is called on the same module twice, resulting parameter names are identical.
+
+## Regularization and reparameterization
+
+JAXnet allows parameter regularization for a whole model with unusual conciseness:
+
+```python
+loss = Sequential(Dense(4), relu)
+loss_with_l2 = Regularized(loss, regularizer=lambda x: .5 * x * x)
+```
+
+`loss_with_l2` is a module that you can now use like any other.
+
+Reparametrization is similarly simple:
+
+```python
+    def Scaled():
+        @parametrized
+        def learnable_scale(params):
+            return 2 * Parameter((), ones, params) * params
+
+        return learnable_scale
+
+    scaled_net = Reparametrized(net, parameter_transform_factory=Scaled)
+```
+
+In this example, every weight vector/matrix is multiplied by a learnable scalar.
+Variational inference can be implemented as a combination of `Reparametrization` and `Regularization`.
+(Example will be added soon.)
+
+Since `Reparametrized` just returns another module, you can apply it to any part of your network:
+
+```python
+net = Sequential(Conv(20, (3, 3)), relu, Conv(20, (3, 3)), relu,
+                 Reparametrized(Sequential(Dense(10), relu, Dense(10)), Scaled))
+```
 
 ## Parameter reuse
 

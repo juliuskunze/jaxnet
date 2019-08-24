@@ -3,7 +3,8 @@ from jax import numpy as np, jit
 from jax.random import PRNGKey
 
 from jaxnet import Dense, Sequential, relu, Conv, Conv1D, ConvTranspose, Conv1DTranspose, flatten, \
-    MaxPool, AvgPool, zeros, GRUCell, Rnn, SumPool, Dropout, BatchNorm
+    MaxPool, AvgPool, zeros, GRUCell, Rnn, SumPool, Dropout, BatchNorm, parametrized, Parameter, \
+    Regularized, ones, Reparametrized
 from tests.util import random_inputs, assert_params_equal
 
 
@@ -193,3 +194,63 @@ def test_Sequential_graceful_update_message():
         assert False
     except ValueError as e:
         assert message == str(e)
+
+
+def test_L2_regularization():
+    @parametrized
+    def loss(inputs):
+        a = Parameter((), ones, inputs, 'a')
+        b = Parameter((), lambda rng, shape: 2 * np.ones(shape), inputs, 'b')
+
+        return a + b
+
+    reg_loss = Regularized(loss, parameter_regularizer=lambda x: x * x)
+
+    inputs = np.zeros(())
+    params = reg_loss.init_params(PRNGKey(0), inputs)
+    assert np.array_equal(np.ones(()), params.loss.a)
+    assert np.array_equal(2 * np.ones(()), params.loss.b)
+
+    reg_loss_out = reg_loss.apply(params, inputs)
+
+    assert 1 + 2 + 1 + 4 == reg_loss_out
+
+
+def test_unparametrized_reparameterization():
+    def doubled(params):
+        return 2 * params
+
+    @parametrized
+    def net(inputs):
+        return Parameter((), lambda rng, shape: 2 * np.ones(shape), inputs)
+
+    scared_params = Reparametrized(net, parameter_transform_factory=lambda: doubled)
+
+    inputs = np.zeros(())
+    params = scared_params.init_params(PRNGKey(0), inputs)
+
+    reg_loss_out = scared_params.apply(params, inputs)
+
+    assert 4 == reg_loss_out
+
+
+def test_reparametrization():
+    @parametrized
+    def net(inputs):
+        return Parameter((), lambda rng, shape: 2 * np.ones(shape), inputs)
+
+    def Scaled():
+        @parametrized
+        def learnable_scale(params):
+            return 2 * Parameter((), ones, params) * params
+
+        return learnable_scale
+
+    scaled_net = Reparametrized(net, parameter_transform_factory=Scaled)
+
+    inputs = np.zeros(())
+    params = scaled_net.init_params(PRNGKey(0), inputs)
+
+    reg_loss_out = scaled_net.apply(params, inputs)
+
+    assert 4 == reg_loss_out

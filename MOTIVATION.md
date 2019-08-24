@@ -3,7 +3,16 @@
 Side effects and mutable state come at a cost.
 Machine learning is no exception.
 
+### Functional handling of parameters allows concise regularization and reparameterization.
+
+JAXnet makes parameter regularization and reparameterization of whole networks concise (see [API](API.mp#regularization-and-reparameterization)).
+It also allows you to regularize or reparameterize any custom modules without changing their code.
+In contrast, TensorFlow requires:
+- Separate implementations for [every](https://www.tensorflow.org/probability/api_docs/python/tfp/layers/DenseReparameterization] [layer](https://www.tensorflow.org/probability/api_docs/python/tfp/layers/Convolution1DReparameterization).
+- [Regularization arguments](https://www.tensorflow.org/versions/r2.0/api_docs/python/tf/keras/layers/Dense) on layer level, with custom implementations for every layer.
+
 ### Functional code allows new ways of optimization.
+
 JAX allows functional `numpy` code to be accelerated with `jit` and run on GPU.
 Here are two use cases:
 - In JAXnet, weights are explicitely initialized into an object controlled by the user. 

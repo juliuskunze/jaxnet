@@ -6,7 +6,7 @@ Different from popular alternatives, it is completely functional:
 - No global compute graph
 - No global random key
 
-This encourages robust code and allows new ways of optimization ([detailed motivation here](MOTIVATION.md)).
+This allows more concise, robust and faster code ([detailed motivation here](MOTIVATION.md)).
 
 ```python
 from jaxnet import *
@@ -61,8 +61,7 @@ pip3 install jaxnet
 ```
 
 **This is an early version. Expect breaking changes!**
-Python 3 is required. To use GPU, first install the [right version of jaxlib](https://github.com/google/jax#installation).
-**Caution: JAXnet requires `jax==0.1.41`. It does not yet work with `jax==0.1.42`.**
+Python 3 is required. To use GPU/TPU, first install the [right version of jaxlib](https://github.com/google/jax#installation).
 
 ## Questions
 
