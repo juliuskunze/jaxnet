@@ -6,7 +6,7 @@ Different from popular alternatives, its API is purely functional:
 - No global compute graph
 - No global random key
 
-This allows code to be more concise, robust and optimized  ([motivation below](README.md#why-is-jaxnet-functional)).
+This allows code to be more concise, robust and optimized ([motivation below](#why-jaxnet)).
 
 **This is a preview. Expect breaking changes!** Install with
 
