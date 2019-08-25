@@ -8,10 +8,10 @@ from jax.random import PRNGKey
 from examples.mnist_vae import gaussian_sample, bernoulli_logpdf, gaussian_kl
 from examples.wavenet import calculate_receptive_field, discretized_mix_logistic_loss, Wavenet
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, GRUCell, Rnn, \
-    softmax, softplus, parameter, glorot, randn, Parameter
+    softmax, softplus, parameter, glorot, randn, Parameter, Reparametrized
 from jaxnet.core import ShapedParametrized
 from tests.test_core import test_parameter
-from tests.test_modules import test_Dense_shape
+from tests.test_modules import test_Dense_shape, Scaled
 
 
 def test_readme():
@@ -201,3 +201,15 @@ def test_wavenet():
 
     opt_state = opt_init(loss.init_params(PRNGKey(0), batch))
     opt_state, loss = update(0, opt_state, batch)
+
+
+def test_reparametrized_submodule():
+    net = Sequential(Conv(2, (3, 3)), relu, Conv(2, (3, 3)), relu, flatten,
+                     Reparametrized(Sequential(Dense(2), relu, Dense(2)), Scaled))
+
+    input = np.ones((1, 3, 3, 1))
+    params = net.init_params(PRNGKey(0), input)
+    assert (2, 2) == params.reparametrized.model.dense1.kernel.shape
+
+    out = net.apply(params, input)
+    assert (1, 2) == out.shape

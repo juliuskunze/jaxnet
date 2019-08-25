@@ -208,8 +208,8 @@ def test_Regularized():
 
     inputs = np.zeros(())
     params = reg_loss.init_params(PRNGKey(0), inputs)
-    assert np.array_equal(np.ones(()), params.loss.a)
-    assert np.array_equal(2 * np.ones(()), params.loss.b)
+    assert np.array_equal(np.ones(()), params.model.a)
+    assert np.array_equal(2 * np.ones(()), params.model.b)
 
     reg_loss_out = reg_loss.apply(params, inputs)
 
@@ -227,8 +227,8 @@ def test_L2Regularized():
 
     inputs = np.zeros(())
     params = reg_loss.init_params(PRNGKey(0), inputs)
-    assert np.array_equal(np.ones(()), params.loss.a)
-    assert np.array_equal(2 * np.ones(()), params.loss.b)
+    assert np.array_equal(np.ones(()), params.model.a)
+    assert np.array_equal(2 * np.ones(()), params.model.b)
 
     reg_loss_out = reg_loss.apply(params, inputs)
 
@@ -241,14 +241,14 @@ def test_L2Regularized_sequential():
 
     inputs = np.ones(1)
     params = reg_loss.init_params(PRNGKey(0), inputs)
-    assert np.array_equal(np.ones((1, 1)), params.loss.dense0.kernel)
-    assert np.array_equal(np.ones((1, 1)), params.loss.dense1.kernel)
+    assert np.array_equal(np.ones((1, 1)), params.model.dense0.kernel)
+    assert np.array_equal(np.ones((1, 1)), params.model.dense1.kernel)
 
     reg_loss_out = reg_loss.apply(params, inputs)
 
     assert 7 == reg_loss_out
 
-def test_unparametrized_reparameterization():
+def test_Reparametrized_unparametrized_transform():
     def doubled(params):
         return 2 * params
 
@@ -256,7 +256,7 @@ def test_unparametrized_reparameterization():
     def net(inputs):
         return Parameter((), lambda rng, shape: 2 * np.ones(shape), inputs)
 
-    scared_params = Reparametrized(net, parameter_transform_factory=lambda: doubled)
+    scared_params = Reparametrized(net, reparametrization_factory=lambda: doubled)
 
     inputs = np.zeros(())
     params = scared_params.init_params(PRNGKey(0), inputs)
@@ -266,19 +266,20 @@ def test_unparametrized_reparameterization():
     assert 4 == reg_loss_out
 
 
-def test_reparametrization():
+def Scaled():
+    @parametrized
+    def learnable_scale(params):
+        return 2 * Parameter((), ones, params) * params
+
+    return learnable_scale
+
+def test_Reparametrized():
     @parametrized
     def net(inputs):
         return Parameter((), lambda rng, shape: 2 * np.ones(shape), inputs)
 
-    def Scaled():
-        @parametrized
-        def learnable_scale(params):
-            return 2 * Parameter((), ones, params) * params
+    scaled_net = Reparametrized(net, reparametrization_factory=Scaled)
 
-        return learnable_scale
-
-    scaled_net = Reparametrized(net, parameter_transform_factory=Scaled)
 
     inputs = np.zeros(())
     params = scaled_net.init_params(PRNGKey(0), inputs)
@@ -286,3 +287,5 @@ def test_reparametrization():
     reg_loss_out = scaled_net.apply(params, inputs)
 
     assert 4 == reg_loss_out
+
+

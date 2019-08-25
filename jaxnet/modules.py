@@ -1,7 +1,7 @@
 import functools
 import itertools
 
-from jax import random, lax, numpy as np, scipy, partial
+from jax import random, lax, numpy as np, scipy, tree_flatten, tree_unflatten
 
 from jaxnet.core import parametrized, parameter
 from jaxnet.initializers import glorot, randn, zeros, ones
@@ -270,19 +270,12 @@ def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,
     return batch_norm
 
 
-def sum_over_parameters(params, transform):
-    if isinstance(params, tuple):
-        return sum(map(partial(sum_over_parameters, transform=transform), params))
-
-    return transform(params)
-
-
 def Regularized(loss_model, parameter_regularizer):
     @parametrized
     def regularized(*inputs):
-        params = parameter(lambda rng: loss_model.init_params(rng, *inputs), 'loss')(inputs)
-        return loss_model.apply(params, *inputs) + sum_over_parameters(
-            params, transform=parameter_regularizer)
+        params = parameter(lambda rng: loss_model.init_params(rng, *inputs), 'model')(inputs)
+        flat_params, _ = tree_flatten(params)
+        return loss_model.apply(params, *inputs) + sum(map(parameter_regularizer, flat_params))
 
     return regularized
 
@@ -291,13 +284,13 @@ def L2Regularized(loss_model, scale):
     return Regularized(loss_model=loss_model, parameter_regularizer=lambda x: .5 * x * x * scale)
 
 
-def Reparametrized(model, parameter_transform_factory, param_init_mapping=lambda x: x):
+def Reparametrized(model, reparametrization_factory, init_transform=lambda x: x):
     @parametrized
     def reparametrized(*inputs):
-        params = parameter(lambda rng: param_init_mapping(model.init_params(rng, *inputs)),
-                           'params')(*inputs)
-        # TODO generalize to nested / dict, ...
-        mapped_params = list(map(lambda param: parameter_transform_factory()(param), params))
-        return model.apply(mapped_params, *inputs)
+        params = parameter(lambda rng: init_transform(model.init_params(rng, *inputs)),
+                           'model')(*inputs)
+        flat_params, tree = tree_flatten(params)
+        mapped_params = map(lambda param: reparametrization_factory()(param), flat_params)
+        return model.apply(tree_unflatten(tree, mapped_params), *inputs)
 
     return reparametrized

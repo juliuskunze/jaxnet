@@ -175,7 +175,7 @@ Reparametrization is similarly simple:
 
         return learnable_scale
 
-    scaled_net = Reparametrized(net, parameter_transform_factory=Scaled)
+    scaled_net = Reparametrized(net, Scaled)
 ```
 
 In this example, every weight vector/matrix is multiplied by a learnable scalar.
@@ -185,8 +185,8 @@ Variational inference can be implemented as a combination of `Reparametrized` an
 Since `Reparametrized` just returns another module, it can be applied to parts of your network:
 
 ```python
-net = Sequential(Conv(20, (3, 3)), relu, Conv(20, (3, 3)), relu,
-                 Reparametrized(Sequential(Dense(10), relu, Dense(10)), Scaled))
+net = Sequential(Conv(2, (3, 3)), relu, Conv(2, (3, 3)), relu, flatten,
+                 Reparametrized(Sequential(Dense(2), relu, Dense(2)), Scaled))
 ```
 
 ## Parameter reuse
