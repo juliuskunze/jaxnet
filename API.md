@@ -140,11 +140,11 @@ Parameters are named `parameter` unless a name is specified as above.
 If names clash within the same module, indices are added in a fixed order:
 
 ```python
-layer = Sequential(Conv(4, (2, 2)), flatten, relu, Dense(3), relu, Dense(2),
+net = Sequential(Conv(4, (2, 2)), flatten, relu, Dense(3), relu, Dense(2),
                    Sequential(Dense(2), relu))
 inputs = np.zeros((1, 5, 5, 2))
 
-params = layer.init_params(PRNGKey(0), inputs)
+params = net.init_params(PRNGKey(0), inputs)
 assert (4, ) == params.conv.bias.shape
 assert (3, ) == params.dense0.bias.shape
 assert (3, 2) == params.dense1.kernel.shape

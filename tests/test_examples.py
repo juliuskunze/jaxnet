@@ -8,7 +8,7 @@ from jax.random import PRNGKey
 from examples.mnist_vae import gaussian_sample, bernoulli_logpdf, gaussian_kl
 from examples.wavenet import calculate_receptive_field, discretized_mix_logistic_loss, Wavenet
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, GRUCell, Rnn, \
-    softmax, softplus, parameter, glorot, randn, Parameter, Reparametrized
+    softmax, softplus, parameter, glorot, randn, Parameter, Reparametrized, L2Regularized
 from jaxnet.core import ShapedParametrized
 from tests.test_core import test_parameter
 from tests.test_modules import test_Dense_shape, Scaled
@@ -190,6 +190,8 @@ def test_wavenet():
             theta, sliced_batch, num_class=1 << 16), axis=0)
                 * np.log2(np.e) / (output_width - 1))
 
+    loss = L2Regularized(loss, .01)
+
     opt_init, opt_update, get_params = optimizers.adam(
         optimizers.exponential_decay(1e-3, decay_steps=1, decay_rate=0.999995))
 
@@ -213,3 +215,15 @@ def test_reparametrized_submodule():
 
     out = net.apply(params, input)
     assert (1, 2) == out.shape
+
+
+def test_regularized_submodule():
+    net = Sequential(Conv(2, (1, 1)), relu, Conv(2, (1, 1)), relu, flatten,
+                     L2Regularized(Sequential(Dense(2), relu, Dense(2), np.sum), .1))
+
+    input = np.ones((1, 3, 3, 1))
+    params = net.init_params(PRNGKey(0), input)
+    assert (2, 2) == params.regularized.model.dense1.kernel.shape
+
+    out = net.apply(params, input)
+    assert () == out.shape

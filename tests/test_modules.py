@@ -204,7 +204,7 @@ def test_Regularized():
 
         return a + b
 
-    reg_loss = Regularized(loss, parameter_regularizer=lambda x: x * x)
+    reg_loss = Regularized(loss, regularizer=lambda x: x * x)
 
     inputs = np.zeros(())
     params = reg_loss.init_params(PRNGKey(0), inputs)

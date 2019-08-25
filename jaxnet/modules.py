@@ -270,18 +270,18 @@ def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,
     return batch_norm
 
 
-def Regularized(loss_model, parameter_regularizer):
+def Regularized(loss_model, regularizer):
     @parametrized
     def regularized(*inputs):
         params = parameter(lambda rng: loss_model.init_params(rng, *inputs), 'model')(inputs)
         flat_params, _ = tree_flatten(params)
-        return loss_model.apply(params, *inputs) + sum(map(parameter_regularizer, flat_params))
+        return loss_model.apply(params, *inputs) + sum(map(lambda param: np.sum(regularizer(param)), flat_params))
 
     return regularized
 
 
 def L2Regularized(loss_model, scale):
-    return Regularized(loss_model=loss_model, parameter_regularizer=lambda x: .5 * x * x * scale)
+    return Regularized(loss_model=loss_model, regularizer=lambda x: .5 * x * x * scale)
 
 
 def Reparametrized(model, reparametrization_factory, init_transform=lambda x: x):

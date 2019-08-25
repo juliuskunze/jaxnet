@@ -5,7 +5,7 @@ from jax.experimental import optimizers
 from jax.random import PRNGKey
 
 from jaxnet import Sequential, parametrized, relu, sigmoid, Conv1D, softplus, \
-    logsoftmax, logsumexp
+    logsoftmax, logsumexp, L2Regularized
 
 
 def discretized_mix_logistic_loss(theta, y, num_class=256, log_scale_min=-7.):
@@ -167,6 +167,8 @@ def main():
 
     opt_init, opt_update, get_params = optimizers.adam(
         optimizers.exponential_decay(1e-3, decay_steps=1, decay_rate=0.999995))
+
+    loss = L2Regularized(loss, .01)
 
     @jit
     def update(i, opt_state, batch):
