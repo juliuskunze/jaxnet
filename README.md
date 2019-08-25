@@ -74,10 +74,10 @@ Deep learning is no exception.
 
 ### Functional parameter handling allows concise regularization and reparametrization.
 
-JAXnet makes things like L2 regularization ([demo](examples/wavnet.py#L171)) and variational inference (see [API](API.md#regularization-and-reparametrization)) concise.
-It allows regularizing or reparametrizing any module without changing their code.
+JAXnet makes things like L2 regularization ([demo](examples/wavenet.py#L171)) and variational inference (see [API](API.md#regularization-and-reparametrization)) concise.
+It allows regularizing or reparametrizing any module without changing its code.
 
-In contrast, TensorFlow 2 requires:
+In contrast, TensorFlow2/Keras requires:
 - Regularization arguments on layer level, with custom implementations for each layer type.
 - Reparametrization arguments on layer level, and separate implementations for [every](https://www.tensorflow.org/probability/api_docs/python/tfp/layers/DenseReparameterization) [layer](https://www.tensorflow.org/probability/api_docs/python/tfp/layers/Convolution1DReparameterization).
 
