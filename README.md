@@ -77,8 +77,8 @@ Deep learning is no exception.
 JAXnet makes things like L2 regularization ([demo](examples/wavenet.py#L171)) and variational inference (see [API](API.md#regularization-and-reparametrization)) concise.
 It allows regularizing or reparametrizing any module without changing its code.
 
-In contrast, TensorFlow2/Keras requires:
-- Regularization arguments on layer level, with custom implementations for each layer type.
+In contrast, TensorFlow2/Keras/PyTorch have mutable variables baked into their model API, and require:
+- Regularization arguments on layer level, with separate implementation for each layer type.
 - Reparametrization arguments on layer level, and separate implementations for [every](https://www.tensorflow.org/probability/api_docs/python/tfp/layers/DenseReparameterization) [layer](https://www.tensorflow.org/probability/api_docs/python/tfp/layers/Convolution1DReparameterization).
 
 ### Functional code allows new ways of optimization.
