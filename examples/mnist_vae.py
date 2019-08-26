@@ -75,23 +75,22 @@ def evaluate(test_rng, images):
     return test_elbo, image_sample_grid(image_rng)
 
 
-@jit
-def binarize_batch(rng, i, images):
-    i = i % num_batches
-    batch = lax.dynamic_slice_in_dim(images, i * batch_size, batch_size)
-    return random.bernoulli(rng, batch)
-
-
 def main():
     step_size = 0.001
     num_epochs = 100
     batch_size = 32
-    test_rng = PRNGKey(1)  # fixed for evaluation
+    test_rng = PRNGKey(1)  # get reconstructions for a *fixed* latent variable sample over time
 
     train_images, test_images = mnist_images()
     num_complete_batches, leftover = divmod(train_images.shape[0], batch_size)
     num_batches = num_complete_batches + bool(leftover)
     opt_init, opt_update, get_params = optimizers.momentum(step_size, mass=0.9)
+
+    @jit
+    def binarize_batch(rng, i, images):
+        i = i % num_batches
+        batch = lax.dynamic_slice_in_dim(images, i * batch_size, batch_size)
+        return random.bernoulli(rng, batch)
 
     @jit
     def run_epoch(rng, opt_state):
