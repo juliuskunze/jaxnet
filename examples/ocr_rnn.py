@@ -50,7 +50,7 @@ def main():
     opt = optimizers.RmsProp(0.003)
 
     batch = train.sample(batch_size)
-    params = cross_entropy.init_params(random.PRNGKey(0), batch.data, batch.target)
+    params = cross_entropy.init_parameters(random.PRNGKey(0), batch.data, batch.target)
     state = opt.init_state(params)
     for epoch in range(10):
         params = get_params(state)

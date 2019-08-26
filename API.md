@@ -50,7 +50,7 @@ scalar = parameter(lambda rng: np.zeros(()))
 The module has a single parameter that is initialized via the given function:
 
 ```python
-param = scalar.init_params(PRNGKey(0))
+param = scalar.init_parameters(PRNGKey(0))
 assert np.zeros(()) == param
 ```
 
@@ -68,7 +68,7 @@ class parameter:
 
     def apply(self, params, *inputs): return params
 
-    def init_params(self, rng, *example_inputs): return self.init_param(rng)
+    def init_parameters(self, rng, *example_inputs): return self.init_param(rng)
 ```
 
 All other modules are composed from this primitive via `@parametrized` functions:
@@ -115,7 +115,7 @@ class Dense:
         kernel, bias = params
         return np.dot(inputs, kernel) + bias
 
-    def init_params(self, rng, example_inputs):
+    def init_parameters(self, rng, example_inputs):
         rng_kernel, rng_bias = random.split(rng, 2)
         kernel = self.kernel_init(rng_kernel, (example_inputs.shape[-1], self.out_dim))
         bias = self.bias_init(rng_bias, (self.out_dim,))
@@ -144,7 +144,7 @@ net = Sequential(Conv(4, (2, 2)), flatten, relu, Dense(3), relu, Dense(2),
                    Sequential(Dense(2), relu))
 inputs = np.zeros((1, 5, 5, 2))
 
-params = net.init_params(PRNGKey(0), inputs)
+params = net.init_parameters(PRNGKey(0), inputs)
 assert (4, ) == params.conv.bias.shape
 assert (3, ) == params.dense0.bias.shape
 assert (3, 2) == params.dense1.kernel.shape
@@ -152,8 +152,8 @@ assert (2, ) == params.dense1.bias.shape
 assert (2, ) == params.sequential.dense.bias.shape
 ```
 
-When `init_params` is called on different modules, parameters corresponding to the same shared module can be different (have different indices) between the two calls.
-When `init_params` is called on the same module twice, resulting parameter names are identical.
+When `init_parameters` is called on different modules, parameters corresponding to the same shared module can be different (have different indices) between the two calls.
+When `init_parameters` is called on the same module twice, resulting parameter names are identical.
 
 ## Regularization and reparametrization
 
@@ -205,7 +205,7 @@ def loss(inputs, targets):
 def accuracy(inputs, targets):
     return np.mean(np.argmax(targets, axis=1) == np.argmax(predict(inputs), axis=1))
 
-params = loss.init_params(PRNGKey(0), inputs)
+params = loss.init_parameters(PRNGKey(0), inputs)
 
 # train params...
 
@@ -219,17 +219,17 @@ accuracy_params = accuracy.params_from({loss: params}, *test_inputs)
 test_acc = jit(accuracy.apply)(accuracy_params, *test_inputs)
 ```
 
-If you want to reuse parts of your network while initializing the rest, use `init_params` with `reuse`:
+If you want to reuse parts of your network while initializing the rest, use `init_parameters` with `reuse`:
 
 ```python
 inputs = np.zeros((1, 2))
 net = Dense(5)
-net_params = net.init_params(PRNGKey(0), inputs)
+net_params = net.init_parameters(PRNGKey(0), inputs)
 
 # train net params...
 
 transfer_net = Sequential(net, relu, Dense(2))
-transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
+transfer_net_params = transfer_net.init_parameters(PRNGKey(1), inputs, reuse={net: net_params})
 
 assert transfer_net_params[0] is net_params
 
@@ -243,7 +243,7 @@ Store parameters with `save_params` and `load_params`:
 ```python
 from pathlib import Path
 
-params = Dense(2).init_params(PRNGKey(0), np.zeros((1, 2)))
+params = Dense(2).init_parameters(PRNGKey(0), np.zeros((1, 2)))
 
 path = Path('/') / 'tmp' / 'net.params'
 save_params(params, path)

@@ -17,7 +17,7 @@ from tests.test_modules import test_Dense_shape, Scaled
 def test_readme():
     net = Sequential(Conv(2, (3, 3)), relu, flatten, Dense(4), softmax)
     batch = np.zeros((3, 5, 5, 1))
-    params = net.init_params(PRNGKey(0), batch)
+    params = net.init_parameters(PRNGKey(0), batch)
     assert (2,) == params.conv.bias.shape
     assert (4,) == params.dense.bias.shape
 
@@ -31,12 +31,12 @@ def test_readme():
 def test_reuse_api():
     inputs = np.zeros((1, 2))
     net = Dense(5)
-    net_params = net.init_params(PRNGKey(0), inputs)
+    net_params = net.init_parameters(PRNGKey(0), inputs)
 
     # train net params...
 
     transfer_net = Sequential(net, relu, Dense(2))
-    transfer_net_params = transfer_net.init_params(PRNGKey(1), inputs, reuse={net: net_params})
+    transfer_net_params = transfer_net.init_parameters(PRNGKey(1), inputs, reuse={net: net_params})
 
     assert transfer_net_params[0] is net_params
 
@@ -49,7 +49,7 @@ def test_parameter_simplified_equivalent():
 
         def apply(self, params, *inputs): return params
 
-        def init_params(self, rng, *example_inputs): return self.init_param(rng)
+        def init_parameters(self, rng, *example_inputs): return self.init_param(rng)
 
     test_parameter(parameter)
 
@@ -80,7 +80,7 @@ def test_Dense_equivalent():
             kernel, bias = params
             return np.dot(inputs, kernel) + bias
 
-        def init_params(self, rng, example_inputs):
+        def init_parameters(self, rng, example_inputs):
             rng_kernel, rng_bias = random.split(rng, 2)
             kernel = self.kernel_init(rng_kernel, (example_inputs.shape[-1], self.out_dim))
             bias = self.bias_init(rng_bias, (self.out_dim,))
@@ -103,7 +103,7 @@ def test_Parameter_dense():
 
     net = Dense(2)
     inputs = np.zeros((1, 3))
-    params = net.init_params(PRNGKey(0), inputs)
+    params = net.init_parameters(PRNGKey(0), inputs)
     assert (3, 2) == params.parameter0.shape
     assert (2,) == params.parameter1.shape
 
@@ -116,7 +116,7 @@ def test_mnist_classifier():
 
     next_batch = lambda: (np.zeros((3, 784)), np.zeros((3, 10)))
     optimizer = optimizers.Momentum(0.001, mass=0.9)
-    state = optimizer.init_state(loss.init_params(PRNGKey(0), *next_batch()))
+    state = optimizer.init_state(loss.init_parameters(PRNGKey(0), *next_batch()))
     for _ in range(2):
         state = optimizer.optimize(loss.apply, state, *next_batch(), jit=True)
 
@@ -145,7 +145,7 @@ def test_mnist_vae():
         logits_x = decode(gaussian_sample(rng, mu_z, sigmasq_z))
         return bernoulli_logpdf(logits_x, images) - gaussian_kl(mu_z, sigmasq_z)
 
-    params = elbo.init_params(PRNGKey(0), PRNGKey(0), np.zeros((32, 5 * 5)))
+    params = elbo.init_parameters(PRNGKey(0), PRNGKey(0), np.zeros((32, 5 * 5)))
     assert (5, 10) == params.encode.sequential1.dense.kernel.shape
 
 
@@ -167,7 +167,7 @@ def test_ocr_rnn():
         softmax,
         lambda x: np.reshape(x, (-1, length, class_count)))
 
-    params = net.init_params(PRNGKey(0), inputs)
+    params = net.init_parameters(PRNGKey(0), inputs)
 
     assert len(params) == 4
     cell = params.rnn0.gru_cell
@@ -211,7 +211,7 @@ def test_wavenet():
     loss = L2Regularized(loss, .01)
 
     opt = optimizers.Adam(optimizers.exponential_decay(1e-3, decay_steps=1, decay_rate=0.999995))
-    state = opt.init_state(loss.init_params(PRNGKey(0), batch))
+    state = opt.init_state(loss.init_parameters(PRNGKey(0), batch))
     state, loss = opt.optimize(loss.apply, state, batch, jit=True, return_loss=True)
     trained_params = opt.get_parameters(state)
 
@@ -221,7 +221,7 @@ def test_reparametrized_submodule():
                      Reparametrized(Sequential(Dense(2), relu, Dense(2)), Scaled))
 
     input = np.ones((1, 3, 3, 1))
-    params = net.init_params(PRNGKey(0), input)
+    params = net.init_parameters(PRNGKey(0), input)
     assert (2, 2) == params.reparametrized.model.dense1.kernel.shape
 
     out = net.apply(params, input)
@@ -233,7 +233,7 @@ def test_regularized_submodule():
                      L2Regularized(Sequential(Dense(2), relu, Dense(2), np.sum), .1))
 
     input = np.ones((1, 3, 3, 1))
-    params = net.init_params(PRNGKey(0), input)
+    params = net.init_parameters(PRNGKey(0), input)
     assert (2, 2) == params.regularized.model.dense1.kernel.shape
 
     out = net.apply(params, input)

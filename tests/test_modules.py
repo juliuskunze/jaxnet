@@ -12,7 +12,7 @@ def test_Dense_shape(Dense=Dense):
     net = Dense(2, kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 3))
 
-    params = net.init_params(PRNGKey(0), inputs)
+    params = net.init_parameters(PRNGKey(0), inputs)
     assert_params_equal((np.zeros((3, 2)), np.zeros(2)), params)
 
     out = net.apply(params, inputs)
@@ -21,7 +21,7 @@ def test_Dense_shape(Dense=Dense):
     out_ = jit(net.apply)(params, inputs)
     assert np.array_equal(out, out_)
 
-    params_ = net.shaped(inputs).init_params(PRNGKey(0))
+    params_ = net.shaped(inputs).init_parameters(PRNGKey(0))
     assert_params_equal(params, params_)
 
 
@@ -34,7 +34,7 @@ def test_Dense_shape(Dense=Dense):
 def test_Conv_runs(channels, filter_shape, padding, strides, input_shape, dilation):
     conv = Conv(channels, filter_shape, strides=strides, padding=padding, dilation=dilation)
     inputs = random_inputs(input_shape)
-    params = conv.init_params(PRNGKey(0), inputs)
+    params = conv.init_parameters(PRNGKey(0), inputs)
     conv.apply(params, inputs)
 
 
@@ -46,7 +46,7 @@ def test_Conv_runs(channels, filter_shape, padding, strides, input_shape, dilati
 def test_Conv1DTranspose_runs(channels, filter_shape, padding, strides, input_shape):
     conv = Conv1D(channels, filter_shape, strides=strides, padding=padding)
     inputs = random_inputs(input_shape)
-    params = conv.init_params(PRNGKey(0), inputs)
+    params = conv.init_parameters(PRNGKey(0), inputs)
     conv.apply(params, inputs)
 
 
@@ -58,7 +58,7 @@ def test_Conv1DTranspose_runs(channels, filter_shape, padding, strides, input_sh
 def test_ConvTranspose_runs(channels, filter_shape, padding, strides, input_shape):
     convt = ConvTranspose(channels, filter_shape, strides=strides, padding=padding)
     inputs = random_inputs(input_shape)
-    params = convt.init_params(PRNGKey(0), inputs)
+    params = convt.init_parameters(PRNGKey(0), inputs)
     convt.apply(params, inputs)
 
 
@@ -70,7 +70,7 @@ def test_ConvTranspose_runs(channels, filter_shape, padding, strides, input_shap
 def test_Conv1DTranspose_runs(channels, filter_shape, padding, strides, input_shape):
     convt = Conv1DTranspose(channels, filter_shape, strides=strides, padding=padding)
     inputs = random_inputs(input_shape)
-    params = convt.init_params(PRNGKey(0), inputs)
+    params = convt.init_parameters(PRNGKey(0), inputs)
     convt.apply(params, inputs)
 
 
@@ -78,7 +78,7 @@ def test_flatten_shape():
     conv = Conv(2, filter_shape=(3, 3), padding='SAME', kernel_init=zeros, bias_init=zeros)
     inputs = np.zeros((1, 5, 5, 2))
 
-    params = conv.init_params(PRNGKey(0), inputs)
+    params = conv.init_parameters(PRNGKey(0), inputs)
     out = conv.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 5, 5, 2)), out)
 
@@ -93,7 +93,7 @@ def test_pool_shape(Pool):
     inputs = np.zeros((1, 5, 5, 2))
 
     pooled = Sequential(conv, Pool(window_shape=(1, 1), strides=(2, 2)))
-    params = pooled.init_params(PRNGKey(0), inputs)
+    params = pooled.init_parameters(PRNGKey(0), inputs)
     out = pooled.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 3, 3, 2)), out)
 
@@ -123,7 +123,7 @@ def test_GRUCell_shape():
 
     x = np.zeros((2, 3))
     carry = init_carry(batch_size=2)
-    params = gru_cell.init_params(PRNGKey(0), carry, x)
+    params = gru_cell.init_parameters(PRNGKey(0), carry, x)
     out = gru_cell.apply(params, carry, x)
 
     assert (2, 10) == out[0].shape
@@ -134,7 +134,7 @@ def test_GRUCell_shape():
 def test_Rnn_shape():
     inputs = np.zeros((2, 5, 4))
     rnn = Rnn(*GRUCell(3, zeros))
-    params = rnn.init_params(PRNGKey(0), inputs)
+    params = rnn.init_parameters(PRNGKey(0), inputs)
 
     assert len(params) == 1
     assert len(params.gru_cell) == 3
@@ -153,7 +153,7 @@ def test_BatchNorm_shape_NHWC(center, scale):
     batch_norm = BatchNorm(axis=(0, 1, 2), center=center, scale=scale)
     inputs = random_inputs(input_shape)
 
-    params = batch_norm.init_params(PRNGKey(0), inputs)
+    params = batch_norm.init_parameters(PRNGKey(0), inputs)
     out = batch_norm.apply(params, inputs)
 
     assert out.shape == input_shape
@@ -170,7 +170,7 @@ def test_BatchNorm_shape_NCHW(center, scale):
     batch_norm = BatchNorm(axis=(0, 2, 3), center=center, scale=scale)
 
     inputs = random_inputs(input_shape)
-    params = batch_norm.init_params(PRNGKey(0), inputs)
+    params = batch_norm.init_parameters(PRNGKey(0), inputs)
     out = batch_norm.apply(params, inputs)
 
     assert out.shape == input_shape
@@ -207,7 +207,7 @@ def test_Regularized():
     reg_loss = Regularized(loss, regularizer=lambda x: x * x)
 
     inputs = np.zeros(())
-    params = reg_loss.init_params(PRNGKey(0), inputs)
+    params = reg_loss.init_parameters(PRNGKey(0), inputs)
     assert np.array_equal(np.ones(()), params.model.a)
     assert np.array_equal(2 * np.ones(()), params.model.b)
 
@@ -226,7 +226,7 @@ def test_L2Regularized():
     reg_loss = L2Regularized(loss, scale=2)
 
     inputs = np.zeros(())
-    params = reg_loss.init_params(PRNGKey(0), inputs)
+    params = reg_loss.init_parameters(PRNGKey(0), inputs)
     assert np.array_equal(np.ones(()), params.model.a)
     assert np.array_equal(2 * np.ones(()), params.model.b)
 
@@ -240,7 +240,7 @@ def test_L2Regularized_sequential():
     reg_loss = L2Regularized(loss, scale=2)
 
     inputs = np.ones(1)
-    params = reg_loss.init_params(PRNGKey(0), inputs)
+    params = reg_loss.init_parameters(PRNGKey(0), inputs)
     assert np.array_equal(np.ones((1, 1)), params.model.dense0.kernel)
     assert np.array_equal(np.ones((1, 1)), params.model.dense1.kernel)
 
@@ -259,7 +259,7 @@ def test_Reparametrized_unparametrized_transform():
     scared_params = Reparametrized(net, reparametrization_factory=lambda: doubled)
 
     inputs = np.zeros(())
-    params = scared_params.init_params(PRNGKey(0), inputs)
+    params = scared_params.init_parameters(PRNGKey(0), inputs)
 
     reg_loss_out = scared_params.apply(params, inputs)
 
@@ -282,7 +282,7 @@ def test_Reparametrized():
 
 
     inputs = np.zeros(())
-    params = scaled_net.init_params(PRNGKey(0), inputs)
+    params = scaled_net.init_parameters(PRNGKey(0), inputs)
 
     reg_loss_out = scaled_net.apply(params, inputs)
 

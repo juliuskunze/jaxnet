@@ -96,7 +96,7 @@ def main():
     batches = synth_batches()
 
     print("\nInitializing parameters.")
-    state = opt(loss.init_params(rng_key, *next(batches)))
+    state = opt(loss.init_parameters(rng_key, *next(batches)))
     for i in range(num_steps):
         print(f'Training on batch {i}.')
         state = opt.optimize(loss.apply, state, *next(batches))

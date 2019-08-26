@@ -17,7 +17,7 @@ demos to their original stax implementations (linked in each).
 
 ### Porting from stax
 
-- Remove `init_params`: Extract parameters. Get rid of `output_shape` and `rng` splitting code.
+- Remove `init_parameters`: Extract parameters. Get rid of `output_shape` and `rng` splitting code.
 - Add `@parameterized` to your `apply_fun`, remove the `params` argument, and use layers/params directly.
 - Update `Serial` to `Sequential`.
 - Update parameter-free `stax` layers (`Relu`, `Flatten`, ...) to JAXnet functions (`relu`, `flatten`, ...).

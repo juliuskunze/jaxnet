@@ -249,7 +249,7 @@ class parametrized(jc.Primitive):
 
         @lu.wrap_init
         def init_and_apply(rng, *inputs):
-            params = self.init_params(rng, *inputs)
+            params = self.init_parameters(rng, *inputs)
             return self.apply(params, *inputs)
 
         self._init_and_apply = init_and_apply
@@ -295,10 +295,10 @@ class parametrized(jc.Primitive):
             if params:
                 return params
 
-        return self._init_params_dict(rng, *example_inputs,
+        return self._init_parameters_dict(rng, *example_inputs,
                                       reuse=reuse, reuse_only=reuse_only)
 
-    def _init_params_dict(self, rng, *example_inputs, reuse, reuse_only):
+    def _init_parameters_dict(self, rng, *example_inputs, reuse, reuse_only):
         flat_inputs, in_tree = tree_util.tree_flatten(example_inputs)
         flat_fun, _ = api_util.flatten_fun_nokwargs(self._wrapped_fun, in_tree)
         (jaxpr, _, consts), submodules_in_call_order = \
@@ -327,7 +327,7 @@ class parametrized(jc.Primitive):
                                                 for i in permutation)
         return OrderedDict(submodule_param_pairs_in_jaxpr_order)
 
-    def init_params(self, rng, *example_inputs, reuse=None, reuse_only=False):
+    def init_parameters(self, rng, *example_inputs, reuse=None, reuse_only=False):
         d = self._init_or_reuse_params_dict(rng, *example_inputs, reuse=reuse,
                                             reuse_only=reuse_only)
 
@@ -397,7 +397,7 @@ class parametrized(jc.Primitive):
         expanded_reuse = parametrized._expand_reuse_dict(reuse, *example_inputs)
 
         # TODO: optimization wrong, duplicate values, needs param adapter
-        return self.init_params(PRNGKey(0), *example_inputs, reuse=expanded_reuse, reuse_only=True)
+        return self.init_parameters(PRNGKey(0), *example_inputs, reuse=expanded_reuse, reuse_only=True)
 
     def apply_from(self, reuse, *example_inputs, jit=False):
         params = self.params_from(reuse, *example_inputs)
@@ -478,7 +478,7 @@ class parameter(parametrized):
         # no need for jit:
         return self._fun(params, *inputs)
 
-    def _init_params_dict(self, rng, *example_inputs, reuse, reuse_only):
+    def _init_parameters_dict(self, rng, *example_inputs, reuse, reuse_only):
         if reuse_only:
             raise ValueError(f'No param value specified for {self}.')
 
@@ -528,8 +528,8 @@ class ShapedParametrized:
     def apply_from(self, reuse, jit=False):
         return self.parametrized.apply_from(reuse, *self.example_inputs, jit=jit)
 
-    def init_params(self, rng):
-        return self.parametrized.init_params(rng, *self.example_inputs)
+    def init_parameters(self, rng):
+        return self.parametrized.init_parameters(rng, *self.example_inputs)
 
 
 def save_params(params, path: Path):
