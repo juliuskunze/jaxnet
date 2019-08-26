@@ -40,7 +40,7 @@ def loss(inputs, targets):
 ```
 
 Notice how `Lambda` layers are not needed in JAXnet.
-`relu` and `logsoftmax` are simple Python functions.
+`relu` and `logsoftmax` are plain Python functions.
 
 ### Immutable weights.
 
@@ -66,7 +66,7 @@ They are returned as part of a new optimizer state, and can be retrieved via `ge
 opt = optimizers.Adam()
 state = opt.init_state(params)
 for _ in range(10):
-    state = opt.optimize(loss.apply, state, *next_batch()) # acclerate with jit=True
+    state = opt.optimize(loss.apply, state, *next_batch()) # accelerate with jit=True
 
 trained_params = opt.get_parameters(state)
 ```
@@ -74,7 +74,7 @@ trained_params = opt.get_parameters(state)
 Invoked a network with:
 
 ```python
-output = net.apply(trained_params, inputs) # acclerate with jit=True
+output = net.apply(trained_params, inputs) # accelerate with jit=True
 ```
 
 ### GPU support and compilation.
