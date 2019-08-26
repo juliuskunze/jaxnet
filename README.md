@@ -14,7 +14,7 @@ creates a neural net model.
 
 ### Extensibility.
 
-Define your own modules/models using `@parametrized` functions. You can reuse other modules:
+Define your own modules using `@parametrized` functions. You can reuse other modules:
 
 ```python
 from jax import numpy
@@ -40,13 +40,12 @@ def loss(inputs, targets):
 ```
 
 Notice how `Lambda` layers are not needed in JAXnet.
-`relu`, `logsoftmax` are simple Python functions.
+`relu` and `logsoftmax` are simple Python functions.
 
 ### Immutable weights.
 
 Different from TensorFlow2/Keras, JAXnet has no global compute graph.
-Network definitions are contained within objects like `net`.
-They do not contain mutable weights.
+Modules like `net` and `loss` do not contain mutable weights.
 Instead, weights are contained in separate, immutable objects.
 They are initialized with `init_params`, provided a random key and example inputs:
 
