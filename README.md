@@ -1,6 +1,7 @@
 # JAXnet [![Build Status](https://travis-ci.org/JuliusKunze/jaxnet.svg?branch=master)](https://travis-ci.org/JuliusKunze/jaxnet) [![PyPI](https://img.shields.io/pypi/v/jaxnet.svg)](https://pypi.python.org/pypi/jaxnet/#history)
 
-JAXnet is a deep learning library built with [JAX](https://github.com/google/jax). Unlike alternatives, its API is purely functional. Featuring:
+JAXnet is a deep learning library built with [JAX](https://github.com/google/jax).
+Unlike alternatives, its API is purely functional.
 
 ### Modularity.
 
@@ -16,23 +17,36 @@ creates a neural net model.
 Define your own modules/models using `@parametrized` functions. You can reuse other modules:
 
 ```python
+from jax import numpy
+
 @parametrized
 def loss(inputs, targets):
     return -np.mean(net(inputs) * targets)
 ```
 
-All modules are composed in this way.
-Compare how concise this is in contrast to TensorFlow2/Keras (similarly PyTorch):
+All modules are composed in this way. `jax.numpy` is mirroring `numpy`.
+If you know how to use `numpy`, you are set for JAXnet.
+Compare this to TensorFlow2/Keras:
 
 ```python
-TODO
+import tensorflow as tf
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Dense, Lambda
+
+net = Sequential([Dense(1024, 'relu'), Dense(1024, 'relu'), Dense(10), Lambda(tf.nn.log_softmax)])
+
+def loss(inputs, targets):
+    return -tf.reduce_mean(net(inputs) * targets)
 ```
+
+Notice how `Lambda` layers are not needed in JAXnet.
+`relu`, `logsoftmax` are simple Python functions.
 
 ### Immutable weights.
 
 Different from TensorFlow2/Keras, JAXnet has no global compute graph.
 Network definitions are contained within objects like `net`.
-They do not have mutable weights.
+They do not contain mutable weights.
 Instead, weights are contained in separate, immutable objects.
 They are initialized with `init_params`, provided a random key and example inputs:
 
@@ -53,7 +67,7 @@ They are returned as part of a new optimizer state, and can be retrieved via `ge
 opt = optimizers.Adam()
 state = opt.init_state(params)
 for _ in range(10):
-    state = opt.optimize(loss.apply, state, *next_batch(), jit=True)
+    state = opt.optimize(loss.apply, state, *next_batch()) # acclerate with jit=True
 
 trained_params = opt.get_parameters(state)
 ```
@@ -61,20 +75,20 @@ trained_params = opt.get_parameters(state)
 Invoked a network with:
 
 ```python
-output = net.apply(trained_params, inputs, jit=True)
+output = net.apply(trained_params, inputs) # acclerate with jit=True
 ```
 
-### GPU and compilation
+### GPU support and compilation.
 
 JAX allows any functional `numpy`/`scipy` code to be accelerated.
 Make it run on GPU by replacing your `numpy` import with `jax.numpy`.
 Compile a function by decorating it with [`jit`](https://github.com/google/jax#compilation-with-jit).
 This will free your function from slow Python interpretation, parallelize operations where possible and optimize your compute graph.
+It provides speed and scalability at the level of TensorFlow2 or PyTorch.
 
 Due to immutable weights, whole training loops can be compiled / run on GPU ([demo](examples/mnist_vae.py#L96)).
 `jit` will make your training as fast a mutating weights inline, and your weights will not leave the GPU.
-This gives you speed and scalability at the level of TensorFlow2 or PyTorch.
-You can write immutable code without worrying about performance.
+You can write functional code without worrying about performance.
 
 You can easily accelerate your pre-/postprocessing code as well ([demo](examples/mnist_vae.py#L61)).
 
