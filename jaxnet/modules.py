@@ -54,12 +54,12 @@ def Parameter(shape, init, dummy_inputs, name=None):
     """
     return GeneralParameter(
         name=name,
-        init_param=lambda rng: init(rng, shape),
+        init_parameter=lambda rng: init(rng, shape),
         dummy_inputs=dummy_inputs)
 
 
-def GeneralParameter(name, init_param, dummy_inputs):
-    return parameter(init_param, name)(dummy_inputs)
+def GeneralParameter(name, init_parameter, dummy_inputs):
+    return parameter(init_parameter, name)(dummy_inputs)
 
 
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):

@@ -1,3 +1,4 @@
+import time
 from collections import namedtuple
 
 import pytest
@@ -45,11 +46,11 @@ def test_reuse_api():
 
 def test_parameter_simplified_equivalent():
     class parameter:
-        def __init__(self, init_param): self.init_param = init_param
+        def __init__(self, init_parameter): self.init_parameter = init_parameter
 
         def apply(self, params, *inputs): return params
 
-        def init_parameters(self, rng, *example_inputs): return self.init_param(rng)
+        def init_parameters(self, rng, *example_inputs): return self.init_parameter(rng)
 
     test_parameter(parameter)
 
@@ -117,8 +118,13 @@ def test_mnist_classifier():
     next_batch = lambda: (np.zeros((3, 784)), np.zeros((3, 10)))
     optimizer = optimizers.Momentum(0.001, mass=0.9)
     state = optimizer.init_state(loss.init_parameters(PRNGKey(0), *next_batch()))
-    for _ in range(2):
+
+    t = time.time()
+    for _ in range(20):
         state = optimizer.optimize(loss.apply, state, *next_batch(), jit=True)
+
+    elapsed = time.time() - t
+    assert 5 > elapsed
 
     params = optimizer.get_parameters(state)
     train_acc = accuracy.apply_from({loss: params}, *next_batch(), jit=True)

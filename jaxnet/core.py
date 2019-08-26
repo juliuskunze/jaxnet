@@ -469,8 +469,8 @@ class parametrized(jc.Primitive):
 
 
 class parameter(parametrized):
-    def __init__(self, init_param, name=None):
-        self._init_param = init_param
+    def __init__(self, init_parameter, name=None):
+        self._init_parameter = init_parameter
 
         super().__init__(lambda params, *_: params, name=name if name else 'parameter')
 
@@ -482,7 +482,7 @@ class parameter(parametrized):
         if reuse_only:
             raise ValueError(f'No param value specified for {self}.')
 
-        return self._init_param(rng)
+        return self._init_parameter(rng)
 
 
 class ShapedParametrized:

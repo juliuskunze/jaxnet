@@ -64,11 +64,11 @@ The `parameter` module is roughly equivalent to:
 
 ```python
 class parameter:
-    def __init__(self, init_param): self.init_param = init_param
+    def __init__(self, init_parameter): self.init_parameter = init_parameter
 
     def apply(self, params, *inputs): return params
 
-    def init_parameters(self, rng, *example_inputs): return self.init_param(rng)
+    def init_parameters(self, rng, *example_inputs): return self.init_parameter(rng)
 ```
 
 All other modules are composed from this primitive via `@parametrized` functions:

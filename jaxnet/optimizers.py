@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from functools import lru_cache
 
 import jax
 from jax import grad, value_and_grad
@@ -21,8 +22,10 @@ class Optimizer(ABC):
     @abstractmethod
     def get_step(self, state): raise NotImplementedError
 
-    def optimize(self, loss_fun, state, *inputs, jit=False, return_loss=False):
-        def inner(state, *inputs):
+    # To avoid recompilation on every optimize call:
+    @lru_cache()
+    def _get_optimize(self, loss_fun, return_loss):
+        def optimize(state, *inputs):
             params = self.get_parameters(state)
             if return_loss:
                 loss, gradient = value_and_grad(loss_fun)(params, *inputs)
@@ -31,6 +34,10 @@ class Optimizer(ABC):
                 gradient = grad(loss_fun)(params, *inputs)
                 return self.optimize_from_gradients(gradient, state)
 
+        return optimize
+
+    def optimize(self, loss_fun, state, *inputs, jit=False, return_loss=False):
+        inner = self._get_optimize(loss_fun, return_loss)
         return (jax.jit(inner) if jit else inner)(state, *inputs)
 
 

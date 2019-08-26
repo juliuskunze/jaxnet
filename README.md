@@ -2,6 +2,7 @@
 
 JAXnet is a deep learning library built with [JAX](https://github.com/google/jax).
 Unlike alternatives, its API is purely functional.
+It features:
 
 ### Modularity.
 
@@ -71,10 +72,10 @@ for _ in range(10):
 trained_params = opt.get_parameters(state)
 ```
 
-Invoked a network with:
+`apply` evaluates a network:
 
 ```python
-output = net.apply(trained_params, inputs) # accelerate with jit=True
+batch_loss = loss.apply(trained_params, inputs) # accelerate with jit=True
 ```
 
 ### GPU support and compilation.
@@ -121,7 +122,7 @@ See JAXnet in action in your browser:
 [ResNet](https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN) and
 [WaveNet](https://colab.research.google.com/drive/111cKRfwYX4YFuPH3FF4V46XLfsPG1icZ).
 
-If you are familiar with [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py), read [this](STAX.md).
+If you are familiar with stax, read [this](STAX.md).
 
 ## Installation
 **This is a preview. Expect breaking changes!** Install with
