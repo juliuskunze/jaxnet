@@ -360,19 +360,20 @@ class parametrized(jc.Primitive):
         Parameters = namedtuple(self._name, params.keys())
         return Parameters(**params)
 
-    def apply(self, params, *inputs):
-        # assert isinstance(params, tuple)
+    def apply(self, params, *inputs, jit=False):
+        def _apply(params, *inputs):
+            def inner():
+                flat_inputs, in_tree = tree_util.tree_flatten(inputs)
+                flat_fun, out_tree = api_util.flatten_fun_nokwargs(self._wrapped_fun, in_tree)
+                with jc.new_master(ApplyTrace) as master:
+                    flat_fun = ApplyTrace._apply_subtrace(flat_fun, master, WrapHashably(params))
+                    flat_outputs = flat_fun.call_wrapped(*inputs)
+                    del master
+                return tree_util.tree_unflatten(out_tree(), flat_outputs)
 
-        def inner():
-            flat_inputs, in_tree = tree_util.tree_flatten(inputs)
-            flat_fun, out_tree = api_util.flatten_fun_nokwargs(self._wrapped_fun, in_tree)
-            with jc.new_master(ApplyTrace) as master:
-                flat_fun = ApplyTrace._apply_subtrace(flat_fun, master, WrapHashably(params))
-                flat_outputs = flat_fun.call_wrapped(*inputs)
-                del master
-            return tree_util.tree_unflatten(out_tree(), flat_outputs)
+            return parametrized._submodule_call_order_tracing.nested(self, inner)
 
-        return parametrized._submodule_call_order_tracing.nested(self, inner)
+        return (jax.jit(_apply) if jit else _apply)(params, *inputs)
 
     def __str__(self):
         return self.name
@@ -473,7 +474,8 @@ class parameter(parametrized):
 
         super().__init__(lambda params, *_: params, name=name if name else 'parameter')
 
-    def apply(self, params, *inputs):
+    def apply(self, params, *inputs, jit=False):
+        # no need for jit:
         return self._fun(params, *inputs)
 
     def _init_params_dict(self, rng, *example_inputs, reuse, reuse_only):

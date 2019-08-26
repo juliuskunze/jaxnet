@@ -1,14 +1,12 @@
 # Run this example in your browser: https://colab.research.google.com/drive/18kICTUbjqnfg5Lk3xFVQtUj6ahct9Vmv
 
-import itertools
 import time
 
 import jax.numpy as np
 import numpy.random as npr
-from jax import jit, grad, random
-from jax.experimental import optimizers
+from jax.random import PRNGKey
 
-from jaxnet import Sequential, parametrized, Dense, relu, logsoftmax
+from jaxnet import Sequential, parametrized, Dense, relu, logsoftmax, optimizers
 
 
 def _one_hot(x, k, dtype=np.float32):
@@ -45,13 +43,8 @@ def accuracy(inputs, targets):
 
 
 def main():
-    rng = random.PRNGKey(0)
-
-    step_size = 0.001
     num_epochs = 10
     batch_size = 128
-    momentum_mass = 0.9
-
     train_images, train_labels, test_images, test_labels = mnist()
     num_train = train_images.shape[0]
     num_complete_batches, leftover = divmod(num_train, batch_size)
@@ -67,24 +60,16 @@ def main():
 
     batches = data_stream()
 
-    opt_init, opt_update, get_params = optimizers.momentum(step_size, mass=momentum_mass)
+    optimizer = optimizers.Momentum(0.001, mass=0.9)
+    state = optimizer.init_state(loss.init_params(PRNGKey(0), *next(batches)))
 
-    @jit
-    def update(i, opt_state, images, labels):
-        params = get_params(opt_state)
-        return opt_update(i, grad(loss.apply)(params, images, labels), opt_state)
-
-    opt_state = opt_init(loss.init_params(rng, *next(batches)))
-    itercount = itertools.count()
-
-    print("\nStarting training...")
     for epoch in range(num_epochs):
         start_time = time.time()
         for _ in range(num_batches):
-            opt_state = update(next(itercount), opt_state, *next(batches))
+            state = optimizer.optimize(loss.apply, state, *next(batches), jit=True)
         epoch_time = time.time() - start_time
 
-        params = get_params(opt_state)
+        params = optimizer.get_parameters(state)
         train_acc = accuracy.apply_from({loss: params}, train_images, train_labels, jit=True)
         test_acc = accuracy.apply_from({loss: params}, test_images, test_labels, jit=True)
         print("Epoch {} in {:0.2f} sec".format(epoch, epoch_time))

@@ -1,11 +1,8 @@
 # Run this example in your browser: https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E
 
-import itertools
+from jax import numpy as np, random
 
-from jax import numpy as np, grad, random, jit
-from jax.experimental.optimizers import rmsprop
-
-from jaxnet import Sequential, Rnn, Dense, softmax, GRUCell, parametrized
+from jaxnet import Sequential, Rnn, Dense, softmax, GRUCell, parametrized, optimizers
 
 
 def read_dataset():
@@ -17,6 +14,7 @@ def read_dataset():
 
 
 def main():
+    # TODO https://github.com/JuliusKunze/jaxnet/issues/4
     print("Sorry, this example does not work yet work with the new jax version.")
     return
 
@@ -40,8 +38,8 @@ def main():
         lambda x: np.reshape(x, (-1, length, class_count)))
 
     @parametrized
-    def cross_entropy(inputs, targets):
-        prediction = net(inputs)
+    def cross_entropy(images, targets):
+        prediction = net(images)
         return np.mean(-np.sum(targets * np.log(prediction), (1, 2)))
 
     @parametrized
@@ -49,26 +47,20 @@ def main():
         prediction = net(inputs)
         return np.mean(np.not_equal(np.argmax(targets, 2), np.argmax(prediction, 2)))
 
-    opt_init, opt_update, get_params = rmsprop(0.003)
+    opt = optimizers.RmsProp(0.003)
 
-    @jit
-    def update(i, opt_state, data, target):
-        params = get_params(opt_state)
-        return opt_update(i, grad(cross_entropy.apply)(params, data, target), opt_state)
-
-    itercount = itertools.count()
     batch = train.sample(batch_size)
     params = cross_entropy.init_params(random.PRNGKey(0), batch.data, batch.target)
-    opt_state = opt_init(params)
+    state = opt.init_state(params)
     for epoch in range(10):
-        params = get_params(opt_state)
+        params = get_params(state)
         e = error.apply_from({cross_entropy: params}, test.data, test.target, jit=True)
         print(f'Epoch {epoch} error {e * 100:.1f}')
 
         break  # TODO https://github.com/JuliusKunze/jaxnet/issues/2
         for _ in range(100):
             batch = train.sample(batch_size)
-            opt_state = update(next(itercount), opt_state, batch.data, batch.target)
+            state = opt.optimize(cross_entropy.apply, state, batch.data, batch.target, jit=True)
 
 
 if __name__ == '__main__':

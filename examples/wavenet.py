@@ -1,11 +1,10 @@
 # Run this example in your browser: https://colab.research.google.com/drive/111cKRfwYX4YFuPH3FF4V46XLfsPG1icZ#scrollTo=i7tMOevVHCXz
 
-from jax import lax, numpy as np, jit, value_and_grad, random
-from jax.experimental import optimizers
+from jax import lax, numpy as np, random
 from jax.random import PRNGKey
 
 from jaxnet import Sequential, parametrized, relu, sigmoid, Conv1D, softplus, \
-    logsoftmax, logsumexp, L2Regularized
+    logsoftmax, logsumexp, L2Regularized, optimizers
 
 
 def discretized_mix_logistic_loss(theta, y, num_class=256, log_scale_min=-7.):
@@ -165,22 +164,16 @@ def main():
             theta, sliced_batch, num_class=1 << 16), axis=0)
                 * np.log2(np.e) / (output_width - 1))
 
-    opt_init, opt_update, get_params = optimizers.adam(
-        optimizers.exponential_decay(1e-3, decay_steps=1, decay_rate=0.999995))
-
     loss = L2Regularized(loss, .01)
 
-    @jit
-    def update(i, opt_state, batch):
-        params = get_params(opt_state)
-        train_loss, gradient = value_and_grad(loss.apply)(params, batch)
-        return opt_update(i, gradient, opt_state), train_loss
-
+    opt = optimizers.Adam(optimizers.exponential_decay(1e-3, decay_steps=1, decay_rate=0.999995))
     print(f'Initializing parameters.')
-    opt_state = opt_init(loss.init_params(PRNGKey(0), next(batches)))
-    for i, batch in enumerate(batches):
-        print(f'Training on batch {i}.')
-        opt_state, loss = update(i, opt_state, batch)
+    state = opt.init_state(loss.init_params(PRNGKey(0), next(batches)))
+    for batch in batches:
+        print(f'Training on batch {opt.get_step(state)}.')
+        state, loss = opt.optimize(loss.apply, state, batch, jit=True, return_loss=True)
+
+    trained_params = opt.get_parameters(state)
 
 
 if __name__ == '__main__':

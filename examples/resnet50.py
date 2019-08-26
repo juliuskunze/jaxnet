@@ -1,11 +1,10 @@
 # Run this example in your browser: https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN#scrollTo=p0J1g94IpxK-
 
 import numpy.random as npr
-from jax import jit, grad, random, numpy as np
-from jax.experimental import optimizers
+from jax import random, numpy as np
 
 from jaxnet import Conv, BatchNorm, GeneralConv, MaxPool, Dense, AvgPool, flatten, logsoftmax, \
-    Sequential, relu, parametrized
+    Sequential, relu, parametrized, optimizers
 
 
 def ConvBlock(kernel_size, filters, strides=(2, 2)):
@@ -93,19 +92,15 @@ def main():
             onehot_labels = labels == np.arange(num_classes)
             yield images, onehot_labels
 
-    opt_init, opt_update, get_params = optimizers.momentum(step_size, mass=0.9)
+    opt = optimizers.Momentum(step_size, mass=0.9)
     batches = synth_batches()
 
-    @jit
-    def update(i, opt_state, inputs, targets):
-        params = get_params(opt_state)
-        return opt_update(i, grad(loss.apply)(params, inputs, targets), opt_state)
-
-    opt_state = opt_init(loss.init_params(rng_key, *next(batches)))
+    print("\nInitializing parameters.")
+    state = opt(loss.init_params(rng_key, *next(batches)))
     for i in range(num_steps):
         print(f'Training on batch {i}.')
-        opt_state = update(i, opt_state, *next(batches))
-    trained_params = get_params(opt_state)
+        state = opt.optimize(loss.apply, state, *next(batches))
+    trained_params = opt.get_parameters(state)
 
 
 if __name__ == '__main__':

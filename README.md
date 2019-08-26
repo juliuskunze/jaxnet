@@ -1,13 +1,13 @@
 # JAXnet [![Build Status](https://travis-ci.org/JuliusKunze/jaxnet.svg?branch=master)](https://travis-ci.org/JuliusKunze/jaxnet) [![PyPI](https://img.shields.io/pypi/v/jaxnet.svg)](https://pypi.python.org/pypi/jaxnet/#history)
 
-JAXnet is a neural net library built with [JAX](https://github.com/google/jax). Unlike alternatives, its API is purely functional. Featuring:
+JAXnet is a deep learning library built with [JAX](https://github.com/google/jax). Unlike alternatives, its API is purely functional. Featuring:
 
 ### Modularity.
 
 ```python
 from jaxnet import *
 
-net = Sequential(Conv(100, (3, 3)), Conv(100, (3, 3)), relu, flatten, Dense(100))
+net = Sequential(Dense(1024), relu, Dense(1024), relu, Dense(10), logsoftmax)
 ```
 creates a neural net model.
 
@@ -17,15 +17,12 @@ Define your own modules/models using `@parametrized` functions. You can reuse ot
 
 ```python
 @parametrized
-def encode(images):
-    hidden = net(images)
-    means = Dense(10)(hidden)
-    variances = Sequential(Dense(10), softplus)(hidden)
-    return means, variances
+def loss(inputs, targets):
+    return -np.mean(net(inputs) * targets)
 ```
 
 All modules are composed in this way.
-Compare how concise this in contrast to TensorFlow2/Keras (similarly PyTorch):
+Compare how concise this is in contrast to TensorFlow2/Keras (similarly PyTorch):
 
 ```python
 TODO
@@ -33,48 +30,53 @@ TODO
 
 ### Immutable weights.
 
-Different from TensorFlow2/Keras and PyTorch, weights in JAXnet are immutable.
-They are initialized with `init_params`, providing a random key and example inputs:
+Different from TensorFlow2/Keras, JAXnet has no global compute graph.
+Network definitions are contained within objects like `net`.
+They do not have mutable weights.
+Instead, weights are contained in separate, immutable objects.
+They are initialized with `init_params`, provided a random key and example inputs:
 
 ```python
 from jax import numpy as np, jit
 from jax.random import PRNGKey
 
-inputs = np.zeros((3, 5, 5, 1))
-params = net.init_params(PRNGKey(0), inputs)
+next_batch = lambda: (np.zeros((3, 784)), np.zeros((3, 10)))
+params = loss.init_params(PRNGKey(0), batch)
 
 print(params.dense.bias) # [-0.0178184   0.02460396 -0.00353479  0.00492503]
 ```
 
-Instead of mutating weights inline, JAX' optimizers return an updated version of weights:
+Instead of mutating weights inline, optimizers return updated versions of weights.
+They are returned as part of a new optimizer state, and can be retrieved via `get_parameters`:
 
 ```python
-TODO # use "jit" for acceleration
+opt = optimizers.Adam()
+state = opt.init_state(params)
+for _ in range(10):
+    state = opt.optimize(loss.apply, state, *next_batch(), jit=True)
+
+trained_params = opt.get_parameters(state)
 ```
 
-After training, invoke the network with:
+Invoked a network with:
 
 ```python
-output = net.apply(params, inputs) # use "jit(net.apply)(params, inputs)" for acceleration
+output = net.apply(trained_params, inputs, jit=True)
 ```
 
-JAXnet has no global compute graph, encouraging reusable code.
-Networks are contained within objects like `net`.
-They do not have mutable state.
-Instead, weights contained in immutable objects like `params`.
+### GPU and compilation
 
-### Optimization + GPU backend.
-
-JAX allows any functional `numpy`/`scipy` code to be optimized.
+JAX allows any functional `numpy`/`scipy` code to be accelerated.
 Make it run on GPU by replacing your `numpy` import with `jax.numpy`.
-Decorating a function with [`jit`](https://github.com/google/jax#compilation-with-jit) will compile your code so that it is not slowed down by the Python interpreter.
+Compile a function by decorating it with [`jit`](https://github.com/google/jax#compilation-with-jit).
+This will free your function from slow Python interpretation, parallelize operations where possible and optimize your compute graph.
 
 Due to immutable weights, whole training loops can be compiled / run on GPU ([demo](examples/mnist_vae.py#L96)).
 `jit` will make your training as fast a mutating weights inline, and your weights will not leave the GPU.
 This gives you speed and scalability at the level of TensorFlow2 or PyTorch.
 You can write immutable code without worrying about performance.
 
-Due to ease of use, it is now practical to accelerate your pre-/postprocessing code as well ([demo](examples/mnist_vae.py#L61)).
+You can easily accelerate your pre-/postprocessing code as well ([demo](examples/mnist_vae.py#L61)).
 
 ### One-line regularization and reparametrization.
 
@@ -86,15 +88,17 @@ In contrast, TensorFlow2/Keras/PyTorch have mutable variables baked into their m
 - Reparametrization arguments on layer level, and separate implementations for [every](https://www.tensorflow.org/probability/api_docs/python/tfp/layers/DenseReparameterization) [layer](https://www.tensorflow.org/probability/api_docs/python/tfp/layers/Convolution1DReparameterization).
 
 ### Flexible random key control.
-JAXnet does not have a global random state. This makes your code deterministic by default.
-JAXnet instead allows flexible control over random keys, which can sometimes be useful ([demo](examples/mnist_vae.py#L89)).
+JAXnet does not have a global random state.
+Random keys are provided explicitely.
+This makes your code deterministic by default.
+It also is more flexible, which can be useful ([demo](examples/mnist_vae.py#L89)).
 
 ### Step-by-step debugging.
 
 JAXnet allows step-by-step debugging with concrete values like any plain Python function
 (when [`jit`](https://github.com/google/jax#compilation-with-jit) compilation is not used).
 
-## API and examples
+## API and demos
 Find more details on the API [here](API.md).
 
 See JAXnet in action in your browser:
@@ -104,9 +108,7 @@ See JAXnet in action in your browser:
 [ResNet](https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN) and
 [WaveNet](https://colab.research.google.com/drive/111cKRfwYX4YFuPH3FF4V46XLfsPG1icZ).
 
-JAXnet is independent of [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py).
-The main motivation over stax is to simplify nesting modules.
-Find details and porting instructions [here](STAX.md).
+If you are familiar with [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py), read [this](STAX.md).
 
 ## Installation
 **This is a preview. Expect breaking changes!** Install with

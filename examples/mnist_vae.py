@@ -2,11 +2,10 @@
 
 import time
 
-from jax import jit, grad, lax, random, numpy as np
-from jax.experimental import optimizers
+from jax import jit, lax, random, numpy as np
 from jax.random import PRNGKey
 
-from jaxnet import Sequential, Dense, relu, softplus, parametrized
+from jaxnet import Sequential, Dense, relu, softplus, parametrized, optimizers
 
 
 def mnist_images():
@@ -84,7 +83,7 @@ def main():
     train_images, test_images = mnist_images()
     num_complete_batches, leftover = divmod(train_images.shape[0], batch_size)
     num_batches = num_complete_batches + bool(leftover)
-    opt_init, opt_update, get_params = optimizers.momentum(step_size, mass=0.9)
+    opt = optimizers.Momentum(step_size, mass=0.9)
 
     @jit
     def binarize_batch(rng, i, images):
@@ -93,25 +92,24 @@ def main():
         return random.bernoulli(rng, batch)
 
     @jit
-    def run_epoch(rng, opt_state):
-        def body_fun(i, opt_state):
-            elbo_rng, data_rng = random.split(random.fold_in(rng, i))
+    def run_epoch(rng, state):
+        def body_fun(i, state):
+            loss_rng, data_rng = random.split(random.fold_in(rng, i))
             batch = binarize_batch(data_rng, i, train_images)
-            g = grad(loss.apply)(get_params(opt_state), elbo_rng, batch)
-            return opt_update(i, g, opt_state)
+            return opt.optimize(loss.apply, state, loss_rng, batch)
 
-        return lax.fori_loop(0, num_batches, body_fun, opt_state)
+        return lax.fori_loop(0, num_batches, body_fun, state)
 
     example_rng = PRNGKey(0)
     example_batch = binarize_batch(example_rng, 0, images=train_images)
     shaped_elbo = loss.shaped(example_rng, example_batch)
     init_params = shaped_elbo.init_params(PRNGKey(2))
-    opt_state = opt_init(init_params)
+    state = opt.init_state(init_params)
 
     for epoch in range(num_epochs):
         tic = time.time()
-        opt_state = run_epoch(PRNGKey(epoch), opt_state)
-        params = get_params(opt_state)
+        state = run_epoch(PRNGKey(epoch), state)
+        params = opt.get_parameters(state)
         test_elbo, samples = evaluate.apply_from({shaped_elbo: params}, test_rng, test_images,
                                                  jit=True)
         print(f'Epoch {epoch: 3d} {test_elbo:.3f} ({time.time() - tic:.3f} sec)')

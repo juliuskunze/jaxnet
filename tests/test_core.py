@@ -31,7 +31,7 @@ def test_external_submodule():
     out_ = net_fun.apply(params, inputs)
     assert np.array_equal(out, out_)
 
-    out_ = jit(net_fun.apply)(params, inputs)
+    out_ = net_fun.apply(params, inputs, jit=True)
     assert np.allclose(out, out_)
 
 
@@ -48,7 +48,7 @@ def test_default_argument_submodule():
     out_ = net_fun.apply(params, inputs)
     assert np.array_equal(out, out_)
 
-    out_ = jit(net_fun.apply)(params, inputs)
+    out_ = net_fun.apply(params, inputs, jit=True)
     assert np.allclose(out, out_)
 
 
@@ -66,7 +66,7 @@ def test_inline_submodule():
     out_ = net_fun.apply(params, inputs)
     assert np.array_equal(out, out_)
 
-    out_ = jit(net_fun.apply)(params, inputs)
+    out_ = net_fun.apply(params, inputs, jit=True)
     assert np.allclose(out, out_)
 
 
@@ -130,7 +130,7 @@ def test_external_submodule2():
     out = net.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
 
-    out_ = jit(net.apply)(params, inputs)
+    out_ = net.apply(params, inputs, jit=True)
     assert np.array_equal(out, out_)
 
 
@@ -149,7 +149,7 @@ def test_external_sequential_submodule():
     out = layer.apply(params, inputs)
     assert (1, 2) == out.shape
 
-    out_ = jit(layer.apply)(params, inputs)
+    out_ = layer.apply(params, inputs, jit=True)
     assert np.allclose(out, out_)
 
 
@@ -165,7 +165,7 @@ def test_internal_param_sharing():
     out = shared_net.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
 
-    out_ = jit(shared_net.apply)(params, inputs)
+    out_ = shared_net.apply(params, inputs, jit=True)
     assert np.array_equal(out, out_)
 
 
@@ -210,7 +210,7 @@ def test_external_param_sharing():
     out = shared_net.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
 
-    out = jit(shared_net.apply)(params, inputs)
+    out = shared_net.apply(params, inputs, jit=True)
     assert np.array_equal(np.zeros((1, 2)), out)
 
 
@@ -247,7 +247,7 @@ def test_no_params():
     out = double.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 3)), out)
 
-    out_ = jit(double.apply)(params, inputs)
+    out_ = double.apply(params, inputs, jit=True)
     assert np.array_equal(out, out_)
 
 
@@ -351,7 +351,7 @@ def test_submodule_without_inputs():
     out = scalar.apply(params)
     assert np.array_equal(np.zeros(()), out)
 
-    out_ = jit(scalar.apply)(params)
+    out_ = scalar.apply(params, jit=True)
     assert np.array_equal(out, out_)
 
 
@@ -366,7 +366,7 @@ def test_nested_module_without_inputs():
     out = dense.apply(params, inputs)
     assert (1, 2) == out.shape
 
-    out_ = jit(dense.apply)(params, inputs)
+    out_ = dense.apply(params, inputs, jit=True)
     assert np.allclose(out, out_)
 
 
@@ -389,7 +389,7 @@ def test_param_and_submodule_mixed():
     out = dense.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
 
-    out_ = jit(dense.apply)(params, inputs)
+    out_ = dense.apply(params, inputs, jit=True)
     assert np.array_equal(out, out_)
 
 
@@ -409,7 +409,7 @@ def test_mixed_up_execution_order():
     out = dense.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
 
-    out_ = jit(dense.apply)(params, inputs)
+    out_ = dense.apply(params, inputs, jit=True)
     assert np.array_equal(out, out_)
 
 
