@@ -80,7 +80,7 @@ trained_params = opt.get_parameters(state)
 `apply` evaluates a network:
 
 ```python
-batch_loss = loss.apply(trained_params, inputs) # accelerate with jit=True
+test_loss = loss.apply(trained_params, *test_batch) # accelerate with jit=True
 ```
 
 ### GPU support and compilation
@@ -105,7 +105,7 @@ In JAXnet, regularizing a model can be done in one line ([demo](examples/wavenet
 loss = L2Regularized(loss, scale=.1)
 ```
 
-`loss` is now a module that can be used as above.
+`loss` is now just another module that can be used as above.
 Reparametrized layers are one-liners, too (see [API](API.md#regularization-and-reparametrization)).
 JAXnet allows regularizing or reparametrizing any module or subnetwork without changing its code.
 This is possible because modules do not instantiate any variables.

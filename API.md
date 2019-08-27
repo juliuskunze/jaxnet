@@ -190,7 +190,8 @@ net = Sequential(Conv(2, (3, 3)), relu, Conv(2, (3, 3)), relu, flatten,
 ```
 
 Implementing `Reparametrized` is straight-forward:
-```
+
+```python
 def Reparametrized(model, reparametrization_factory):
     @parametrized
     def reparametrized(*inputs):

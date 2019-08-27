@@ -17,11 +17,19 @@ demos to their original stax implementations (linked in each).
 
 ### Porting from stax
 
-- Remove `init_parameters`: Extract parameters. Get rid of `output_shape` and `rng` splitting code.
-- Add `@parameterized` to your `apply_fun`, remove the `params` argument, and use layers/params directly.
-- Update `Serial` to `Sequential`.
-- Update parameter-free `stax` layers (`Relu`, `Flatten`, ...) to JAXnet functions (`relu`, `flatten`, ...).
-- If you use `FanInConcat` or `FanInSum`, update to `lambda x: np.concatenate(x, axis=-1)` or `sum`, respectively.
-- If you use `FanOut` or `parallel`, reformulate your code as a custom `@parameterized` function.
-- If you use `shape_dependent`, define layers inline and makes them depend on the input.
+- Add `@parameterized` to your `apply_fun`
+- Remove `params` argument
+- Define/use params and layers inline.
+- Remove `init_params`.
+- Update layers:
+
+    |stax|JAXnet|
+    |---|---|
+    |`Serial`|`Sequential`|
+    |`Relu`, `Flatten`, `Softmax`, ...| `relu`, `flatten`, `softmax`, ...|
+    |`FanInConcat`|`lambda x: np.concatenate(x, axis=-1)`|
+    |`FanInSum`|`sum`|
+    |`FanOut`, `parallel`| Reformulate as `@parameterized` module. |
+    |`shape_dependent`| Define layers inline, dependent on the input. |
+    | All other layers | Stay the same. |
 - Update usage of your model as described in the [overview](README.md#Overview).
