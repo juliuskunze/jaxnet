@@ -15,7 +15,7 @@ from jaxnet import *
 
 net = Sequential(Dense(1024), relu, Dense(1024), relu, Dense(4), logsoftmax)
 ```
-creates a neural net model.
+creates a neural net model from predefined modules.
 
 ### Extensibility
 
@@ -29,8 +29,9 @@ def loss(inputs, targets):
     return -np.mean(net(inputs) * targets)
 ```
 
-All modules are composed in this way. [`jax.numpy`](https://github.com/google/jax#whats-supported) is mirroring `numpy`.
-If you know how to use `numpy`, you are set for JAXnet.
+All modules are composed in this way.
+[`jax.numpy`](https://github.com/google/jax#whats-supported) is mirroring `numpy`,
+meaning that if you know how to use `numpy`, you know most of JAXnet.
 Compare this to TensorFlow2/Keras:
 
 ```python
@@ -38,7 +39,7 @@ import tensorflow as tf
 from tensorflow.keras import Sequential
 from tensorflow.keras.layers import Dense, Lambda
 
-net = Sequential([Dense(1024, 'relu'), Dense(1024, 'relu'), Dense(10), Lambda(tf.nn.log_softmax)])
+net = Sequential([Dense(1024, 'relu'), Dense(1024, 'relu'), Dense(4), Lambda(tf.nn.log_softmax)])
 
 def loss(inputs, targets):
     return -tf.reduce_mean(net(inputs) * targets)
