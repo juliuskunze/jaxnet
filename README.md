@@ -109,8 +109,8 @@ loss = L2Regularized(loss, scale=.1)
 Reparametrized layers are one-liners, too (see [API](API.md#regularization-and-reparametrization)).
 JAXnet allows regularizing or reparametrizing any module or subnetwork without changing its code.
 This is possible because modules do not instantiate any variables.
-Instead, a module's `apply` is a function with parameters as an argument.
-This function can then be composed to build layers like `L2Regularized`.
+Instead each module provides a function (`apply`) with parameters as an argument.
+This function can be wrapped to build layers like `L2Regularized`.
 
 In contrast, TensorFlow2/Keras/PyTorch have mutable variables baked into their model API. They therefore require:
 - Regularization arguments on layer level, with separate code necessary for each layer.
