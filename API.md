@@ -195,31 +195,38 @@ If you want to evaluate parts or extended versions of a trained network
 (to get accuracy, generate samples, do introspection, ...), you can use `apply_from`:
 
 ```python
-predict = Sequential(Dense(1024), relu, Dense(10), logsoftmax)
+net = Sequential(Dense(1024), relu, Dense(1024), relu, Dense(4), logsoftmax)
 
 @parametrized
 def loss(inputs, targets):
-    return -np.mean(predict(inputs) * targets)
+    return -np.mean(net(inputs) * targets)
 
 @parametrized
 def accuracy(inputs, targets):
     return np.mean(np.argmax(targets, axis=1) == np.argmax(predict(inputs), axis=1))
 
-params = loss.init_parameters(PRNGKey(0), inputs)
+params = loss.init_parameters(PRNGKey(0), np.zeros((3, 784)), np.zeros((3, 4)))
 
 # train params...
 
-test_acc = accuracy.apply_from({loss: params}, *test_inputs, jit=True)
+test_acc = accuracy.apply_from({loss: params}, *test_batch, jit=True)
 ```
 
 It is a shorthand for:
 
 ```python
-accuracy_params = accuracy.params_from({loss: params}, *test_inputs)
-test_acc = jit(accuracy.apply)(accuracy_params, *test_inputs)
+accuracy_params = accuracy.params_from({loss: params}, *test_batch)
+test_acc = jit(accuracy.apply)(accuracy_params, *test_batch)
 ```
 
-If you want to reuse parts of your network while initializing the rest, use `init_parameters` with `reuse`:
+This assumes that the inputs for `loss` are the same as for `accuracy`.
+To specify different inputs, for example to get predictions from `net` (which do require a `target`), use `shaped`:
+
+```
+predictions = net.apply_from({loss.shaped(*next_batch()): params}, test_inputs, jit=True)
+```
+
+If you want to reuse parts of your network while initializing the rest, use `init_parameters` with `reuse` ([demo](examples/mnist_vae.py#L105)):
 
 ```python
 inputs = np.zeros((1, 2))
