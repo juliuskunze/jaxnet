@@ -9,23 +9,32 @@ from examples.mnist_vae import gaussian_sample, bernoulli_logpdf, gaussian_kl
 from examples.wavenet import calculate_receptive_field, discretized_mix_logistic_loss, Wavenet
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, GRUCell, Rnn, \
     softmax, softplus, parameter, glorot, randn, Parameter, Reparametrized, L2Regularized, \
-    optimizers
+    optimizers, logsoftmax
 from jaxnet.core import ShapedParametrized
 from tests.test_core import test_parameter
 from tests.test_modules import test_Dense_shape, Scaled
 
 
 def test_readme():
-    net = Sequential(Conv(2, (3, 3)), relu, flatten, Dense(4), softmax)
-    batch = np.zeros((3, 5, 5, 1))
-    params = net.init_parameters(PRNGKey(0), batch)
-    assert (2,) == params.conv.bias.shape
-    assert (4,) == params.dense.bias.shape
+    net = Sequential(Dense(1024), relu, Dense(1024), relu, Dense(4), logsoftmax)
 
-    out = net.apply(params, batch)
-    assert (3, 4) == out.shape
+    @parametrized
+    def loss(inputs, targets):
+        return -np.mean(net(inputs) * targets)
 
-    out_ = net.apply(params, batch, jit=True)
+    def next_batch(): return np.zeros((3, 784)), np.zeros((3, 4))
+
+    params = loss.init_parameters(PRNGKey(0), *next_batch())
+
+    print(params.sequential.dense2.bias)  # [0.00376661 0.01038619 0.00920947 0.00792002]
+
+    assert np.allclose([0.00376661, 0.01038619, 0.00920947, 0.00792002],
+                       params.sequential.dense2.bias)
+
+    out = loss.apply(params, *next_batch())
+    assert () == out.shape
+
+    out_ = loss.apply(params, *next_batch(), jit=True)
     assert out.shape == out_.shape
 
 
