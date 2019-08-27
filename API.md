@@ -220,13 +220,13 @@ test_acc = jit(accuracy.apply)(accuracy_params, *test_batch)
 ```
 
 This assumes that the inputs for `loss` are the same as for `accuracy`.
-To specify different inputs, for example to get predictions from `net` (which do require a `target`), use `shaped`:
+To specify different inputs, for example to get predictions from `net` (which do require a `target`), use `shaped` ([demo](examples/mnist_vae.py#L105)):
 
-```
+```python
 predictions = net.apply_from({loss.shaped(*next_batch()): params}, test_inputs, jit=True)
 ```
 
-If you want to reuse parts of your network while initializing the rest, use `init_parameters` with `reuse` ([demo](examples/mnist_vae.py#L105)):
+If you want to reuse parts of your network while initializing the rest, use `init_parameters` with `reuse`:
 
 ```python
 inputs = np.zeros((1, 2))
