@@ -215,6 +215,7 @@ def test_Regularized():
 
     assert 1 + 2 + 1 + 4 == reg_loss_out
 
+
 def test_L2Regularized():
     @parametrized
     def loss(inputs):
@@ -234,6 +235,7 @@ def test_L2Regularized():
 
     assert 1 + 2 + 1 + 4 == reg_loss_out
 
+
 def test_L2Regularized_sequential():
     loss = Sequential(Dense(1, ones, ones), relu, Dense(1, ones, ones), sum)
 
@@ -247,6 +249,7 @@ def test_L2Regularized_sequential():
     reg_loss_out = reg_loss.apply(params, inputs)
 
     assert 7 == reg_loss_out
+
 
 def test_Reparametrized_unparametrized_transform():
     def doubled(params):
@@ -273,6 +276,7 @@ def Scaled():
 
     return learnable_scale
 
+
 def test_Reparametrized():
     @parametrized
     def net(inputs):
@@ -280,12 +284,9 @@ def test_Reparametrized():
 
     scaled_net = Reparametrized(net, reparametrization_factory=Scaled)
 
-
     inputs = np.zeros(())
     params = scaled_net.init_parameters(PRNGKey(0), inputs)
 
     reg_loss_out = scaled_net.apply(params, inputs)
 
     assert 4 == reg_loss_out
-
-

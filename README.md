@@ -119,7 +119,7 @@ In contrast, TensorFlow2/Keras/PyTorch have mutable variables baked into their m
 ### Random key control
 JAXnet does not have global random state.
 Random keys are provided explicitly, making code deterministic and independent of previously executed code by default.
-This can help debugging and is more flexible ([demo](examples/mnist_vae.py#L89)).
+This can help debugging and is more flexible ([demo](examples/mnist_vae.py#L81)).
 Read more on random numbers in JAX [here](https://github.com/google/jax#random-numbers-are-different).
 
 ### Step-by-step debugging

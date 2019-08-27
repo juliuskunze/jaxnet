@@ -1,7 +1,7 @@
 import functools
 import itertools
 
-from jax import random, lax, numpy as np, scipy, tree_flatten, tree_unflatten
+from jax import random, lax, numpy as np, scipy, tree_flatten, tree_map, tree_leaves
 
 from jaxnet.core import parametrized, parameter
 from jaxnet.initializers import glorot, randn, zeros, ones
@@ -274,8 +274,8 @@ def Regularized(loss_model, regularizer):
     @parametrized
     def regularized(*inputs):
         params = parameter(lambda rng: loss_model.init_parameters(rng, *inputs), 'model')(inputs)
-        flat_params, _ = tree_flatten(params)
-        return loss_model.apply(params, *inputs) + sum(map(lambda param: np.sum(regularizer(param)), flat_params))
+        regularization_loss = sum(map(lambda param: np.sum(regularizer(param)), tree_leaves(params)))
+        return loss_model.apply(params, *inputs) + regularization_loss
 
     return regularized
 
@@ -289,8 +289,7 @@ def Reparametrized(model, reparametrization_factory, init_transform=lambda x: x)
     def reparametrized(*inputs):
         params = parameter(lambda rng: init_transform(model.init_parameters(rng, *inputs)),
                            'model')(*inputs)
-        flat_params, tree = tree_flatten(params)
-        mapped_params = map(lambda param: reparametrization_factory()(param), flat_params)
-        return model.apply(tree_unflatten(tree, mapped_params), *inputs)
+        transformed_params = tree_map(lambda param: reparametrization_factory()(param), params)
+        return model.apply(transformed_params, *inputs)
 
     return reparametrized

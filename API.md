@@ -189,6 +189,18 @@ net = Sequential(Conv(2, (3, 3)), relu, Conv(2, (3, 3)), relu, flatten,
                  Reparametrized(Sequential(Dense(2), relu, Dense(2)), Scaled))
 ```
 
+Implementing `Reparametrized` is straight-forward:
+```
+def Reparametrized(model, reparametrization_factory):
+    @parametrized
+    def reparametrized(*inputs):
+        params = parameter(lambda rng: model.init_parameters(rng, *inputs))(*inputs)
+        transformed_params = tree_map(lambda param: reparametrization_factory()(param), params)
+        return model.apply(transformed_params, *inputs)
+
+    return reparametrized
+```
+
 ## Parameter reuse
 
 If you want to evaluate parts or extended versions of a trained network
