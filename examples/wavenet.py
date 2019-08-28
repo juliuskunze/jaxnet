@@ -95,7 +95,7 @@ def ResLayer(dilation_channels, residual_channels, filter_width, dilation, outpu
             inputs, [0, inputs.shape[1] - out.shape[1], 0],
             [inputs.shape[0], out.shape[1], inputs.shape[2]])
         new_out = sum(out, sliced_inputs)
-        skip = Conv1D(residual_channels, (1,), padding='SAME')(skip_slice(inputs, output_width))
+        skip = Conv1D(residual_channels, (1,), padding='SAME')(skip_slice(p, output_width))
         return new_out, skip
 
     return res_layer

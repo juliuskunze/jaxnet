@@ -17,9 +17,9 @@ demos to their original stax implementations (linked in each).
 
 ### Porting from stax
 
-- Add `@parameterized` to your `apply_fun`
-- Remove `params` argument
-- Define/use params and layers inline.
+- Add `@parametrized` to your `apply_fun`.
+- Remove the `params` argument.
+- Define or use parameters and layers inline.
 - Remove `init_params`.
 - Update layers:
 
@@ -29,7 +29,7 @@ demos to their original stax implementations (linked in each).
     |`Relu`, `Flatten`, `Softmax`, ...| `relu`, `flatten`, `softmax`, ...|
     |`FanInConcat`|`lambda x: np.concatenate(x, axis=-1)`|
     |`FanInSum`|`sum`|
-    |`FanOut`, `parallel`| Reformulate as `@parameterized` module. |
+    |`FanOut`, `parallel`| Reformulate as `@parametrized` module. |
     |`shape_dependent`| Define layers inline, dependent on the input. |
     | All other layers | Stay the same. |
 - Update usage of your model as described in the [overview](README.md#Overview).
