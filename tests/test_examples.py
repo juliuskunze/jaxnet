@@ -131,7 +131,6 @@ def test_mnist_classifier():
     t = time.time()
     for _ in range(10):
         state = opt.update(loss.apply, state, *next_batch(), jit=True)
-        assert () == l.shape
 
     elapsed = time.time() - t
     assert 5 > elapsed

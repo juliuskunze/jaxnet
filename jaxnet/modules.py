@@ -52,13 +52,10 @@ def Parameter(shape, init, dummy_inputs, name=None):
     :param dummy_inputs: If called as a submodule, dummy_inputs needs to depend on an input.
     See https://github.com/JuliusKunze/jaxnet/issues/1 for details.
     """
-    return GeneralParameter(
-        name=name,
-        init_parameter=lambda rng: init(rng, shape),
-        dummy_inputs=dummy_inputs)
+    return GeneralParameter(lambda rng: init(rng, shape), dummy_inputs=dummy_inputs, name=name)
 
 
-def GeneralParameter(name, init_parameter, dummy_inputs):
+def GeneralParameter(init_parameter, dummy_inputs, name):
     return parameter(init_parameter, name)(dummy_inputs)
 
 
