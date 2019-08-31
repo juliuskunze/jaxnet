@@ -228,7 +228,7 @@ test_acc = accuracy.apply_from({loss: params}, *test_batch, jit=True)
 It is a shorthand for:
 
 ```python
-accuracy_params = accuracy.params_from({loss: params}, *test_batch)
+accuracy_params = accuracy.parameters_from({loss: params}, *test_batch)
 test_acc = jit(accuracy.apply)(accuracy_params, *test_batch)
 ```
 

@@ -14,7 +14,7 @@ class Optimizer(ABC):
     def init_state(self, parameters): raise NotImplementedError
 
     @abstractmethod
-    def optimize_from_gradients(self, gradients, state): raise NotImplementedError
+    def update_from_gradients(self, gradients, state): raise NotImplementedError
 
     @abstractmethod
     def get_parameters(self, state): raise NotImplementedError
@@ -29,10 +29,10 @@ class Optimizer(ABC):
             params = self.get_parameters(state)
             if return_loss:
                 loss, gradient = value_and_grad(loss_fun)(params, *inputs)
-                return self.optimize_from_gradients(gradient, state), loss
+                return self.update_from_gradients(gradient, state), loss
             else:
                 gradient = grad(loss_fun)(params, *inputs)
-                return self.optimize_from_gradients(gradient, state)
+                return self.update_from_gradients(gradient, state)
 
         return update
 
@@ -54,7 +54,7 @@ class OptimizerFromExperimental(Optimizer):
     def init_state(self, parameters):
         return 0, self._init_state(parameters)
 
-    def optimize_from_gradients(self, gradients, state):
+    def update_from_gradients(self, gradients, state):
         step, _state = state
         return step + 1, self._update_state(step, gradients, _state)
 

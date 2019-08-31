@@ -393,14 +393,14 @@ class parametrized(jc.Primitive):
 
         return expanded_reuse
 
-    def params_from(self, reuse, *example_inputs):
+    def parameters_from(self, reuse, *example_inputs):
         expanded_reuse = parametrized._expand_reuse_dict(reuse, *example_inputs)
 
         # TODO: optimization wrong, duplicate values, needs param adapter
         return self.init_parameters(PRNGKey(0), *example_inputs, reuse=expanded_reuse, reuse_only=True)
 
     def apply_from(self, reuse, *example_inputs, jit=False):
-        params = self.params_from(reuse, *example_inputs)
+        params = self.parameters_from(reuse, *example_inputs)
         return (jax.jit(self.apply) if jit else self.apply)(params, *example_inputs)
 
     def __eq__(self, obj):

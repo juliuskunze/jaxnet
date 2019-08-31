@@ -432,7 +432,7 @@ def test_params_from():
     inputs = np.zeros((1, 3))
     layer_params = layer.init_parameters(PRNGKey(0), inputs)
 
-    params_ = net.params_from({layer: layer_params}, inputs)
+    params_ = net.parameters_from({layer: layer_params}, inputs)
     assert_params_equal((layer_params,), params_)
 
     out = net.apply(params_, inputs)
@@ -454,7 +454,7 @@ def test_params_from_subsubmodule():
 
     subsublayer_params = subsublayer.init_parameters(PRNGKey(0), inputs)
 
-    params_ = net.params_from({subsublayer: subsublayer_params}, inputs)
+    params_ = net.parameters_from({subsublayer: subsublayer_params}, inputs)
     assert_dense_params_equal(subsublayer_params, params_[0][0])
     out_ = net.apply(params_, inputs)
     assert out.shape == out_.shape
@@ -472,7 +472,7 @@ def test_params_from_top_level():
     params = net.init_parameters(PRNGKey(0), inputs)
     out = net.apply(params, inputs)
 
-    params_ = net.params_from({net: params}, inputs)
+    params_ = net.parameters_from({net: params}, inputs)
     assert_dense_params_equal(params, params_)
     out_ = net.apply(params_, inputs)
     assert np.array_equal(out, out_)
@@ -497,7 +497,7 @@ def test_params_from_shared_submodules():
     a_params = a.init_parameters(PRNGKey(0), inputs)
     out = a.apply(a_params, inputs)
 
-    params = net.params_from({a: a_params}, inputs)
+    params = net.parameters_from({a: a_params}, inputs)
     assert_params_equal(a_params.dense.kernel, params.sequential0.dense.kernel)
     assert_params_equal(a_params.dense.kernel, params.sequential1.dense.kernel)
     out = net.apply(params, inputs)
@@ -540,7 +540,7 @@ def test_params_from_shared_submodules2():
     a_params = a.init_parameters(PRNGKey(0), inputs)
     out = a.apply(a_params, inputs)
 
-    params = net.params_from({a: a_params}, inputs)
+    params = net.parameters_from({a: a_params}, inputs)
     assert_dense_params_equal(a_params.dense, params.sequential0.dense)
     assert_dense_params_equal(a_params.dense, params.sequential1.dense)
     # TODO parameters are duplicated, optimization with weight sharing is wrong:

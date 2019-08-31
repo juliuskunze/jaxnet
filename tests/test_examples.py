@@ -141,7 +141,7 @@ def test_mnist_classifier():
     train_acc = accuracy.apply_from({loss: params}, *next_batch(), jit=True)
     assert () == train_acc.shape
 
-    predict_params = predict.params_from({loss: params}, *next_batch())
+    predict_params = predict.parameters_from({loss: params}, *next_batch())
     predictions = predict.apply(predict_params, next_batch()[0], jit=True)
     assert (3, 10) == predictions.shape
 
