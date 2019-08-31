@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections import namedtuple
 from functools import lru_cache
 
 import jax
@@ -11,16 +12,20 @@ from jax.experimental.optimizers import constant, exponential_decay, inverse_tim
 
 class Optimizer(ABC):
     @abstractmethod
-    def init_state(self, parameters): raise NotImplementedError
+    def init(self, parameters):
+        raise NotImplementedError
 
     @abstractmethod
-    def update_from_gradients(self, gradients, state): raise NotImplementedError
+    def update_from_gradients(self, gradients, state):
+        raise NotImplementedError
 
     @abstractmethod
-    def get_parameters(self, state): raise NotImplementedError
+    def get_parameters(self, state):
+        raise NotImplementedError
 
     @abstractmethod
-    def get_step(self, state): raise NotImplementedError
+    def get_step(self, state):
+        raise NotImplementedError
 
     # To avoid recompilation on every call:
     @lru_cache()
@@ -47,20 +52,23 @@ class Optimizer(ABC):
         return self._update(loss_fun, state, *inputs, jit=jit, return_loss=True)
 
 
+State = namedtuple('optimizer', ('step', 'values'))
+
+
 class OptimizerFromExperimental(Optimizer):
     def __init__(self, experimental_optimizer):
-        self._init_state, self._update_state, self._get_params = experimental_optimizer
+        self._init, self._update_from_gradients, self._get_parameters = experimental_optimizer
 
-    def init_state(self, parameters):
-        return 0, self._init_state(parameters)
+    def init(self, parameters):
+        return State(0, self._init(parameters))
 
     def update_from_gradients(self, gradients, state):
         step, _state = state
-        return step + 1, self._update_state(step, gradients, _state)
+        return State(step + 1, self._update_from_gradients(step, gradients, _state))
 
     def get_parameters(self, state):
-        step, _state = state
-        return self._get_params(_state)
+        _, _state = state
+        return self._get_parameters(_state)
 
     def get_step(self, state):
         step, _ = state

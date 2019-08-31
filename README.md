@@ -70,7 +70,7 @@ They are returned as part of a new optimizer state, and can be retrieved via `ge
 
 ```python
 opt = optimizers.Adam()
-state = opt.init_state(params)
+state = opt.init(params)
 for _ in range(10):
     state = opt.update(loss.apply, state, *next_batch()) # accelerate with jit=True
 

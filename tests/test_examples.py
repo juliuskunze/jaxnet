@@ -126,12 +126,11 @@ def test_mnist_classifier():
 
     next_batch = lambda: (np.zeros((3, 784)), np.zeros((3, 10)))
     opt = optimizers.Momentum(0.001, mass=0.9)
-    state = opt.init_state(loss.init_parameters(PRNGKey(0), *next_batch()))
+    state = opt.init(loss.init_parameters(PRNGKey(0), *next_batch()))
 
     t = time.time()
     for _ in range(10):
         state = opt.update(loss.apply, state, *next_batch(), jit=True)
-        state, l = opt.update_and_get_loss(loss.apply, state, *next_batch(), jit=True)
         assert () == l.shape
 
     elapsed = time.time() - t
@@ -228,7 +227,7 @@ def test_wavenet():
     loss = L2Regularized(loss, .01)
 
     opt = optimizers.Adam(optimizers.exponential_decay(1e-3, decay_steps=1, decay_rate=0.999995))
-    state = opt.init_state(loss.init_parameters(PRNGKey(0), batch))
+    state = opt.init(loss.init_parameters(PRNGKey(0), batch))
     state, loss = opt.update_and_get_loss(loss.apply, state, batch, jit=True)
     trained_params = opt.get_parameters(state)
 

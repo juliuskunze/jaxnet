@@ -60,16 +60,16 @@ def main():
 
     batches = data_stream()
 
-    optimizer = optimizers.Momentum(0.001, mass=0.9)
-    state = optimizer.init_state(loss.init_parameters(PRNGKey(0), *next(batches)))
+    opt = optimizers.Momentum(0.001, mass=0.9)
+    state = opt.init(loss.init_parameters(PRNGKey(0), *next(batches)))
 
     for epoch in range(num_epochs):
         start_time = time.time()
         for _ in range(num_batches):
-            state = optimizer.update(loss.apply, state, *next(batches), jit=True)
+            state = opt.update(loss.apply, state, *next(batches), jit=True)
         epoch_time = time.time() - start_time
 
-        params = optimizer.get_parameters(state)
+        params = opt.get_parameters(state)
         train_acc = accuracy.apply_from({loss: params}, train_images, train_labels, jit=True)
         test_acc = accuracy.apply_from({loss: params}, test_images, test_labels, jit=True)
         print("Epoch {} in {:0.2f} sec".format(epoch, epoch_time))

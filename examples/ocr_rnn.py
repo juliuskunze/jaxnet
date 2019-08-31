@@ -51,7 +51,7 @@ def main():
 
     batch = train.sample(batch_size)
     params = cross_entropy.init_parameters(random.PRNGKey(0), batch.data, batch.target)
-    state = opt.init_state(params)
+    state = opt.init(params)
     for epoch in range(10):
         params = get_params(state)
         e = error.apply_from({cross_entropy: params}, test.data, test.target, jit=True)

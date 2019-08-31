@@ -104,7 +104,7 @@ def main():
     example_batch = binarize_batch(example_rng, 0, images=train_images)
     shaped_elbo = loss.shaped(example_rng, example_batch)
     init_parameters = shaped_elbo.init_parameters(PRNGKey(2))
-    state = opt.init_state(init_parameters)
+    state = opt.init(init_parameters)
 
     for epoch in range(num_epochs):
         tic = time.time()
