@@ -96,7 +96,7 @@ def main():
         def body_fun(i, state):
             loss_rng, data_rng = random.split(random.fold_in(rng, i))
             batch = binarize_batch(data_rng, i, train_images)
-            return opt.optimize(loss.apply, state, loss_rng, batch)
+            return opt.update(loss.apply, state, loss_rng, batch)
 
         return lax.fori_loop(0, num_batches, body_fun, state)
 

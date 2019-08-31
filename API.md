@@ -233,7 +233,7 @@ test_acc = jit(accuracy.apply)(accuracy_params, *test_batch)
 ```
 
 This assumes that the inputs for `loss` are the same as for `accuracy`.
-To specify different inputs, for example to get predictions from `net` (which do require a `target`), use `shaped` ([demo](examples/mnist_vae.py#L105)):
+Use `shaped` to specify deviating input shapes, for example to get predictions from `net` (which does not require a `target`) ([demo](examples/mnist_vae.py#L105)):
 
 ```python
 predictions = net.apply_from({loss.shaped(*next_batch()): params}, test_inputs, jit=True)

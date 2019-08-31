@@ -72,7 +72,7 @@ They are returned as part of a new optimizer state, and can be retrieved via `ge
 opt = optimizers.Adam()
 state = opt.init_state(params)
 for _ in range(10):
-    state = opt.optimize(loss.apply, state, *next_batch()) # accelerate with jit=True
+    state = opt.update(loss.apply, state, *next_batch()) # accelerate with jit=True
 
 trained_params = opt.get_parameters(state)
 ```
@@ -85,7 +85,7 @@ test_loss = loss.apply(trained_params, *test_batch) # accelerate with jit=True
 
 ### GPU support and compilation
 
-JAX allows any functional `numpy`/`scipy` code to be accelerated.
+JAX allows functional `numpy`/`scipy` code to be accelerated.
 Make it run on GPU by replacing your `numpy` import with `jax.numpy`.
 Compile a function by decorating it with [`jit`](https://github.com/google/jax#compilation-with-jit).
 This will free your function from slow Python interpretation, parallelize operations where possible and optimize your compute graph.

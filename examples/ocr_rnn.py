@@ -60,7 +60,7 @@ def main():
         break  # TODO https://github.com/JuliusKunze/jaxnet/issues/2
         for _ in range(100):
             batch = train.sample(batch_size)
-            state = opt.optimize(cross_entropy.apply, state, batch.data, batch.target, jit=True)
+            state = opt.update(cross_entropy.apply, state, batch.data, batch.target, jit=True)
 
 
 if __name__ == '__main__':

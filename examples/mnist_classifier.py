@@ -66,7 +66,7 @@ def main():
     for epoch in range(num_epochs):
         start_time = time.time()
         for _ in range(num_batches):
-            state = optimizer.optimize(loss.apply, state, *next(batches), jit=True)
+            state = optimizer.update(loss.apply, state, *next(batches), jit=True)
         epoch_time = time.time() - start_time
 
         params = optimizer.get_parameters(state)

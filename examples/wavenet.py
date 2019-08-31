@@ -171,7 +171,7 @@ def main():
     state = opt.init_state(loss.init_parameters(PRNGKey(0), next(batches)))
     for batch in batches:
         print(f'Training on batch {opt.get_step(state)}.')
-        state, loss = opt.optimize(loss.apply, state, batch, jit=True, return_loss=True)
+        state, loss = opt.update(loss.apply, state, batch, jit=True, return_loss=True)
 
     trained_params = opt.get_parameters(state)
 

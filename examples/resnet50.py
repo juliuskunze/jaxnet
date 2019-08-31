@@ -99,7 +99,7 @@ def main():
     state = opt(loss.init_parameters(rng_key, *next(batches)))
     for i in range(num_steps):
         print(f'Training on batch {i}.')
-        state = opt.optimize(loss.apply, state, *next(batches))
+        state = opt.update(loss.apply, state, *next(batches))
     trained_params = opt.get_parameters(state)
 
 

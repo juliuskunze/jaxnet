@@ -22,10 +22,10 @@ class Optimizer(ABC):
     @abstractmethod
     def get_step(self, state): raise NotImplementedError
 
-    # To avoid recompilation on every optimize call:
+    # To avoid recompilation on every call:
     @lru_cache()
-    def _get_optimize(self, loss_fun, return_loss):
-        def optimize(state, *inputs):
+    def _update_fun(self, loss_fun, return_loss=False):
+        def update(state, *inputs):
             params = self.get_parameters(state)
             if return_loss:
                 loss, gradient = value_and_grad(loss_fun)(params, *inputs)
@@ -34,11 +34,17 @@ class Optimizer(ABC):
                 gradient = grad(loss_fun)(params, *inputs)
                 return self.optimize_from_gradients(gradient, state)
 
-        return optimize
+        return update
 
-    def optimize(self, loss_fun, state, *inputs, jit=False, return_loss=False):
-        inner = self._get_optimize(loss_fun, return_loss)
+    def _update(self, loss_fun, state, *inputs, jit=False, return_loss=False):
+        inner = self._update_fun(loss_fun, return_loss=return_loss)
         return (jax.jit(inner) if jit else inner)(state, *inputs)
+
+    def update(self, loss_fun, state, *inputs, jit=False):
+        return self._update(loss_fun, state, *inputs, jit=jit)
+
+    def update_and_get_loss(self, loss_fun, state, *inputs, jit=False):
+        return self._update(loss_fun, state, *inputs, jit=jit, return_loss=True)
 
 
 class OptimizerFromExperimental(Optimizer):
