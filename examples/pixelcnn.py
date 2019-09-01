@@ -1,6 +1,6 @@
-import time
-
+import tensorflow_datasets as tfds
 from jax import numpy as np, lax, vmap, random
+from jax.random import PRNGKey
 from jax.util import partial
 
 from jaxnet import Parameter, parametrized, randn, elu, sigmoid, softplus, Dropout, logsumexp, \
@@ -298,27 +298,21 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, **resnet_kwargs)
 
 def dataset(batch_size):
     import tensorflow as tf
-    tf.random.set_random_seed(0)
 
-    import tensorflow_datasets as tfds
+    tf.random.set_random_seed(0)
     cifar = tfds.load('cifar10')
 
     def get_train_batches():
-        return tfds.as_numpy(
-            cifar['train'].map(lambda el: el['image']).shuffle(1000)
-                .batch(batch_size).prefetch(1))
+        return tfds.as_numpy(cifar['train'].map(lambda el: el['image']).
+                             shuffle(1000).batch(batch_size).prefetch(1))
 
-    test_batches = tfds.as_numpy(
-        cifar['test'].map(lambda el: el['image']).repeat().shuffle(1000)
-            .batch(batch_size).prefetch(1))
-    return test_batches, get_train_batches
+    test_batches = tfds.as_numpy(cifar['test'].map(lambda el: el['image']).
+                                 repeat().shuffle(1000).batch(batch_size).prefetch(1))
+    return get_train_batches, test_batches
 
 
 def main(batch_size=32, epochs=10, step_size=.001, decay_rate=.999995,
          nr_filters=1, nr_resnet=0, dropout_p=.5):
-    t0 = time.time()
-    rng = random.PRNGKey(0)
-    test_batches, get_train_batches = dataset(batch_size)
     unbatched_loss = PixelCNNPP(nr_filters=nr_filters,
                                 nr_resnet=nr_resnet, dropout_p=dropout_p)
 
@@ -331,29 +325,30 @@ def main(batch_size=32, epochs=10, step_size=.001, decay_rate=.999995,
         assert losses.shape == (batch_size,)
         return np.mean(losses)
 
-    opt = optimizers.Adam(optimizers.exponential_decay(step_size, 1, decay_rate))
-
-    rng, rng_init_1, rng_init_2 = random.split(rng, 3)
+    get_train_batches, test_batches = dataset(batch_size)
+    rng, rng_init_1, rng_init_2 = random.split(PRNGKey(0), 3)
     # TODO fix:
     params = unbatched_loss.init_parameters(rng_init_1, rng_init_2, next(test_batches)[0])
     # TODO fix batched version:
     # TODO rng_init_2 = random.split(rng_init_2, test_batch_size)
     # TODO vmap(loss, (0, 0))
     params = loss.init_parameters(rng_init_1, rng_init_2, next(test_batches))
+
+    opt = optimizers.Adam(optimizers.exponential_decay(step_size, 1, decay_rate))
     state = opt.init(params)
 
     for epoch in range(epochs):
-        for i, batch in enumerate(get_train_batches()):
+        for batch in get_train_batches():
             rng, rng_update = random.split(rng)
-            state, train_loss = opt.update(loss.apply, state, rng_update, batch)
+            i = opt.get_step(state)
+            state, train_loss = opt.update_and_get_loss(loss.apply, state, rng_update, batch)
 
             if i % 100 == 0 or i < 10:
                 rng, rng_test = random.split(rng)
                 test_loss = loss(opt.get_parameters(state), rng_test, next(test_batches))
                 print(f"Epoch {epoch}, iteration {i}, "
                       f"train loss {train_loss:.3f}, "
-                      f"test loss {test_loss:.3f} "
-                      f"({time.time() - t0:.2f}s)")
+                      f"test loss {test_loss:.3f} ")
 
 
 if __name__ == '__main__':
