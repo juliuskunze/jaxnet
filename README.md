@@ -8,6 +8,8 @@ while maintaining user-friendliness, modularity and scalability:
 - Regularization and reparametrization of any module or whole networks in one line.
 - No global random state, flexible random key control.
 
+If you already know stax, read [this](STAX.md).
+
 ### Modularity
 
 ```python
@@ -136,8 +138,6 @@ See JAXnet in action in your browser:
 [OCR with RNNs (to be fixed)](https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E),
 [ResNet](https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN) and
 [WaveNet](https://colab.research.google.com/drive/111cKRfwYX4YFuPH3FF4V46XLfsPG1icZ).
-
-If you are familiar with stax, read [this](STAX.md).
 
 ## Installation
 **This is a preview. Expect breaking changes!** Install with

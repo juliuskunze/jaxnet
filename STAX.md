@@ -1,21 +1,112 @@
-## What about [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
+## Why use JAXnet over [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
 
-JAXnet is independent of stax. Writing custom modules is a lot more concise in JAXnet. Advantages include:
- - **Automated parameter initialization**: Delegation to submodules, parameter container layout, output shape inference, random key splitting behind the scenes
- - **Automated parameter resolution**: Unpacking of parameters during execution, passing to submodules behind the scenes
- - Support for **parameter sharing and reuse**
- - Seamless use of **parameter-free functions as modules**
- - **User-friendly optimizer API**
+JAXnet improves user-friendliness and extensibility beyond that of Keras/TensorFlow/PyTorch,
+while retaining the functional API philosophy of stax. Advantages of JAXnet include:
 
-JAXnet provides all stax functionality, and more.
+### Effortless module definitions
 
-Compare the
-[Mnist Classifier](https://colab.research.google.com/drive/18kICTUbjqnfg5Lk3xFVQtUj6ahct9Vmv),
-[Mnist VAE](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g) and
-[ResNet](https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN#scrollTo=p0J1g94IpxK-)
-demos to their original stax implementations (linked in each).
+```python
+def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
+    @parametrized
+    def dense(inputs):
+        W = Parameter((inputs.shape[-1], out_dim), kernel_init, inputs)
+        b = Parameter((out_dim,), bias_init, inputs)
+        return np.dot(inputs, kernel) + bias
 
-### Porting from stax
+    return dense
+```
+
+The same in stax:
+
+```python
+def Dense(out_dim, W_init=glorot(), b_init=randn()):
+  def init_fun(rng, input_shape):
+    output_shape = input_shape[:-1] + (out_dim,)
+    k1, k2 = random.split(rng)
+    W, b = W_init(k1, (input_shape[-1], out_dim)), b_init(k2, (out_dim,))
+    return output_shape, (W, b)
+  def apply_fun(params, inputs, **kwargs):
+    W, b = params
+    return np.dot(inputs, W) + b
+  return init_fun, apply_fun
+```
+
+From the [Mnist VAE example](https://colab.research.google.com/drive/19web5SnmIFglLcnpXE34phiTY03v39-g):
+
+```python
+@parametrized
+def elbo(rng, images):
+    mu_z, sigmasq_z = encode(images)
+    logits_x = decode(gaussian_sample(rng, mu_z, sigmasq_z))
+    return bernoulli_logpdf(logits_x, images) - gaussian_kl(mu_z, sigmasq_z)
+```
+
+The same in stax:
+
+```python
+def elbo(rng, params, images):
+    enc_params, dec_params = params
+    mu_z, sigmasq_z = encode(enc_params, images)
+    logits_x = decode(dec_params, gaussian_sample(rng, mu_z, sigmasq_z))
+    return bernoulli_logpdf(logits_x, images) - gaussian_kl(mu_z, sigmasq_z)
+```
+
+JAXnet does not require boilerplate parameter initialization (output shape inference, random key splitting) and handling code (destructuring, passing to submodules).
+
+### User-friendly optimizer API
+
+```python
+opt = optimizers.Adam()
+state = opt.init(params)
+for _ in range(10):
+    state = opt.update(loss.apply, state, *next_batch(), jit=True)
+
+trained_params = opt.get_parameters(state)
+```
+
+The same in stax:
+
+```python
+opt_init, opt_update, get_params = optimizers.adam(0.001)
+
+@jit
+def update(i, opt_state, batch):
+    params = get_params(opt_state)
+    return opt_update(i, grad(loss)(params, batch), opt_state)
+
+state = opt_init(init_params)
+for _ in range(10):
+    state = update(next(itercount), state, *next_batch())
+
+trained_params = get_params(opt_state)
+```
+
+### Use parameter-free function seamlessly
+
+```python
+def fancy_relu(x):
+    return relu(x * x)
+
+layer = Sequential(Dense(10), fancy_relu)
+```
+
+The same in stax:
+
+```python
+def fancy_relu(x):
+    return relu(x * x)
+
+FancyRelu = elementwise(fancy_relu)
+
+layer = Serial(Dense(10), FancyRelu)
+```
+
+### Other advantages
+
+ - Streamlined support for parameter [sharing](API.md#parameter-sharing) and [reuse](API.md#parameter-reuse).
+ - JAXnet support all [stax functionality](blob/master/jaxnet/modules.py), and more.
+
+## Porting from stax
 
 - Add `@parametrized` to your `apply_fun`.
 - Remove the `params` argument.

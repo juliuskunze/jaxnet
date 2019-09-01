@@ -136,6 +136,8 @@ def DownRightShiftedConv(out_chan, filter_shape=(2, 2), strides=None, **kwargs):
         padded = np.pad(inputs, ((f_h - 1, 0), (f_w - 1, 0), (0, 0)))
         return Conv(out_chan, filter_shape, strides, 'VALID', **kwargs)(padded)
 
+    return down_right_shifted_conv
+
 
 def DownRightShiftedConvTranspose(out_chan, filter_shape=(2, 2), strides=None, **kwargs):
     @parametrized
