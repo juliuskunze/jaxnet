@@ -227,8 +227,9 @@ def test_wavenet():
 
     opt = optimizers.Adam(optimizers.exponential_decay(1e-3, decay_steps=1, decay_rate=0.999995))
     state = opt.init(loss.init_parameters(PRNGKey(0), batch))
-    state, loss = opt.update_and_get_loss(loss.apply, state, batch, jit=True)
+    state, train_loss = opt.update_and_get_loss(loss.apply, state, batch, jit=True)
     trained_params = opt.get_parameters(state)
+    assert () == train_loss.shape
 
 
 def test_reparametrized_submodule():
