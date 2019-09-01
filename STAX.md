@@ -1,6 +1,6 @@
 ## Why use JAXnet over [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
 
-JAXnet improves user-friendliness and extensibility beyond that of Keras/TensorFlow/PyTorch,
+JAXnet improves extensibility and user-friendliness to that of Keras/TensorFlow/PyTorch,
 while retaining the functional API philosophy of stax. Advantages of JAXnet include:
 
 ### Effortless module definitions
@@ -81,7 +81,7 @@ for _ in range(10):
 trained_params = get_params(opt_state)
 ```
 
-### Use parameter-free function seamlessly
+### Seamless use of parameter-free functions as modules
 
 ```python
 def fancy_relu(x):
@@ -104,15 +104,16 @@ layer = Serial(Dense(10), FancyRelu)
 ### Other advantages
 
  - Streamlined support for parameter [sharing](API.md#parameter-sharing) and [reuse](API.md#parameter-reuse).
- - JAXnet support all [stax functionality](blob/master/jaxnet/modules.py), and more.
+ - JAXnet [supports](blob/master/jaxnet/modules.py) all stax functionality, and more.
 
 ## Porting from stax
 
-- Add `@parametrized` to your `apply_fun`.
-- Remove the `params` argument.
-- Define or use parameters and layers inline.
-- Remove `init_params`.
-- Update layers:
+- Update custom layers:
+    - Add `@parametrized` to your `apply_fun`.
+    - Remove the `params` argument and define or use parameters and layers inline.
+    - Remove `init_params`.
+
+- Update predefined layers:
 
     |stax|JAXnet|
     |---|---|
@@ -123,4 +124,5 @@ layer = Serial(Dense(10), FancyRelu)
     |`FanOut`, `parallel`| Reformulate as `@parametrized` module. |
     |`shape_dependent`| Define layers inline, dependent on the input. |
     | All other layers | Stay the same. |
+
 - Update usage of your model as described in the [overview](README.md#Overview).
