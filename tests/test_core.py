@@ -3,18 +3,72 @@ from jax import numpy as np, jit, lax
 from jax.random import PRNGKey
 
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, save_params, \
-    load_params, Parameter, parameter, randn
+    load_params, Parameter, parameter, randn, GeneralParameter
 from tests.util import random_inputs, assert_params_equal, assert_dense_params_equal
 
 
 def test_parameter(parameter=parameter):
     scalar = parameter(lambda _: np.zeros(()))
-    param = scalar.init_parameters(PRNGKey(0))
+    params = scalar.init_parameters(PRNGKey(0))
 
-    assert np.zeros(()) == param
-    out = scalar.apply(param)
-    assert param == out
+    assert np.zeros(()) == params
+    out = scalar.apply(params)
+    assert params == out
 
+
+def test_parameter_submodule():
+    @parametrized
+    def wrapper(dummy_inputs):
+        return GeneralParameter(lambda _: np.zeros(()), dummy_inputs)
+
+    params = wrapper.init_parameters(PRNGKey(0), np.zeros(()))
+
+    assert np.zeros(()) == params.parameter
+    out = wrapper.apply(params, np.zeros(()))
+    assert params.parameter == out
+
+
+def test_parameter_with_multiple_arrays(parameter=parameter):
+    two_scalars = parameter(lambda _: (np.zeros(()), np.zeros(())))
+    params = two_scalars.init_parameters(PRNGKey(0))
+
+    a, b = params
+    assert np.zeros(()) == a
+    assert np.zeros(()) == b
+    out = two_scalars.apply(params)
+    assert params == out
+
+
+def test_parameter_with_multiple_arrays_submodule():
+    @parametrized
+    def wrapper(dummy_inputs):
+        return GeneralParameter(lambda _: (np.zeros(()), np.zeros(())), dummy_inputs)
+
+    params = wrapper.init_parameters(PRNGKey(0), np.zeros(()))
+
+    a, b = params.parameter
+    assert np.zeros(()) == a
+    assert np.zeros(()) == b
+    out = wrapper.apply(params, np.zeros(()))
+    assert params.parameter == out
+
+def test_submodule_order():
+    @parametrized
+    def wrapper(dummy_inputs):
+        a = Parameter((1,), zeros, dummy_inputs)
+        b = Parameter((2,), zeros, dummy_inputs)
+        c = Parameter((3,), zeros, dummy_inputs)
+        d = Parameter((4,), zeros, dummy_inputs)
+        e = Parameter((5,), zeros, dummy_inputs)
+        f = Parameter((6,), zeros, dummy_inputs)
+
+        return np.concatenate([a, f]) + np.concatenate([b, e]) + np.concatenate([c, d])
+
+    params = wrapper.init_parameters(PRNGKey(0), np.zeros(()))
+
+    assert np.zeros((1, )) == params.parameter0
+    out = wrapper.apply(params, np.zeros(()))
+    assert (7, ) == out.shape
 
 def test_external_submodule():
     layer = Dense(3)

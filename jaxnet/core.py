@@ -10,6 +10,7 @@ from jax.interpreters import xla, partial_eval as pe
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal
 from jax.lax.lax_control_flow import _promote_aval_rank
 from jax.random import PRNGKey
+import numpy as onp
 
 zip = safe_zip
 map = safe_map
@@ -323,7 +324,7 @@ class parametrized(jc.Primitive):
         permutation = parametrized._permutation_to_jaxpr_order(jaxpr, submodules_in_call_order)
         assert len(submodule_params) == len(permutation)
         submodule_param_pairs_in_call_order = list(submodule_params.items())
-        submodule_param_pairs_in_jaxpr_order = (submodule_param_pairs_in_call_order[i]
+        submodule_param_pairs_in_jaxpr_order = list(submodule_param_pairs_in_call_order[i]
                                                 for i in permutation)
         return OrderedDict(submodule_param_pairs_in_jaxpr_order)
 
@@ -443,6 +444,10 @@ class parametrized(jc.Primitive):
     _submodule_call_order_tracing = SubmoduleCallOrderTracing()
 
     @staticmethod
+    def inverse_permutation(permutation):
+        return onp.arange(len(permutation))[onp.argsort(permutation)]
+
+    @staticmethod
     def _permutation_to_jaxpr_order(jaxpr, submodules_in_call_order):
         """
         Needed to supply parameter values (in order of appearance in jaxpr) to the right submodule.
@@ -460,7 +465,7 @@ class parametrized(jc.Primitive):
         assert len(submodule_execution_index_by_name) == 0
         assert len(permutation) == len(submodules_in_call_order)
 
-        return permutation
+        return parametrized.inverse_permutation(permutation)
 
     @staticmethod
     def _partialize(flat_inputs):

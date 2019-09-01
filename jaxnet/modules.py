@@ -55,7 +55,7 @@ def Parameter(shape, init, dummy_inputs, name=None):
     return GeneralParameter(lambda rng: init(rng, shape), dummy_inputs=dummy_inputs, name=name)
 
 
-def GeneralParameter(init_parameter, dummy_inputs, name):
+def GeneralParameter(init_parameter, dummy_inputs, name=None):
     return parameter(init_parameter, name)(dummy_inputs)
 
 
