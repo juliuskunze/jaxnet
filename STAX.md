@@ -105,6 +105,7 @@ layer = Serial(Dense(10), FancyRelu)
 
  - Streamlined support for parameter [sharing](API.md#parameter-sharing) and [reuse](API.md#parameter-reuse).
  - [Support](https://github.com/JuliusKunze/jaxnet/blob/master/jaxnet/modules.py) for all stax functionality, and more.
+ - No need for `shape_dependent`, all submodules can depend on input shapes when defined inline.
 
 ## Porting from stax
 
