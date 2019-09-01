@@ -70,13 +70,13 @@ The same in stax:
 opt_init, opt_update, get_params = optimizers.adam(0.001)
 
 @jit
-def update(i, opt_state, batch):
-    params = get_params(opt_state)
-    return opt_update(i, grad(loss)(params, batch), opt_state)
+def update(i, state, batch):
+    params = get_params(state)
+    return opt_update(i, grad(loss)(params, batch), state)
 
-state = opt_init(init_params)
-for _ in range(10):
-    state = update(next(itercount), state, *next_batch())
+state = opt_init(params)
+for i in range(10):
+    state = update(i, state, *next_batch())
 
 trained_params = get_params(opt_state)
 ```
