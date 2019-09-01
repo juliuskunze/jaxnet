@@ -104,7 +104,7 @@ layer = Serial(Dense(10), FancyRelu)
 ### Other advantages
 
  - Streamlined support for parameter [sharing](API.md#parameter-sharing) and [reuse](API.md#parameter-reuse).
- - JAXnet [supports](blob/master/jaxnet/modules.py) all stax functionality, and more.
+ - [Support](https://github.com/JuliusKunze/jaxnet/blob/master/jaxnet/modules.py) for all stax functionality, and more.
 
 ## Porting from stax
 
