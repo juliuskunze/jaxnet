@@ -27,15 +27,6 @@ def test_Parameter_submodule():
     out = wrapper.apply(params, np.zeros(()))
     assert params.parameter == out
 
-def test_Parameter_submodule_dummy_input_message():
-    @parametrized
-    def wrapper(inputs):
-        return Parameter(lambda _: np.zeros(()))()
-
-    with pytest.raises(ValueError) as e:
-        wrapper.init_parameters(PRNGKey(0), np.zeros(()))
-
-    assert str(e)
 
 def test_Parameter_with_multiple_arrays(Parameter=Parameter):
     two_scalars = Parameter(lambda _: (np.zeros(()), np.zeros(())))
