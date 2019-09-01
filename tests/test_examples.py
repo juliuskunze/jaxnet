@@ -8,10 +8,10 @@ from jax.random import PRNGKey
 from examples.mnist_vae import gaussian_sample, bernoulli_logpdf, gaussian_kl
 from examples.wavenet import calculate_receptive_field, discretized_mix_logistic_loss, Wavenet
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, GRUCell, Rnn, \
-    softmax, softplus, parameter, glorot, randn, Parameter, Reparametrized, L2Regularized, \
+    softmax, softplus, Parameter, glorot, randn, parameter, Reparametrized, L2Regularized, \
     optimizers, logsoftmax
 from jaxnet.core import ShapedParametrized
-from tests.test_core import test_parameter
+from tests.test_core import test_Parameter
 from tests.test_modules import test_Dense_shape, Scaled
 
 
@@ -54,22 +54,22 @@ def test_reuse_api():
 
 
 def test_parameter_simplified_equivalent():
-    class parameter:
+    class Parameter:
         def __init__(self, init_parameter): self.init_parameter = init_parameter
 
         def apply(self, params, *inputs): return params
 
         def init_parameters(self, rng, *example_inputs): return self.init_parameter(rng)
 
-    test_parameter(parameter)
+    test_Parameter(Parameter)
 
 
 def test_parameter_Dense_equivalent():
     def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
         @parametrized
         def dense(inputs):
-            kernel = parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))(inputs)
-            bias = parameter(lambda rng: bias_init(rng, (out_dim,)))(inputs)
+            kernel = Parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))(inputs)
+            bias = Parameter(lambda rng: bias_init(rng, (out_dim,)))(inputs)
             return np.dot(inputs, kernel) + bias
 
         return dense
@@ -105,8 +105,8 @@ def test_Parameter_dense():
     def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
         @parametrized
         def dense(inputs):
-            kernel = Parameter((inputs.shape[-1], out_dim), kernel_init, inputs)
-            bias = Parameter((out_dim,), bias_init, inputs)
+            kernel = parameter((inputs.shape[-1], out_dim), kernel_init, inputs)
+            bias = parameter((out_dim,), bias_init, inputs)
             return np.dot(inputs, kernel) + bias
 
         return dense

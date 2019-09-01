@@ -40,11 +40,11 @@ shared_net = Sequential(layer, layer)
 
 ## How do modules work?
 
-`parameter` is the primitive module from which all modules are built.
+`Parameter` is the primitive module from which all modules are built.
 It is created from an initialization function:
 
 ```python
-scalar = parameter(lambda rng: np.zeros(()))
+scalar = Parameter(lambda rng: np.zeros(()))
 ```
 
 The module has a single parameter that is initialized via the given function:
@@ -60,10 +60,10 @@ Independent of any inputs, it returns these parameter values:
 assert param == scalar.apply(param)
 ```
 
-The `parameter` module is roughly equivalent to:
+The `Parameter` module is roughly equivalent to:
 
 ```python
-class parameter:
+class Parameter:
     def __init__(self, init_parameter): self.init_parameter = init_parameter
 
     def apply(self, params, *inputs): return params
@@ -77,24 +77,24 @@ All other modules are composed from this primitive via `@parametrized` functions
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parametrized
     def dense(inputs):
-        kernel = parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))(inputs)
-        bias = parameter(lambda rng: bias_init(rng, (out_dim,)))(inputs)
+        kernel = Parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))(inputs)
+        bias = Parameter(lambda rng: bias_init(rng, (out_dim,)))(inputs)
         return np.dot(inputs, kernel) + bias
 
     return dense
 ```
 
-(For technical reasons, `parameter` is required to be called with any dummy argument
+(For technical reasons, `Parameter` is required to be called with any dummy argument
 that depends on the module input.
 This is planned to be removed in a future version.)
-The `Parameter` function allows to express the same more concisely:
+The `parameter` function allows to express the same more concisely:
 
 ```python
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parametrized
     def dense(inputs):
-        kernel = Parameter((inputs.shape[-1], out_dim), kernel_init, inputs)
-        bias = Parameter((out_dim,), bias_init, inputs)
+        kernel = parameter((inputs.shape[-1], out_dim), kernel_init, inputs)
+        bias = parameter((out_dim,), bias_init, inputs)
         return np.dot(inputs, kernel) + bias
 
     return dense
@@ -127,8 +127,8 @@ This allows creation and usage of models as described in the [readme](README.md)
 Parameters can optionally be named (see next section for effect):
 
 ```python
-        kernel = Parameter((inputs.shape[-1], out_dim), kernel_init, inputs, 'kernel')
-        bias = Parameter((out_dim,), bias_init, inputs, 'name')
+        kernel = parameter((inputs.shape[-1], out_dim), kernel_init, inputs, 'kernel')
+        bias = parameter((out_dim,), bias_init, inputs, 'name')
 ```
 
 ## How are parameters named?
@@ -171,7 +171,7 @@ Reparametrization is similarly simple:
     def Scaled():
         @parametrized
         def learnable_scale(params):
-            return 2 * Parameter((), ones, params) * params
+            return 2 * parameter((), ones, params) * params
 
         return learnable_scale
 
@@ -195,7 +195,7 @@ Implementing `Reparametrized` is straight-forward:
 def Reparametrized(model, reparametrization_factory):
     @parametrized
     def reparametrized(*inputs):
-        params = parameter(lambda rng: model.init_parameters(rng, *inputs))(*inputs)
+        params = Parameter(lambda rng: model.init_parameters(rng, *inputs))(*inputs)
         transformed_params = tree_map(lambda param: reparametrization_factory()(param), params)
         return model.apply(transformed_params, *inputs)
 

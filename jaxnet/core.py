@@ -3,6 +3,7 @@ from pathlib import Path
 
 import dill
 import jax
+import numpy as onp
 from jax import lax, random, core as jc, linear_util as lu, \
     unzip2, unzip3, safe_zip, safe_map, partial, WrapHashably, tree_util, api_util
 from jax.abstract_arrays import ShapedArray
@@ -10,7 +11,6 @@ from jax.interpreters import xla, partial_eval as pe
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal
 from jax.lax.lax_control_flow import _promote_aval_rank
 from jax.random import PRNGKey
-import numpy as onp
 
 zip = safe_zip
 map = safe_map
@@ -297,7 +297,7 @@ class parametrized(jc.Primitive):
                 return params
 
         return self._init_parameters_dict(rng, *example_inputs,
-                                      reuse=reuse, reuse_only=reuse_only)
+                                          reuse=reuse, reuse_only=reuse_only)
 
     def _init_parameters_dict(self, rng, *example_inputs, reuse, reuse_only):
         flat_inputs, in_tree = tree_util.tree_flatten(example_inputs)
@@ -325,7 +325,7 @@ class parametrized(jc.Primitive):
         assert len(submodule_params) == len(permutation)
         submodule_param_pairs_in_call_order = list(submodule_params.items())
         submodule_param_pairs_in_jaxpr_order = list(submodule_param_pairs_in_call_order[i]
-                                                for i in permutation)
+                                                    for i in permutation)
         return OrderedDict(submodule_param_pairs_in_jaxpr_order)
 
     def init_parameters(self, rng, *example_inputs, reuse=None, reuse_only=False):
@@ -398,7 +398,8 @@ class parametrized(jc.Primitive):
         expanded_reuse = parametrized._expand_reuse_dict(reuse, *example_inputs)
 
         # TODO: optimization wrong, duplicate values, needs param adapter
-        return self.init_parameters(PRNGKey(0), *example_inputs, reuse=expanded_reuse, reuse_only=True)
+        return self.init_parameters(PRNGKey(0), *example_inputs, reuse=expanded_reuse,
+                                    reuse_only=True)
 
     def apply_from(self, reuse, *example_inputs, jit=False):
         params = self.parameters_from(reuse, *example_inputs)
@@ -473,7 +474,7 @@ class parametrized(jc.Primitive):
                    flat_inputs)
 
 
-class parameter(parametrized):
+class Parameter(parametrized):
     def __init__(self, init_parameter, name=None):
         self._init_parameter = init_parameter
 

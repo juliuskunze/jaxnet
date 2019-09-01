@@ -3,7 +3,7 @@ from jax import numpy as np, jit
 from jax.random import PRNGKey
 
 from jaxnet import Dense, Sequential, relu, Conv, Conv1D, ConvTranspose, Conv1DTranspose, flatten, \
-    MaxPool, AvgPool, zeros, GRUCell, Rnn, SumPool, Dropout, BatchNorm, parametrized, Parameter, \
+    MaxPool, AvgPool, zeros, GRUCell, Rnn, SumPool, Dropout, BatchNorm, parametrized, parameter, \
     Regularized, ones, Reparametrized, L2Regularized
 from tests.util import random_inputs, assert_params_equal
 
@@ -199,8 +199,8 @@ def test_Sequential_graceful_update_message():
 def test_Regularized():
     @parametrized
     def loss(inputs):
-        a = Parameter((), ones, inputs, 'a')
-        b = Parameter((), lambda rng, shape: 2 * np.ones(shape), inputs, 'b')
+        a = parameter((), ones, inputs, 'a')
+        b = parameter((), lambda rng, shape: 2 * np.ones(shape), inputs, 'b')
 
         return a + b
 
@@ -219,8 +219,8 @@ def test_Regularized():
 def test_L2Regularized():
     @parametrized
     def loss(inputs):
-        a = Parameter((), ones, inputs, 'a')
-        b = Parameter((), lambda rng, shape: 2 * np.ones(shape), inputs, 'b')
+        a = parameter((), ones, inputs, 'a')
+        b = parameter((), lambda rng, shape: 2 * np.ones(shape), inputs, 'b')
 
         return a + b
 
@@ -257,7 +257,7 @@ def test_Reparametrized_unparametrized_transform():
 
     @parametrized
     def net(inputs):
-        return Parameter((), lambda rng, shape: 2 * np.ones(shape), inputs)
+        return parameter((), lambda rng, shape: 2 * np.ones(shape), inputs)
 
     scared_params = Reparametrized(net, reparametrization_factory=lambda: doubled)
 
@@ -272,7 +272,7 @@ def test_Reparametrized_unparametrized_transform():
 def Scaled():
     @parametrized
     def learnable_scale(params):
-        return 2 * Parameter((), ones, params) * params
+        return 2 * parameter((), ones, params) * params
 
     return learnable_scale
 
@@ -280,7 +280,7 @@ def Scaled():
 def test_Reparametrized():
     @parametrized
     def net(inputs):
-        return Parameter((), lambda rng, shape: 2 * np.ones(shape), inputs)
+        return parameter((), lambda rng, shape: 2 * np.ones(shape), inputs)
 
     scaled_net = Reparametrized(net, reparametrization_factory=Scaled)
 

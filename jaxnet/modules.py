@@ -1,9 +1,9 @@
 import functools
 import itertools
 
-from jax import random, lax, numpy as np, scipy, tree_flatten, tree_map, tree_leaves
+from jax import random, lax, numpy as np, scipy, tree_map, tree_leaves
 
-from jaxnet.core import parametrized, parameter
+from jaxnet.core import parametrized, Parameter
 from jaxnet.initializers import glorot, randn, zeros, ones
 
 
@@ -47,16 +47,12 @@ def fastvar(x, axis, keepdims):
     return np.mean(x ** 2, axis, keepdims=keepdims) - np.mean(x, axis, keepdims=keepdims) ** 2
 
 
-def Parameter(shape, init, dummy_inputs, name=None):
+def parameter(shape, init, dummy_inputs, name=None):
     """
     :param dummy_inputs: If called as a submodule, dummy_inputs needs to depend on an input.
     See https://github.com/JuliusKunze/jaxnet/issues/1 for details.
     """
-    return GeneralParameter(lambda rng: init(rng, shape), dummy_inputs=dummy_inputs, name=name)
-
-
-def GeneralParameter(init_parameter, dummy_inputs, name=None):
-    return parameter(init_parameter, name)(dummy_inputs)
+    return Parameter(lambda rng: init(rng, shape), name=name)(dummy_inputs)
 
 
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
@@ -64,9 +60,9 @@ def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
 
     @parametrized
     def dense(inputs):
-        kernel = Parameter((inputs.shape[-1], out_dim), kernel_init, dummy_inputs=inputs,
+        kernel = parameter((inputs.shape[-1], out_dim), kernel_init, dummy_inputs=inputs,
                            name='kernel')
-        bias = Parameter((out_dim,), bias_init, dummy_inputs=inputs, name='bias')
+        bias = parameter((out_dim,), bias_init, dummy_inputs=inputs, name='bias')
         return np.dot(inputs, kernel) + bias
 
     return dense
@@ -113,8 +109,8 @@ def GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None, padding
         bias_shape = tuple(itertools.dropwhile(lambda x: x == 1,
                                                [out_chan if c == 'C' else 1 for c in out_spec]))
 
-        kernel = Parameter(kernel_shape, kernel_init, inputs, 'kernel')
-        bias = Parameter(bias_shape, bias_init, inputs, 'bias')
+        kernel = parameter(kernel_shape, kernel_init, inputs, 'kernel')
+        bias = parameter(bias_shape, bias_init, inputs, 'bias')
         return lax.conv_general_dilated(inputs, kernel, strides, padding, one, dilation,
                                         dimension_numbers) + bias
 
@@ -146,8 +142,8 @@ def GeneralConvTranspose(dimension_numbers, out_chan, filter_shape,
         bias_shape = tuple(
             itertools.dropwhile(lambda x: x == 1, [out_chan if c == 'C' else 1 for c in out_spec]))
 
-        kernel = Parameter(kernel_shape, kernel_init, inputs, 'kernel')
-        bias = Parameter(bias_shape, bias_init, inputs, 'bias')
+        kernel = parameter(kernel_shape, kernel_init, inputs, 'kernel')
+        bias = parameter(bias_shape, bias_init, inputs, 'bias')
         return lax.conv_transpose(inputs, kernel, strides, padding,
                                   dimension_numbers) + bias
 
@@ -195,7 +191,7 @@ def GRUCell(carry_size, param_init):
     @parametrized
     def gru_cell(carry, x):
         def param(name):
-            return Parameter((x.shape[1] + carry_size, carry_size), param_init, carry, name)
+            return parameter((x.shape[1] + carry_size, carry_size), param_init, carry, name)
 
         both = np.concatenate((x, carry), axis=1)
         update = sigmoid(np.dot(both, param('update_kernel')))
@@ -261,8 +257,8 @@ def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,
         z = (x - mean) / np.sqrt(var + epsilon)
         shape = tuple(d for i, d in enumerate(x.shape) if i not in axis)
 
-        scaled = z * Parameter(shape, gamma_init, x, 'gamma')[ed] if scale else z
-        return scaled + Parameter(shape, beta_init, x, 'beta')[ed] if center else scaled
+        scaled = z * parameter(shape, gamma_init, x, 'gamma')[ed] if scale else z
+        return scaled + parameter(shape, beta_init, x, 'beta')[ed] if center else scaled
 
     return batch_norm
 
@@ -270,8 +266,9 @@ def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,
 def Regularized(loss_model, regularizer):
     @parametrized
     def regularized(*inputs):
-        params = parameter(lambda rng: loss_model.init_parameters(rng, *inputs), 'model')(inputs)
-        regularization_loss = sum(map(lambda param: np.sum(regularizer(param)), tree_leaves(params)))
+        params = Parameter(lambda rng: loss_model.init_parameters(rng, *inputs), 'model')(inputs)
+        regularization_loss = sum(
+            map(lambda param: np.sum(regularizer(param)), tree_leaves(params)))
         return loss_model.apply(params, *inputs) + regularization_loss
 
     return regularized
@@ -284,7 +281,7 @@ def L2Regularized(loss_model, scale):
 def Reparametrized(model, reparametrization_factory, init_transform=lambda x: x):
     @parametrized
     def reparametrized(*inputs):
-        params = parameter(lambda rng: init_transform(model.init_parameters(rng, *inputs)),
+        params = Parameter(lambda rng: init_transform(model.init_parameters(rng, *inputs)),
                            'model')(*inputs)
         transformed_params = tree_map(lambda param: reparametrization_factory()(param), params)
         return model.apply(transformed_params, *inputs)

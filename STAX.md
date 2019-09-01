@@ -9,8 +9,8 @@ while retaining the functional API philosophy of stax. Advantages of JAXnet incl
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parametrized
     def dense(inputs):
-        W = Parameter((inputs.shape[-1], out_dim), kernel_init, inputs)
-        b = Parameter((out_dim,), bias_init, inputs)
+        W = parameter((inputs.shape[-1], out_dim), kernel_init, inputs)
+        b = parameter((out_dim,), bias_init, inputs)
         return np.dot(inputs, kernel) + bias
 
     return dense

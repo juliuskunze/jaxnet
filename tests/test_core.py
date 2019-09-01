@@ -3,12 +3,12 @@ from jax import numpy as np, jit, lax
 from jax.random import PRNGKey
 
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, save_params, \
-    load_params, Parameter, parameter, randn, GeneralParameter
+    load_params, parameter, Parameter, randn
 from tests.util import random_inputs, assert_params_equal, assert_dense_params_equal
 
 
-def test_parameter(parameter=parameter):
-    scalar = parameter(lambda _: np.zeros(()))
+def test_Parameter(Parameter=Parameter):
+    scalar = Parameter(lambda _: np.zeros(()))
     params = scalar.init_parameters(PRNGKey(0))
 
     assert np.zeros(()) == params
@@ -16,10 +16,10 @@ def test_parameter(parameter=parameter):
     assert params == out
 
 
-def test_parameter_submodule():
+def test_Parameter_submodule():
     @parametrized
     def wrapper(dummy_inputs):
-        return GeneralParameter(lambda _: np.zeros(()), dummy_inputs)
+        return Parameter(lambda _: np.zeros(()))(dummy_inputs)
 
     params = wrapper.init_parameters(PRNGKey(0), np.zeros(()))
 
@@ -27,9 +27,18 @@ def test_parameter_submodule():
     out = wrapper.apply(params, np.zeros(()))
     assert params.parameter == out
 
+def test_Parameter_submodule_dummy_input_message():
+    @parametrized
+    def wrapper(inputs):
+        return Parameter(lambda _: np.zeros(()))()
 
-def test_parameter_with_multiple_arrays(parameter=parameter):
-    two_scalars = parameter(lambda _: (np.zeros(()), np.zeros(())))
+    with pytest.raises(ValueError) as e:
+        wrapper.init_parameters(PRNGKey(0), np.zeros(()))
+
+    assert str(e)
+
+def test_Parameter_with_multiple_arrays(Parameter=Parameter):
+    two_scalars = Parameter(lambda _: (np.zeros(()), np.zeros(())))
     params = two_scalars.init_parameters(PRNGKey(0))
 
     a, b = params
@@ -42,7 +51,7 @@ def test_parameter_with_multiple_arrays(parameter=parameter):
 def test_parameter_with_multiple_arrays_submodule():
     @parametrized
     def wrapper(dummy_inputs):
-        return GeneralParameter(lambda _: (np.zeros(()), np.zeros(())), dummy_inputs)
+        return Parameter(lambda _: (np.zeros(()), np.zeros(())))(dummy_inputs)
 
     params = wrapper.init_parameters(PRNGKey(0), np.zeros(()))
 
@@ -52,23 +61,25 @@ def test_parameter_with_multiple_arrays_submodule():
     out = wrapper.apply(params, np.zeros(()))
     assert params.parameter == out
 
+
 def test_submodule_order():
     @parametrized
     def wrapper(dummy_inputs):
-        a = Parameter((1,), zeros, dummy_inputs)
-        b = Parameter((2,), zeros, dummy_inputs)
-        c = Parameter((3,), zeros, dummy_inputs)
-        d = Parameter((4,), zeros, dummy_inputs)
-        e = Parameter((5,), zeros, dummy_inputs)
-        f = Parameter((6,), zeros, dummy_inputs)
+        a = parameter((1,), zeros, dummy_inputs)
+        b = parameter((2,), zeros, dummy_inputs)
+        c = parameter((3,), zeros, dummy_inputs)
+        d = parameter((4,), zeros, dummy_inputs)
+        e = parameter((5,), zeros, dummy_inputs)
+        f = parameter((6,), zeros, dummy_inputs)
 
         return np.concatenate([a, f]) + np.concatenate([b, e]) + np.concatenate([c, d])
 
     params = wrapper.init_parameters(PRNGKey(0), np.zeros(()))
 
-    assert np.zeros((1, )) == params.parameter0
+    assert np.zeros((1,)) == params.parameter0
     out = wrapper.apply(params, np.zeros(()))
-    assert (7, ) == out.shape
+    assert (7,) == out.shape
+
 
 def test_external_submodule():
     layer = Dense(3)
@@ -348,7 +359,7 @@ def test_scan_parametrized_cell_without_params():
 def test_scan_parametrized_cell():
     @parametrized
     def cell(carry, x):
-        scale = Parameter((2,), zeros, carry)
+        scale = parameter((2,), zeros, carry)
         return scale * np.array([2]) * carry * x, scale * np.array([2]) * carry * x
 
     @parametrized
@@ -397,7 +408,7 @@ def test_input_dependent_nested_modules():
 def test_submodule_without_inputs():
     @parametrized
     def scalar():
-        return parameter(lambda: np.zeros(()))
+        return Parameter(lambda: np.zeros(()))
 
     params = scalar.init_parameters(PRNGKey(0))
     assert_params_equal((), params)
@@ -427,12 +438,12 @@ def test_nested_module_without_inputs():
 def test_param_and_submodule_mixed():
     @parametrized
     def linear_map(inputs):
-        kernel = Parameter((inputs.shape[-1], 2), zeros, inputs, 'kernel')
+        kernel = parameter((inputs.shape[-1], 2), zeros, inputs, 'kernel')
         return np.dot(inputs, kernel)
 
     @parametrized
     def dense(inputs):
-        return linear_map(inputs) + Parameter((2,), zeros, inputs, 'bias')
+        return linear_map(inputs) + parameter((2,), zeros, inputs, 'bias')
 
     inputs = np.zeros((1, 3))
 
@@ -450,8 +461,8 @@ def test_param_and_submodule_mixed():
 def test_mixed_up_execution_order():
     @parametrized
     def dense(inputs):
-        bias = Parameter((2,), zeros, inputs, 'bias')
-        kernel = Parameter((inputs.shape[-1], 2), zeros, inputs, 'kernel')
+        bias = parameter((2,), zeros, inputs, 'bias')
+        kernel = parameter((inputs.shape[-1], 2), zeros, inputs, 'kernel')
         return np.dot(inputs, kernel) + bias
 
     inputs = np.zeros((1, 3))
@@ -607,7 +618,7 @@ def test_params_from_shared_submodules2():
 def test_tuple_input():
     @parametrized
     def net(input_dict):
-        return input_dict[0] * input_dict[1] * Parameter((), zeros, input_dict[0])
+        return input_dict[0] * input_dict[1] * parameter((), zeros, input_dict[0])
 
     inputs = (np.zeros((2,)), np.zeros((2,)))
     params = net.init_parameters(PRNGKey(0), inputs)
@@ -619,7 +630,7 @@ def test_tuple_input():
 def test_dict_input():
     @parametrized
     def net(input_dict):
-        return input_dict['a'] * input_dict['b'] * Parameter((), zeros, input_dict['a'])
+        return input_dict['a'] * input_dict['b'] * parameter((), zeros, input_dict['a'])
 
     inputs = {'a': np.zeros((2,)), 'b': np.zeros((2,))}
     params = net.init_parameters(PRNGKey(0), inputs)
@@ -630,7 +641,7 @@ def test_dict_input():
 def test_tuple_output():
     @parametrized
     def net(inputs):
-        return inputs, inputs  # * Parameter((), zeros, inputs)
+        return inputs, inputs * parameter((), zeros, inputs)
 
     inputs = np.zeros((1, 3))
     params = net.init_parameters(PRNGKey(0), inputs)
@@ -661,8 +672,8 @@ def test_tuple_output_nested():
 def test_submodule_init_parameters_is_random():
     @parametrized
     def dense(inputs):
-        a = Parameter((), randn(), inputs, 'a')
-        b = Parameter((), randn(), inputs, 'b')
+        a = parameter((), randn(), inputs, 'a')
+        b = parameter((), randn(), inputs, 'b')
 
         return a + b
 
