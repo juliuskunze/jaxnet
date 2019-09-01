@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from jax.random import PRNGKey
 
 from jaxnet import *

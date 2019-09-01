@@ -1,7 +1,7 @@
 ## Why use JAXnet over [stax](https://github.com/google/jax/blob/master/jax/experimental/stax.py)?
 
-JAXnet improves extensibility and user-friendliness to that of Keras/TensorFlow/PyTorch,
-while retaining the functional API philosophy of stax. Advantages of JAXnet include:
+JAXnet improves extensibility and user-friendliness to that of Keras/TensorFlow2/PyTorch,
+while retaining the functional character of stax. Advantages of JAXnet include:
 
 ### Effortless module definitions
 
