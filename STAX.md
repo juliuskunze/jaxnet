@@ -6,12 +6,12 @@ while retaining the functional character of stax. Advantages of JAXnet include:
 ### Effortless module definitions
 
 ```python
-def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
+def Dense(out_dim, W_init=glorot(), b_init=randn()):
     @parametrized
     def dense(inputs):
-        W = parameter((inputs.shape[-1], out_dim), kernel_init, inputs)
-        b = parameter((out_dim,), bias_init, inputs)
-        return np.dot(inputs, kernel) + bias
+        W = parameter((inputs.shape[-1], out_dim), W_init, inputs)
+        b = parameter((out_dim,), b_init, inputs)
+        return np.dot(inputs, W) + b
 
     return dense
 ```
