@@ -1,10 +1,10 @@
-import setuptools
 import pathlib
 
+import setuptools
 
 setuptools.setup(
     name='jaxnet',
-    version='0.2.1',
+    version='0.2.2',
     description='Neural Nets for JAX',
     url='http://github.com/JuliusKunze/jaxnet',
     long_description=pathlib.Path('README.md').read_text(),

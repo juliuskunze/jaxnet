@@ -126,4 +126,4 @@ layer = Serial(Dense(10), FancyRelu)
     |`shape_dependent`| Define layers inline, dependent on the input. |
     | All other layers | Stay the same. |
 
-- Update usage of your model as described in the [overview](README.md#Overview).
+- Update usage of your model as described in the [readme](README.md#immutable-weights).
