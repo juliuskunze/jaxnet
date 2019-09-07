@@ -5,7 +5,7 @@ from jax.random import PRNGKey
 from jaxnet import Dense, Sequential, relu, Conv, Conv1D, ConvTranspose, Conv1DTranspose, flatten, \
     MaxPool, AvgPool, zeros, GRUCell, Rnn, SumPool, Dropout, BatchNorm, parametrized, parameter, \
     Regularized, ones, Reparametrized, L2Regularized
-from tests.util import random_inputs, assert_params_equal
+from tests.util import random_inputs, assert_parameters_equal
 
 
 def test_Dense_shape(Dense=Dense):
@@ -13,7 +13,7 @@ def test_Dense_shape(Dense=Dense):
     inputs = np.zeros((1, 3))
 
     params = net.init_parameters(PRNGKey(0), inputs)
-    assert_params_equal((np.zeros((3, 2)), np.zeros(2)), params)
+    assert_parameters_equal((np.zeros((3, 2)), np.zeros(2)), params)
 
     out = net.apply(params, inputs)
     assert np.array_equal(np.zeros((1, 2)), out)
@@ -22,7 +22,7 @@ def test_Dense_shape(Dense=Dense):
     assert np.array_equal(out, out_)
 
     params_ = net.shaped(inputs).init_parameters(PRNGKey(0))
-    assert_params_equal(params, params_)
+    assert_parameters_equal(params, params_)
 
 
 @pytest.mark.parametrize('channels', [2, 3])

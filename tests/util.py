@@ -11,7 +11,7 @@ def random_inputs(input_shape, rng=PRNGKey(0)):
         raise TypeError(type(input_shape))
 
 
-def assert_params_equal(p, p_):
+def assert_parameters_equal(p, p_):
     if isinstance(p, np.ndarray):
         assert np.array_equal(p, p_)
         return
@@ -25,13 +25,13 @@ def assert_params_equal(p, p_):
 
     if isinstance(p, dict):
         for k, e in p.items():
-            assert_params_equal(e, p_[k])
+            assert_parameters_equal(e, p_[k])
     else:
         for e, e_ in zip(p, p_):
-            assert_params_equal(e, e_)
+            assert_parameters_equal(e, e_)
 
 
-def assert_dense_params_equal(p, p_):
+def assert_dense_parameters_equal(p, p_):
     assert len(p) == len(p_)
     assert np.array_equal(p.kernel, p_.kernel)
     assert np.array_equal(p.bias, p_.bias)

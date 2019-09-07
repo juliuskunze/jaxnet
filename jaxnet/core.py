@@ -16,13 +16,13 @@ zip = safe_zip
 map = safe_map
 
 
-def _call_init(primitive, rng, submodule_params, params,
+def _call_init(primitive, rng, submodule_params, parameters,
                jaxpr, consts, freevar_vals, in_vals, **kwargs):
     jaxpr, = jaxpr
     consts, = consts
     freevar_vals, = freevar_vals
     f = lu.wrap_init(partial(jc.eval_jaxpr, jaxpr, consts, freevar_vals))
-    return primitive.bind(f, *in_vals, **params), submodule_params
+    return primitive.bind(f, *in_vals, **parameters), submodule_params
 
 
 def _scan_init(rng, submodule_params_dict, consts, init, xs, forward, length, jaxpr, reuse,
@@ -43,7 +43,7 @@ def _scan_init(rng, submodule_params_dict, consts, init, xs, forward, length, ja
         submodule_params = ()
     else:
         primitive, = submodule_params_dict.keys()
-        submodule_params = (primitive._params_namedtuple(submodule_params_dict[primitive]),)
+        submodule_params = (primitive._parameters_namedtuple(submodule_params_dict[primitive]),)
 
     def body_fun(i, vals):
         idx = i if forward else length - i - 1
@@ -66,7 +66,7 @@ def _scan_apply(submodule_params_iter, consts, init, xs, forward, length, jaxpr)
     ys_aval = _promote_aval_rank(length, y_aval)
 
     # TODO fix param sharing
-    cell_params = (submodule_params_iter.get_params(None),) if len(
+    cell_params = (submodule_params_iter.get_parameters(None),) if len(
         submodule_params_iter.submodule_params) > 0 else ()
 
     def body_fun(i, vals):
@@ -90,17 +90,17 @@ def _get_primitive_init(primitive, reuse, reuse_only):
     if isinstance(primitive, parametrized):
         def traced_submodule_init(rng, submodule_params_dict, *inputs):
             if primitive not in submodule_params_dict:
-                params_dict = primitive._init_or_reuse_params_dict(rng, *inputs, reuse=reuse,
-                                                                   reuse_only=reuse_only)
+                params_dict = primitive._init_or_reuse_parameters_dict(rng, *inputs, reuse=reuse,
+                                                                       reuse_only=reuse_only)
                 submodule_params_dict[primitive] = params_dict
-            submodule_params = primitive._params_namedtuple(submodule_params_dict[primitive])
+            submodule_params = primitive._parameters_namedtuple(submodule_params_dict[primitive])
             out, _ = jax.tree_flatten(primitive.apply(submodule_params, *inputs))
             return out, submodule_params_dict
 
         return traced_submodule_init
 
-    return (lambda _, submodule_params, *in_vals, **params:
-            (primitive.bind(*in_vals, **params), submodule_params))
+    return (lambda _, submodule_params, *in_vals, **parameters:
+            (primitive.bind(*in_vals, **parameters), submodule_params))
 
 
 def _get_submodule_params(rng, jaxpr, consts, freevar_vals, submodule_params, *args, reuse,
@@ -152,21 +152,21 @@ apply_rules = {lax.scan_p: _scan_apply}
 
 
 class ApplyTrace(jc.Trace):
-    class SubmoduleParamsIterator:
-        def __init__(self, submodule_params):
-            self.submodule_params = submodule_params
+    class SubmoduleParameterIterator:
+        def __init__(self, submodule_parameters):
+            self.submodule_parameters = submodule_parameters
             self.index = 0
-            self.submodule_params_by_primitive = {}
+            self.submodule_parameters_by_primitive = {}
 
-        def get_params(self, primitive):
-            params = self.submodule_params_by_primitive.get(primitive)
-            if params is not None:
-                return params
+        def get_parameters(self, primitive):
+            parameters = self.submodule_parameters_by_primitive.get(primitive)
+            if parameters is not None:
+                return parameters
 
-            params = self.submodule_params[self.index]
+            parameters = self.submodule_parameters[self.index]
             self.index += 1
-            self.submodule_params_by_primitive[primitive] = params
-            return params
+            self.submodule_parameters_by_primitive[primitive] = parameters
+            return parameters
 
     class Tracer(jc.Tracer):
         __slots__ = ['val', 'submodule_params_iter']
@@ -190,7 +190,7 @@ class ApplyTrace(jc.Trace):
 
             submodule_param_iter = None
             for iter in submodule_params_iters:
-                if isinstance(iter, ApplyTrace.SubmoduleParamsIterator):
+                if isinstance(iter, ApplyTrace.SubmoduleParameterIterator):
                     assert submodule_param_iter is None or iter is submodule_param_iter
                     submodule_param_iter = iter
                 else:
@@ -208,24 +208,24 @@ class ApplyTrace(jc.Trace):
     def sublift(self, val):
         return ApplyTrace.Tracer(self, {}, val.val)
 
-    def process_primitive(self, primitive, tracers, params):
+    def process_primitive(self, primitive, tracers, parameters):
         flat_inputs, submodule_params_iter = ApplyTrace.Tracer.merge(tracers)
         if primitive in apply_rules:
-            out = apply_rules[primitive](submodule_params_iter, *flat_inputs, **params)
+            out = apply_rules[primitive](submodule_params_iter, *flat_inputs, **parameters)
         elif isinstance(primitive, parametrized):
-            out = primitive.apply(submodule_params_iter.get_params(primitive), *flat_inputs)
+            out = primitive.apply(submodule_params_iter.get_parameters(primitive), *flat_inputs)
             out, _ = jax.tree_flatten(out)
         else:
-            out = primitive.bind(*flat_inputs, **params)
+            out = primitive.bind(*flat_inputs, **parameters)
         if primitive.multiple_results:
             return map(partial(ApplyTrace.Tracer, self, submodule_params_iter), out)
         else:
             return ApplyTrace.Tracer(self, submodule_params_iter, out)
 
-    def process_call(self, call_primitive, f, tracers, params):
+    def process_call(self, call_primitive, f, tracers, parameters):
         flat_inputs, submodule_params_iter = ApplyTrace.Tracer.merge(tracers)
         f = ApplyTrace._apply_subtrace(f, self.master, WrapHashably(submodule_params_iter))
-        flat_outs = call_primitive.bind(f, *flat_inputs, **params)
+        flat_outs = call_primitive.bind(f, *flat_inputs, **parameters)
         return map(partial(ApplyTrace.Tracer, self, submodule_params_iter), flat_outs)
 
     @staticmethod
@@ -234,7 +234,7 @@ class ApplyTrace(jc.Trace):
         submodule_params = submodule_params.val
         trace = ApplyTrace(master, jc.cur_sublevel())
         outs = yield map(partial(ApplyTrace.Tracer, trace,
-                                 ApplyTrace.SubmoduleParamsIterator(submodule_params)), vals), {}
+                                 ApplyTrace.SubmoduleParameterIterator(submodule_params)), vals), {}
         out_tracers = map(trace.full_raise, outs)
         yield [t.val for t in out_tracers]
 
@@ -250,8 +250,8 @@ class parametrized(jc.Primitive):
 
         @lu.wrap_init
         def init_and_apply(rng, *inputs):
-            params = self.init_parameters(rng, *inputs)
-            return self.apply(params, *inputs)
+            parameters = self.init_parameters(rng, *inputs)
+            return self.apply(parameters, *inputs)
 
         self._init_and_apply = init_and_apply
         # Avoids running trace_to_jaxpr twice during initialization just for out_tree:
@@ -290,11 +290,11 @@ class parametrized(jc.Primitive):
         flat_outs = self.bind(*flat_inputs)
         return jax.tree_unflatten(self._out_tree(*inputs), flat_outs)
 
-    def _init_or_reuse_params_dict(self, rng, *example_inputs, reuse=None, reuse_only=False):
+    def _init_or_reuse_parameters_dict(self, rng, *example_inputs, reuse=None, reuse_only=False):
         if reuse:
-            params = reuse.get(self)
-            if params:
-                return params
+            parameters = reuse.get(self)
+            if parameters:
+                return parameters
 
         return self._init_parameters_dict(rng, *example_inputs,
                                           reuse=reuse, reuse_only=reuse_only)
@@ -329,24 +329,24 @@ class parametrized(jc.Primitive):
         return OrderedDict(submodule_param_pairs_in_jaxpr_order)
 
     def init_parameters(self, rng, *example_inputs, reuse=None, reuse_only=False):
-        d = self._init_or_reuse_params_dict(rng, *example_inputs, reuse=reuse,
-                                            reuse_only=reuse_only)
+        d = self._init_or_reuse_parameters_dict(rng, *example_inputs, reuse=reuse,
+                                                reuse_only=reuse_only)
 
-        return self._params_namedtuple(d)
+        return self._parameters_namedtuple(d)
 
-    def _params_namedtuple(self, params_dict):
-        if isinstance(params_dict, tuple):  # happens on reuse
-            return params_dict
+    def _parameters_namedtuple(self, parameters_dict):
+        if isinstance(parameters_dict, tuple):  # happens on reuse
+            return parameters_dict
 
-        if not isinstance(params_dict, dict):
-            assert hasattr(params_dict, 'shape')
+        if not isinstance(parameters_dict, dict):
+            assert hasattr(parameters_dict, 'shape')
 
-            return params_dict
+            return parameters_dict
 
         index_by_prefix = defaultdict(lambda: 0)
 
-        prefix_param_pairs = [(module._name, module._params_namedtuple(params))
-                              for module, params in params_dict.items()]
+        prefix_param_pairs = [(module._name, module._parameters_namedtuple(parameters))
+                              for module, parameters in parameters_dict.items()]
 
         prefix_counter = Counter([prefix for prefix, _ in prefix_param_pairs])
 
@@ -361,20 +361,21 @@ class parametrized(jc.Primitive):
         Parameters = namedtuple(self._name, params.keys())
         return Parameters(**params)
 
-    def apply(self, params, *inputs, jit=False):
-        def _apply(params, *inputs):
+    def apply(self, parameters, *inputs, jit=False):
+        def _apply(parameters, *inputs):
             def inner():
                 flat_inputs, in_tree = tree_util.tree_flatten(inputs)
                 flat_fun, out_tree = api_util.flatten_fun_nokwargs(self._wrapped_fun, in_tree)
                 with jc.new_master(ApplyTrace) as master:
-                    flat_fun = ApplyTrace._apply_subtrace(flat_fun, master, WrapHashably(params))
+                    flat_fun = ApplyTrace._apply_subtrace(flat_fun, master,
+                                                          WrapHashably(parameters))
                     flat_outputs = flat_fun.call_wrapped(*inputs)
                     del master
                 return tree_util.tree_unflatten(out_tree(), flat_outputs)
 
             return parametrized._submodule_call_order_tracing.nested(self, inner)
 
-        return (jax.jit(_apply) if jit else _apply)(params, *inputs)
+        return (jax.jit(_apply) if jit else _apply)(parameters, *inputs)
 
     def __str__(self):
         return self.name
@@ -383,14 +384,14 @@ class parametrized(jc.Primitive):
     def _expand_reuse_dict(reuse, *example_inputs):
         expanded_reuse = {}
 
-        for module, params in reuse.items():
+        for module, parameters in reuse.items():
             if isinstance(module, parametrized):
                 module = module.shaped(*example_inputs)
 
             if not isinstance(module, ShapedParametrized):
                 raise ValueError('Keys for reuse must be parametrized or ShapedParametrized.')
 
-            expanded_reuse.update(module._get_reuse_dict(params))
+            expanded_reuse.update(module._get_reuse_dict(parameters))
 
         return expanded_reuse
 
@@ -402,8 +403,8 @@ class parametrized(jc.Primitive):
                                     reuse_only=True)
 
     def apply_from(self, reuse, *example_inputs, jit=False):
-        params = self.parameters_from(reuse, *example_inputs)
-        return (jax.jit(self.apply) if jit else self.apply)(params, *example_inputs)
+        parameters = self.parameters_from(reuse, *example_inputs)
+        return (jax.jit(self.apply) if jit else self.apply)(parameters, *example_inputs)
 
     def __eq__(self, obj):
         return isinstance(obj, parametrized) and self.name == obj.name
@@ -478,11 +479,11 @@ class Parameter(parametrized):
     def __init__(self, init_parameter, name=None):
         self._init_parameter = init_parameter
 
-        super().__init__(lambda params, *_: params, name=name if name else 'parameter')
+        super().__init__(lambda parameter, *_: parameter, name=name if name else 'parameter')
 
-    def apply(self, params, *inputs, jit=False):
+    def apply(self, parameters, *inputs, jit=False):
         # no need for jit:
-        return self._fun(params, *inputs)
+        return self._fun(parameters, *inputs)
 
     def _init_parameters_dict(self, rng, *example_inputs, reuse, reuse_only):
         if reuse_only:
@@ -499,36 +500,37 @@ class ShapedParametrized:
 
     def _params_dict(self):
         if self._cached_params_dict is None:
-            self._cached_params_dict = self.parametrized._init_or_reuse_params_dict(
+            self._cached_params_dict = self.parametrized._init_or_reuse_parameters_dict(
                 PRNGKey(0), *self.example_inputs)
 
         return self._cached_params_dict
 
     @staticmethod
-    def _get_reuse_dict_form(module, params, params_dict):
-        assert len(params_dict) == len(params)
-        d = {module: params}
+    def _get_reuse_dict_form(module, parameters, params_dict):
+        assert len(params_dict) == len(parameters)
+        d = {module: parameters}
 
         if not isinstance(params_dict, dict): return d
 
-        for ((module, submodule_params_dict), submodule_params) in zip(params_dict.items(), params):
+        for ((module, submodule_params_dict), submodule_params) in zip(params_dict.items(),
+                                                                       parameters):
             if isinstance(module, parametrized):
                 d[module] = submodule_params
                 reuse_dict = ShapedParametrized._get_reuse_dict_form(
                     module, submodule_params, params_dict=submodule_params_dict)
-                for module, params in reuse_dict.items():
+                for module, parameters in reuse_dict.items():
                     params_ = d.get(module)
-                    if params_ is not None and not params is params_:
+                    if params_ is not None and not parameters is params_:
                         # TODO: create params_from_overlapping
-                        raise ValueError("Provided reuse params contradict each other."
+                        raise ValueError("Provided reuse parameters contradict each other."
                                          "Use params_from_overlapping if intended.")
 
                 d.update(reuse_dict)
 
         return d
 
-    def _get_reuse_dict(self, params):
-        return ShapedParametrized._get_reuse_dict_form(self.parametrized, params,
+    def _get_reuse_dict(self, parameters):
+        return ShapedParametrized._get_reuse_dict_form(self.parametrized, parameters,
                                                        self._params_dict())
 
     def apply_from(self, reuse, jit=False):
@@ -538,9 +540,9 @@ class ShapedParametrized:
         return self.parametrized.init_parameters(rng, *self.example_inputs)
 
 
-def save_params(params, path: Path):
+def save_params(parameters, path: Path):
     with path.open('wb') as file:
-        dill.dump(params, file)
+        dill.dump(parameters, file)
 
 
 def load_params(path: Path):
