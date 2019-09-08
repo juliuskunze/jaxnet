@@ -608,7 +608,7 @@ def test_parameters_from_diamond_shared_submodules():
 @pytest.mark.skip('TODO')
 def test_diamond_shared_submodules():
     p = Parameter(lambda rng: np.ones(()))
-    a = Sequential(p)
+    a = Sequential(Sequential(p))
     b = Sequential(p)
 
     @parametrized
@@ -617,7 +617,7 @@ def test_diamond_shared_submodules():
 
     params = net.init_parameters(PRNGKey(0), np.zeros(()))
     assert 1 == len(params)
-    assert np.array_equal(np.ones(()), params)
+    assert np.array_equal(np.ones(()), params.sequential)
     a, b = net.apply(params, np.zeros(()))
     assert np.array_equal(np.ones(()), a)
     assert np.array_equal(np.ones(()), b)

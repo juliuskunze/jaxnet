@@ -35,9 +35,9 @@ def _scan_init(rng, submodule_params_dict, consts, init, xs, forward, length, ja
     ys_aval = _promote_aval_rank(length, y_aval)
 
     x = _index_arrays(0, x_aval, xs)
-    submodule_params_dict = _get_submodule_params(rng, jaxpr.jaxpr, jaxpr.literals, (),
-                                                  submodule_params_dict, consts, init, x,
-                                                  reuse=reuse, reuse_only=reuse_only)
+    submodule_params_dict = _get_submodule_parameters(rng, jaxpr.jaxpr, jaxpr.literals, (),
+                                                      submodule_params_dict, consts, init, x,
+                                                      reuse=reuse, reuse_only=reuse_only)
 
     if len(submodule_params_dict) == 0:
         submodule_params = ()
@@ -103,8 +103,8 @@ def _get_primitive_init(primitive, reuse, reuse_only):
             (primitive.bind(*in_vals, **parameters), submodule_params))
 
 
-def _get_submodule_params(rng, jaxpr, consts, freevar_vals, submodule_params, *args, reuse,
-                          reuse_only):
+def _get_submodule_parameters(rng, jaxpr, consts, freevar_vals, submodule_parameters, *args,
+                              reuse, reuse_only):
     def read(v):
         if type(v) is jc.Literal:
             return v.val
@@ -131,18 +131,18 @@ def _get_submodule_params(rng, jaxpr, consts, freevar_vals, submodule_params, *a
                 map(read, bound_vars))
                 for subjaxpr, const_vars, bound_vars
                 in eqn.bound_subjaxprs])
-            ans, submodule_params = primitive_init(
-                prim_rng, submodule_params, eqn.params, subjaxprs,
+            ans, submodule_parameters = primitive_init(
+                prim_rng, submodule_parameters, eqn.params, subjaxprs,
                 sub_consts, sub_freevar_vals, in_vals)
         else:
-            ans, submodule_params = primitive_init(
-                prim_rng, submodule_params, *in_vals, **eqn.params)
+            ans, submodule_parameters = primitive_init(
+                prim_rng, submodule_parameters, *in_vals, **eqn.params)
         if eqn.primitive.multiple_results:
             map(write, eqn.outvars, ans)
         else:
             write(eqn.outvars[0], ans)
 
-    return submodule_params
+    return submodule_parameters
 
 
 init_rules = {xla.xla_call_p: partial(_call_init, xla.xla_call_p),
@@ -307,7 +307,7 @@ class parametrized(jc.Primitive):
                 self, lambda: pe.trace_to_jaxpr(flat_fun, parametrized._partialize(flat_inputs)),
                 do_trace_submodules=True)
 
-        submodule_params = _get_submodule_params(
+        submodule_params = _get_submodule_parameters(
             rng, jaxpr, consts, [], OrderedDict(), *example_inputs,
             reuse=reuse, reuse_only=reuse_only)
 
