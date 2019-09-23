@@ -106,10 +106,7 @@ def _get_primitive_init(primitive, reuse, reuse_only):
 def _get_submodule_parameters(rng, jaxpr, consts, freevar_vals, submodule_parameters, *args,
                               reuse, reuse_only):
     def read(v):
-        if type(v) is jc.Literal:
-            return v.val
-        else:
-            return env[v]
+        return v.val if type(v) is jc.Literal else env[v]
 
     def write(v, val):
         env[v] = val
@@ -242,8 +239,7 @@ class ApplyTrace(jc.Trace):
 class parametrized(jc.Primitive):
     def __init__(self, fun, name=None):
         self._name = name if name else fun.__name__
-        self._fun = fun
-        self._wrapped_fun = lu.wrap_init(self._fun)
+        self._wrapped_fun = lu.wrap_init(fun) if fun else None
         self.multiple_results = True
 
         super().__init__(f'{self._name}_{id(self)}')
@@ -478,12 +474,10 @@ class parametrized(jc.Primitive):
 class Parameter(parametrized):
     def __init__(self, init_parameter, name=None):
         self._init_parameter = init_parameter
-
-        super().__init__(lambda parameter, *_: parameter, name=name if name else 'parameter')
+        super().__init__(fun=None, name=name if name else 'parameter')
 
     def apply(self, parameters, *inputs, jit=False):
-        # no need for jit:
-        return self._fun(parameters, *inputs)
+        return parameters
 
     def _init_parameters_dict(self, rng, *example_inputs, reuse, reuse_only):
         if reuse_only:
