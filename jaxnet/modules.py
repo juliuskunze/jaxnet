@@ -225,21 +225,23 @@ def Dropout(rate, mode='train'):
     """Constructor for a dropout function with given rate."""
 
     def dropout(inputs, *args, **kwargs):
-        if len(args) == 1:
-            rng = args[0]
-        else:
-            rng = kwargs.get('rng', None)
-            if rng is None:
-                msg = ("dropout requires to be called with a PRNG key argument. "
-                       "That is, instead of `dropout(params, inputs)`, "
-                       "call it like `dropout(inputs, key)` "
-                       "where `key` is a jax.random.PRNGKey value.")
-                raise ValueError(msg)
-        if mode == 'train':
-            keep = random.bernoulli(rng, rate, inputs.shape)
-            return np.where(keep, inputs / rate, 0)
-        else:
+        if mode != 'train':
             return inputs
+
+        def get_rng():
+            if len(args) == 1:
+                return args[0]
+
+            try:
+                return kwargs['rng']
+            except KeyError:
+                raise ValueError(
+                    "dropout requires to be called with a PRNG key. "
+                    "That is, instead of `dropout(inputs)`, call it like `dropout(inputs, key)` "
+                    "where `key` is a jax.random.PRNGKey value.")
+
+        keep = random.bernoulli(get_rng(), rate, inputs.shape)
+        return np.where(keep, inputs / rate, 0)
 
     return dropout
 

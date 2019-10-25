@@ -1,6 +1,7 @@
 import pytest
 from jax import numpy as np, jit
 from jax.random import PRNGKey
+from pytest import raises
 
 from jaxnet import Dense, Sequential, relu, Conv, Conv1D, ConvTranspose, Conv1DTranspose, flatten, \
     MaxPool, AvgPool, zeros, GRUCell, Rnn, SumPool, Dropout, BatchNorm, parametrized, parameter, \
@@ -108,14 +109,15 @@ def test_Dropout_shape(mode, input_shape=(1, 2, 3)):
     out_ = dropout(inputs, rng=PRNGKey(0))
     assert np.array_equal(out, out_)
 
-    try:
+    if mode != 'train':
         dropout(inputs)
-        assert False
-    except ValueError as e:
-        assert 'dropout requires to be called with a PRNG key argument. ' \
-               'That is, instead of `dropout(params, inputs)`, ' \
-               'call it like `dropout(inputs, key)` ' \
-               'where `key` is a jax.random.PRNGKey value.' == str(e)
+    else:
+        with raises(ValueError) as e_info:
+            dropout(inputs)
+
+        assert ("dropout requires to be called with a PRNG key. "
+                "That is, instead of `dropout(inputs)`, call it like `dropout(inputs, key)` "
+                "where `key` is a jax.random.PRNGKey value.") == str(e_info.value)
 
 
 def test_GRUCell_shape():

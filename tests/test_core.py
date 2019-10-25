@@ -55,7 +55,7 @@ def test_parameter_with_multiple_arrays_submodule():
 
 def test_submodule_order():
     @parametrized
-    def wrapper(dummy_inputs):
+    def net(dummy_inputs):
         a = parameter((1,), zeros, dummy_inputs)
         b = parameter((2,), zeros, dummy_inputs)
         c = parameter((3,), zeros, dummy_inputs)
@@ -65,64 +65,76 @@ def test_submodule_order():
 
         return np.concatenate([a, f]) + np.concatenate([b, e]) + np.concatenate([c, d])
 
-    params = wrapper.init_parameters(PRNGKey(0), np.zeros(()))
+    params = net.init_parameters(PRNGKey(0), np.zeros(()))
 
     assert np.zeros((1,)) == params.parameter0
-    out = wrapper.apply(params, np.zeros(()))
+    out = net.apply(params, np.zeros(()))
     assert (7,) == out.shape
 
+
+def test_deep_nested_inline_submodule():
+    Net = lambda: parametrized(lambda inputs: Parameter(lambda rng: np.zeros(()))(inputs),
+                               name='net')
+    Net2 = lambda: parametrized(lambda inputs: Net()(inputs), name='net2')
+    Net3 = lambda: parametrized(lambda inputs: Net2()(inputs), name='net3')
+    Net4 = lambda: parametrized(lambda inputs: Net3()(inputs), name='net4')
+
+    net = Net4()
+    params = net.init_parameters(PRNGKey(0), np.zeros(()))
+    out = net.apply(params, np.zeros(()))
+    assert 0 == out
 
 def test_external_submodule():
     layer = Dense(3)
 
     @parametrized
-    def net_fun(inputs):
+    def net(inputs):
         return 2 * layer(inputs)
 
     inputs = random_inputs((2,))
-    params = net_fun.init_parameters(PRNGKey(0), inputs)
-    out = net_fun.apply(params, inputs)
+    params = net.init_parameters(PRNGKey(0), inputs)
+    out = net.apply(params, inputs)
     assert out.shape == (3,)
 
-    out_ = net_fun.apply(params, inputs)
+    out_ = net.apply(params, inputs)
     assert np.array_equal(out, out_)
 
-    out_ = net_fun.apply(params, inputs, jit=True)
+    out_ = net.apply(params, inputs, jit=True)
     assert np.allclose(out, out_)
 
 
 def test_default_argument_submodule():
     @parametrized
-    def net_fun(inputs, layer=Dense(3)):
+    def net(inputs, layer=Dense(3)):
         return 2 * layer(inputs)
 
     inputs = random_inputs((2,))
-    params = net_fun.init_parameters(PRNGKey(0), inputs)
-    out = net_fun.apply(params, inputs)
+    params = net.init_parameters(PRNGKey(0), inputs)
+    out = net.apply(params, inputs)
     assert out.shape == (3,)
 
-    out_ = net_fun.apply(params, inputs)
+    out_ = net.apply(params, inputs)
     assert np.array_equal(out, out_)
 
-    out_ = net_fun.apply(params, inputs, jit=True)
+    out_ = net.apply(params, inputs, jit=True)
     assert np.allclose(out, out_)
 
 
 def test_inline_submodule():
     @parametrized
-    def net_fun(inputs):
+    def net(inputs):
         layer = Dense(3)
         return 2 * layer(inputs)
 
     inputs = random_inputs((2,))
-    params = net_fun.init_parameters(PRNGKey(0), inputs)
-    out = net_fun.apply(params, inputs)
+    params = net.init_parameters(PRNGKey(0), inputs)
+    out = net.apply(params, inputs)
     assert out.shape == (3,)
 
-    out_ = net_fun.apply(params, inputs)
+    out_ = net.apply(params, inputs)
     assert np.array_equal(out, out_)
 
-    out_ = net_fun.apply(params, inputs, jit=True)
+    out_ = net.apply(params, inputs, jit=True)
     assert np.allclose(out, out_)
 
 
@@ -130,12 +142,12 @@ def test_external_submodule_partial_jit():
     layer = Dense(3)
 
     @parametrized
-    def net_fun(inputs):
+    def net(inputs):
         return jit(lambda x: 2 * x)(layer(inputs))
 
     inputs = random_inputs((2,))
-    params = net_fun.init_parameters(PRNGKey(0), inputs)
-    out = net_fun.apply(params, inputs)
+    params = net.init_parameters(PRNGKey(0), inputs)
+    out = net.apply(params, inputs)
     assert out.shape == (3,)
 
 
@@ -145,12 +157,12 @@ def test_external_submodule_partial_jit_submodule():
 
     @parametrized
     @jit
-    def net_fun(inputs):
+    def net(inputs):
         return layer(inputs)
 
     inputs = random_inputs((2,))
-    params = net_fun.init_parameters(PRNGKey(0), inputs)
-    out = net_fun.apply(params, inputs)
+    params = net.init_parameters(PRNGKey(0), inputs)
+    out = net.apply(params, inputs)
     assert out.shape == (3,)
 
 
