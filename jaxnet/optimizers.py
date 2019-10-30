@@ -7,7 +7,7 @@ from jax import grad, value_and_grad
 from jax.experimental import optimizers as experimental
 # noinspection PyUnresolvedReferences
 from jax.experimental.optimizers import constant, exponential_decay, inverse_time_decay, \
-    piecewise_constant
+    polynomial_decay, piecewise_constant
 
 
 class Optimizer(ABC):
@@ -73,9 +73,6 @@ class OptimizerFromExperimental(Optimizer):
     def get_step(self, state):
         step, _ = state
         return step
-
-
-# TODO: capitalized since will be classes in the future:
 
 
 def Sgd(step_size=0.01):

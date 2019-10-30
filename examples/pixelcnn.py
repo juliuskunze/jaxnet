@@ -328,7 +328,7 @@ def main(batch_size=32, epochs=10, step_size=.001, decay_rate=.999995,
 
     get_train_batches, test_batches = dataset(batch_size)
     rng, rng_init_1, rng_init_2 = random.split(PRNGKey(0), 3)
-    # TODO fix:
+    # TODO https://github.com/JuliusKunze/jaxnet/issues/5 fix:
     params = unbatched_loss.init_parameters(rng_init_1, rng_init_2, next(test_batches)[0])
     # TODO fix batched version:
     # TODO rng_init_2 = random.split(rng_init_2, test_batch_size)

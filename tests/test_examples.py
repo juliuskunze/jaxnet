@@ -164,7 +164,7 @@ def test_mnist_vae():
     assert (5, 10) == params.encode.sequential1.dense.kernel.shape
 
 
-@pytest.mark.skip('TODO')
+@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/4')
 def test_ocr_rnn():
     length = 5
     carry_size = 3
@@ -195,7 +195,7 @@ def test_ocr_rnn():
     assert np.array_equal(.25 * np.ones((1, 5, 4)), out)
 
 
-@pytest.mark.skip('TODO too slow, make test or implementation faster')
+@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/10')
 def test_wavenet():
     filter_width = 2
     initial_filter_width = 3

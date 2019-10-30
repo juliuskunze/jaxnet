@@ -30,7 +30,7 @@ def test():
     out = loss.apply(opt.get_parameters(state), *next_batch())
     assert () == out.shape
 
-    # TODO waiting for https://github.com/google/jax/issues/1278
+    # TODO https://github.com/JuliusKunze/jaxnet/issues/12
     # path = Path('/tmp') / 'test.params'
     # save_params(state, path)
     # state = load_params(path)

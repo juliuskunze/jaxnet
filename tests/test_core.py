@@ -84,6 +84,7 @@ def test_deep_nested_inline_submodule():
     out = net.apply(params, np.zeros(()))
     assert 0 == out
 
+
 def test_external_submodule():
     layer = Dense(3)
 
@@ -138,12 +139,10 @@ def test_inline_submodule():
     assert np.allclose(out, out_)
 
 
-def test_external_submodule_partial_jit():
-    layer = Dense(3)
-
+def test_partial_jit():
     @parametrized
     def net(inputs):
-        return jit(lambda x: 2 * x)(layer(inputs))
+        return jit(lambda x: 2 * x)(Dense(3)(inputs))
 
     inputs = random_inputs((2,))
     params = net.init_parameters(PRNGKey(0), inputs)
@@ -151,14 +150,12 @@ def test_external_submodule_partial_jit():
     assert out.shape == (3,)
 
 
-@pytest.mark.skip('TODO')
-def test_external_submodule_partial_jit_submodule():
-    layer = Dense(3)
-
+@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/14')
+def test_compiled_submodule():
     @parametrized
     @jit
     def net(inputs):
-        return layer(inputs)
+        return Dense(3)(inputs)
 
     inputs = random_inputs((2,))
     params = net.init_parameters(PRNGKey(0), inputs)
@@ -319,7 +316,7 @@ def test_no_params():
     assert np.array_equal(out, out_)
 
 
-@pytest.mark.skip('TODO')
+@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/4')
 def test_scan_unparametrized_cell():
     def cell(carry, x):
         return np.array([2]) * carry * x, np.array([2]) * carry * x
@@ -337,7 +334,7 @@ def test_scan_unparametrized_cell():
     assert (3, 2) == outs.shape
 
 
-@pytest.mark.skip('TODO')
+@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/4')
 def test_scan_parametrized_cell_without_params():
     @parametrized
     def cell(carry, x):
@@ -358,7 +355,7 @@ def test_scan_parametrized_cell_without_params():
     assert (3, 2) == outs.shape
 
 
-@pytest.mark.skip('TODO')
+@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/4')
 def test_scan_parametrized_cell():
     @parametrized
     def cell(carry, x):
@@ -407,7 +404,7 @@ def test_input_dependent_nested_modules():
     assert (5, 5) == out.shape
 
 
-@pytest.mark.skip('TODO')
+@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/1')
 def test_submodule_without_inputs():
     @parametrized
     def scalar():
@@ -611,13 +608,13 @@ def test_parameters_from_diamond_shared_submodules():
     params = net.parameters_from({a: a_params}, inputs)
     assert_dense_parameters_equal(a_params.dense, params.sequential0.dense)
     assert_dense_parameters_equal(a_params.dense, params.sequential1.dense)
-    # TODO parameters are duplicated, optimization with weight sharing is wrong:
-    # TODO assert 1 == len(params)
+    # TODO https://github.com/JuliusKunze/jaxnet/issues/8
+    # assert 1 == len(params)
     out_, _ = net.apply(params, inputs)
     assert np.array_equal(out, out_)
 
 
-@pytest.mark.skip('TODO')
+@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/8')
 def test_diamond_shared_submodules():
     p = Parameter(lambda rng: np.ones(()))
     a = Sequential(Sequential(p))
@@ -634,11 +631,12 @@ def test_diamond_shared_submodules():
     assert np.array_equal(np.ones(()), a)
     assert np.array_equal(np.ones(()), b)
 
-@pytest.mark.skip('TODO')
+
+@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/9')
 def test_tuple_input():
     @parametrized
-    def net(input_dict):
-        return input_dict[0] * input_dict[1] * parameter((), zeros, input_dict[0])
+    def net(input_tuple):
+        return input_tuple[0] * input_tuple[1] * parameter((), zeros, input_tuple[0])
 
     inputs = (np.zeros((2,)), np.zeros((2,)))
     params = net.init_parameters(PRNGKey(0), inputs)
@@ -646,7 +644,7 @@ def test_tuple_input():
     assert np.array_equal(np.zeros((2, 10)), out)
 
 
-@pytest.mark.skip('TODO')
+@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/9')
 def test_dict_input():
     @parametrized
     def net(input_dict):

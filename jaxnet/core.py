@@ -27,7 +27,7 @@ def _call_init(primitive, rng, submodule_params, parameters,
 
 def _scan_init(rng, submodule_params_dict, consts, init, xs, forward, length, jaxpr, reuse,
                reuse_only):
-    # TODO update to jax==0.1.42
+    # TODO https://github.com/JuliusKunze/jaxnet/issues/4
     assert len(consts) == 0
 
     _, _, x_aval = jaxpr.in_avals
@@ -60,7 +60,7 @@ def _scan_init(rng, submodule_params_dict, consts, init, xs, forward, length, ja
 
 
 def _scan_apply(submodule_params_iter, consts, init, xs, forward, length, jaxpr):
-    # TODO update to jax==0.1.42
+    # TODO https://github.com/JuliusKunze/jaxnet/issues/4
     _, _, x_aval = jaxpr.in_avals
     _, y_aval = jaxpr.out_aval
     ys_aval = _promote_aval_rank(length, y_aval)
@@ -307,7 +307,8 @@ class parametrized(jc.Primitive):
             rng, jaxpr, consts, [], OrderedDict(), *example_inputs,
             reuse=reuse, reuse_only=reuse_only)
 
-        # TODO cleanup, needed whenever parent of scan is used as submodule,
+        # TODO https://github.com/JuliusKunze/jaxnet/issues/4
+        # cleanup, needed whenever parent of scan is used as submodule,
         # since cell tracing is leaking into modules above:
         # submodules_in_execution_order = list(
         #    filter(lambda x: x in submodule_params, submodules_in_execution_order))
@@ -394,7 +395,7 @@ class parametrized(jc.Primitive):
     def parameters_from(self, reuse, *example_inputs):
         expanded_reuse = parametrized._expand_reuse_dict(reuse, *example_inputs)
 
-        # TODO: optimization wrong, duplicate values, needs param adapter
+        # TODO https://github.com/JuliusKunze/jaxnet/issues/8
         return self.init_parameters(PRNGKey(0), *example_inputs, reuse=expanded_reuse,
                                     reuse_only=True)
 
@@ -515,9 +516,8 @@ class ShapedParametrized:
                 for module, parameters in reuse_dict.items():
                     params_ = d.get(module)
                     if params_ is not None and not parameters is params_:
-                        # TODO: create params_from_overlapping
-                        raise ValueError("Provided reuse parameters contradict each other."
-                                         "Use params_from_overlapping if intended.")
+                        # TODO: https://github.com/JuliusKunze/jaxnet/issues/13
+                        raise ValueError("Provided reuse parameters contradict each other.")
 
                 d.update(reuse_dict)
 
