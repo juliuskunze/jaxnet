@@ -164,7 +164,6 @@ def test_mnist_vae():
     assert (5, 10) == params.encode.sequential1.dense.kernel.shape
 
 
-@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/4')
 def test_ocr_rnn():
     length = 5
     carry_size = 3

@@ -132,7 +132,6 @@ def test_GRUCell_shape():
     assert (2, 10) == out[1].shape
 
 
-@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/4')
 def test_Rnn_shape():
     inputs = np.zeros((2, 5, 4))
     rnn = Rnn(*GRUCell(3, zeros))

@@ -14,10 +14,6 @@ def read_dataset():
 
 
 def main():
-    # TODO https://github.com/JuliusKunze/jaxnet/issues/4
-    print("Sorry, this example does not work yet work with the new jax version.")
-    return
-
     train, test = read_dataset()
     _, length, x_size = train.data.shape
     class_count = train.target.shape[2]
@@ -50,10 +46,9 @@ def main():
     opt = optimizers.RmsProp(0.003)
 
     batch = train.sample(batch_size)
-    params = cross_entropy.init_parameters(random.PRNGKey(0), batch.data, batch.target)
-    state = opt.init(params)
+    state = opt.init(cross_entropy.init_parameters(random.PRNGKey(0), batch.data, batch.target))
     for epoch in range(10):
-        params = get_params(state)
+        params = opt.get_parameters(state)
         e = error.apply_from({cross_entropy: params}, test.data, test.target, jit=True)
         print(f'Epoch {epoch} error {e * 100:.1f}')
 

@@ -316,7 +316,6 @@ def test_no_params():
     assert np.array_equal(out, out_)
 
 
-@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/4')
 def test_scan_unparametrized_cell():
     def cell(carry, x):
         return np.array([2]) * carry * x, np.array([2]) * carry * x
@@ -334,7 +333,6 @@ def test_scan_unparametrized_cell():
     assert (3, 2) == outs.shape
 
 
-@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/4')
 def test_scan_parametrized_cell_without_params():
     @parametrized
     def cell(carry, x):
@@ -355,7 +353,6 @@ def test_scan_parametrized_cell_without_params():
     assert (3, 2) == outs.shape
 
 
-@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/4')
 def test_scan_parametrized_cell():
     @parametrized
     def cell(carry, x):

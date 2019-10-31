@@ -5,82 +5,80 @@ import dill
 import jax
 import numpy as onp
 from jax import lax, random, core as jc, linear_util as lu, \
-    unzip2, unzip3, safe_zip, safe_map, partial, WrapHashably, tree_util, api_util
+    unzip2, unzip3, safe_zip, safe_map, partial, WrapHashably, tree_util, api_util, split_list
 from jax.abstract_arrays import ShapedArray
 from jax.interpreters import xla, partial_eval as pe
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal
-from jax.lax.lax_control_flow import _promote_aval_rank
+from jax.lax.lax_control_flow import _index_array, _update_array, _empty_array, fori_loop
 from jax.random import PRNGKey
+from jax.util import split_dict
 
 zip = safe_zip
 map = safe_map
 
 
-def _call_init(primitive, rng, submodule_params, parameters,
-               jaxpr, consts, freevar_vals, in_vals, **kwargs):
+def _call_init(rng, submodule_params, parameters, jaxpr, consts, freevar_vals, in_vals, **kwargs):
     jaxpr, = jaxpr
     consts, = consts
     freevar_vals, = freevar_vals
     f = lu.wrap_init(partial(jc.eval_jaxpr, jaxpr, consts, freevar_vals))
-    return primitive.bind(f, *in_vals, **parameters), submodule_params
+    return xla.xla_call_p.bind(f, *in_vals, **parameters), submodule_params
 
 
-def _scan_init(rng, submodule_params_dict, consts, init, xs, forward, length, jaxpr, reuse,
-               reuse_only):
-    # TODO https://github.com/JuliusKunze/jaxnet/issues/4
-    assert len(consts) == 0
+def _parametrized_scan_impl(cell_parameters, *args, **kwargs):
+    """Almost identical to lax_control_flow._scan_impl, but with a parametrized cell."""
 
-    _, _, x_aval = jaxpr.in_avals
-    _, y_aval = jaxpr.out_aval
-    ys_aval = _promote_aval_rank(length, y_aval)
+    forward, length, num_consts, num_carry, jaxpr, linear = split_dict(
+        kwargs, ["forward", "length", "num_consts", "num_carry", "jaxpr", "linear"])
 
-    x = _index_arrays(0, x_aval, xs)
+    consts, init, xs = split_list(args, [num_consts, num_carry])
+    _, _, x_avals = split_list(jaxpr.in_avals, [num_consts, num_carry])
+    _, y_avals = split_list(jaxpr.out_avals, [num_carry])
+
+    cell_primitive = parametrized(jc.jaxpr_as_fun(jaxpr))
+    cell = partial(cell_primitive.apply, cell_parameters)
+
+    def body_fun(i, vals):
+        i = i if forward else length - i - 1
+        carry, ys = split_list(vals, [num_carry])
+        x = map(partial(_index_array, i), x_avals, xs)
+        # difference to _scan_impl: 'cell' instead of 'jaxpr_as_fun(jaxpr)':
+        out_flat = cell(*(consts + carry + x))
+        carry_out, y_updates = split_list(out_flat, [num_carry])
+        ys_out = map(partial(_update_array, i), y_avals, ys, y_updates)
+        return carry_out + ys_out
+
+    ys_init = map(partial(_empty_array, length), y_avals)
+    return fori_loop(0, length, body_fun, init + ys_init)
+
+
+def _scan_init(rng, submodule_params_dict,
+               *args, forward, length, num_consts, num_carry, jaxpr, linear, reuse, reuse_only):
+    consts, init, xs = split_list(args, [num_consts, num_carry])
+    _, _, x_avals = split_list(jaxpr.in_avals, [num_consts, num_carry])
+    x = map(partial(_index_array, 0), x_avals, xs)
     submodule_params_dict = _get_submodule_parameters(rng, jaxpr.jaxpr, jaxpr.literals, (),
-                                                      submodule_params_dict, consts, init, x,
+                                                      submodule_params_dict, *(consts + init + x),
                                                       reuse=reuse, reuse_only=reuse_only)
 
-    if len(submodule_params_dict) == 0:
-        submodule_params = ()
-    else:
+    def get_cell_params():
+        if len(submodule_params_dict) == 0:
+            return ()
+
         primitive, = submodule_params_dict.keys()
-        submodule_params = (primitive._parameters_namedtuple(submodule_params_dict[primitive]),)
+        return primitive._parameters_namedtuple(submodule_params_dict[primitive]),
 
-    def body_fun(i, vals):
-        idx = i if forward else length - i - 1
-        carry, ys = vals
-        x = _index_arrays(idx, x_aval, xs)
-        cell = parametrized(jc.jaxpr_as_fun(jaxpr))
-        carry_out, y = cell.apply(submodule_params, consts, carry, x)
-        ys_out = _update_arrays(idx, y_aval, ys, y)
-        return carry_out, ys_out
+    carry_and_ys = _parametrized_scan_impl(
+        get_cell_params(), *args, forward=forward, length=length,
+        num_consts=num_consts, num_carry=num_carry, jaxpr=jaxpr, linear=linear)
 
-    ys_init = _empty_arrays(ys_aval)
-    carry, ys = lax.fori_loop(0, length, body_fun, (init, ys_init))
-    return jc.pack((carry, ys)), submodule_params_dict
+    return carry_and_ys, submodule_params_dict
 
 
-def _scan_apply(submodule_params_iter, consts, init, xs, forward, length, jaxpr):
-    # TODO https://github.com/JuliusKunze/jaxnet/issues/4
-    _, _, x_aval = jaxpr.in_avals
-    _, y_aval = jaxpr.out_aval
-    ys_aval = _promote_aval_rank(length, y_aval)
-
+def _scan_apply(submodule_parameter_iter, *args, **kwargs):
     # TODO fix param sharing
-    cell_params = (submodule_params_iter.get_parameters(None),) if len(
-        submodule_params_iter.submodule_params) > 0 else ()
-
-    def body_fun(i, vals):
-        idx = i if forward else length - i - 1
-        carry, ys = vals
-        x = _index_arrays(idx, x_aval, xs)
-        cell = parametrized(jc.jaxpr_as_fun(jaxpr))
-        carry_out, y = cell.apply(cell_params, consts, carry, x)
-        ys_out = _update_arrays(idx, y_aval, ys, y)
-        return carry_out, ys_out
-
-    ys_init = _empty_arrays(ys_aval)
-    carry, ys = lax.fori_loop(0, length, body_fun, (init, ys_init))
-    return jc.pack((carry, ys))
+    cell_params = submodule_parameter_iter.get_parameters_or_empty()
+    return _parametrized_scan_impl(cell_params, *args, **kwargs)
 
 
 def _get_primitive_init(primitive, reuse, reuse_only):
@@ -142,7 +140,7 @@ def _get_submodule_parameters(rng, jaxpr, consts, freevar_vals, submodule_parame
     return submodule_parameters
 
 
-init_rules = {xla.xla_call_p: partial(_call_init, xla.xla_call_p),
+init_rules = {xla.xla_call_p: _call_init,
               lax.scan_p: _scan_init}
 
 apply_rules = {lax.scan_p: _scan_apply}
@@ -164,6 +162,9 @@ class ApplyTrace(jc.Trace):
             self.index += 1
             self.submodule_parameters_by_primitive[primitive] = parameters
             return parameters
+
+        def get_parameters_or_empty(self):
+            return (self.get_parameters(None),) if len(self.submodule_parameters) > 0 else ()
 
     class Tracer(jc.Tracer):
         __slots__ = ['val', 'submodule_params_iter']
@@ -307,16 +308,10 @@ class parametrized(jc.Primitive):
             rng, jaxpr, consts, [], OrderedDict(), *example_inputs,
             reuse=reuse, reuse_only=reuse_only)
 
-        # TODO https://github.com/JuliusKunze/jaxnet/issues/4
-        # cleanup, needed whenever parent of scan is used as submodule,
-        # since cell tracing is leaking into modules above:
-        # submodules_in_execution_order = list(
-        #    filter(lambda x: x in submodule_params, submodules_in_execution_order))
-
-        assert len(submodule_params) == len(submodules_in_call_order)
-
         if len(submodule_params) <= 1:
             return submodule_params
+
+        assert len(submodule_params) == len(submodules_in_call_order)
 
         permutation = parametrized._permutation_to_jaxpr_order(jaxpr, submodules_in_call_order)
         assert len(submodule_params) == len(permutation)
