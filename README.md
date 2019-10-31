@@ -125,7 +125,6 @@ This can help debugging and is more flexible ([demo](examples/mnist_vae.py#L81))
 Read more on random numbers in JAX [here](https://github.com/google/jax#random-numbers-are-different).
 
 ### Step-by-step debugging
-
 JAXnet allows step-by-step debugging with concrete values like any plain Python function
 (when [`jit`](https://github.com/google/jax#compilation-with-jit) compilation is not used).
 

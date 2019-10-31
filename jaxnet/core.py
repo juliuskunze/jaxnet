@@ -534,11 +534,11 @@ class ShapedParametrized:
         return self.parametrized.init_parameters(rng, *self.example_inputs)
 
 
-def save_params(parameters, path: Path):
+def save(parameters, path: Path):
     with path.open('wb') as file:
         dill.dump(parameters, file)
 
 
-def load_params(path: Path):
+def load(path: Path):
     with path.open('rb') as file:
         return dill.load(file)

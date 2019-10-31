@@ -1,3 +1,3 @@
-from jaxnet.modules import *
+from jaxnet.core import parametrized, Parameter, save, load
 from jaxnet.initializers import *
-from jaxnet.core import parametrized, Parameter, save_params, load_params
+from jaxnet.modules import *

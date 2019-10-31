@@ -2,8 +2,8 @@ import pytest
 from jax import numpy as np, jit, lax
 from jax.random import PRNGKey
 
-from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, save_params, \
-    load_params, parameter, Parameter, randn
+from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, save, \
+    load, parameter, Parameter, randn
 from tests.util import random_inputs, assert_parameters_equal, assert_dense_parameters_equal
 
 
@@ -704,7 +704,7 @@ def test_save_and_load_params():
 
     from pathlib import Path
     path = Path('/') / 'tmp' / 'net.params'
-    save_params(params, path)
-    params_ = load_params(path)
+    save(params, path)
+    params_ = load(path)
 
     assert_dense_parameters_equal(params, params_)

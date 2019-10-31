@@ -256,18 +256,35 @@ assert transfer_net_params[0] is net_params
 # train transfer_net_params...
 ```
 
-## Parameter storage
+## Storing parameters
 
-Store parameters with `save_params` and `load_params`:
+Store parameters with `save` and `load`:
 
 ```python
-from pathlib import Path
+opt = optimizers.Adam()
+state = opt.init(params)
 
-params = Dense(2).init_parameters(PRNGKey(0), np.zeros((1, 2)))
+# train ...
 
-path = Path('/') / 'tmp' / 'net.params'
-save_params(params, path)
-params = load_params(path)
+trained_params = opt.get_parameters(state)
 
-print(params.dense.kernel)
+save(trained_params, Path.home() / 'net')
+```
+
+```python
+trained_params = load(Path.home() / 'net')
+
+# evaluate etc. ...
+```
+
+You can store the complete optimizer state with the same methods:
+
+```python
+save(state, Path.home() / 'net')
+```
+
+```python
+state = load(Path.home() / 'net')
+
+# continue training...
 ```
