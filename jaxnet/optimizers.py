@@ -31,13 +31,15 @@ class Optimizer(ABC):
     def get_parameters(self, state):
         _, state = state
 
-        def replace(node):
-            if all(map(lambda n: isinstance(n, jax.numpy.ndarray), node)):
-                return self._get_parameter(node)
+        def _get_parameters(state):
+            # assumes state is non-nested (named)tuple of numpy arrays for each parameter:
+            if all(map(lambda n: isinstance(n, jax.numpy.ndarray), state)):
+                return self._get_parameter(state)
 
-            return type(node)(*map(replace, node))
+            # TODO assumes parameters to be a nested (named)tuple / list:
+            return type(state)(*map(_get_parameters, state))
 
-        return replace(state)
+        return _get_parameters(state)
 
     def get_step(self, state):
         step, _ = state
@@ -84,9 +86,10 @@ _PARAMETER = 'parameter'
 
 
 class Sgd(Optimizer):
+    ParameterState = namedtuple('sgd', (_PARAMETER,))
+
     def __init__(self, step_size=0.01):
         self.step_size = experimental.make_schedule(step_size)
-        self.ParameterState = namedtuple('sgd', (_PARAMETER,))
 
     def _init_for_parameter(self, parameter):
         return self.ParameterState(parameter)
@@ -100,7 +103,7 @@ class Sgd(Optimizer):
 
 
 class OptimizerFromExperimental(Optimizer):
-    """ Wrapper for stax' experimental optimizers
+    """ Wrapper for those JAX' experimental optimizers
     that already use a non-nested tuple of numpy arrays per parameter as state."""
 
     def __init__(self, experimental_optimizer, *args, state_component_names):
@@ -152,8 +155,8 @@ class Sm3(Optimizer):
             experimental.sm3.__wrapped__(step_size, momentum)
 
     @lru_cache()
-    def ParameterState(self, parameter_shape):
-        return namedtuple('sm3', (_PARAMETER, 'm', *(f'v{i}' for i in range(len(parameter_shape)))))
+    def ParameterState(self, shape):
+        return namedtuple('sm3', (_PARAMETER, 'm', *(f'v{i}' for i in range(len(shape)))))
 
     def _init_for_parameter(self, parameter):
         x, m, vs = self._inner_init(parameter)
