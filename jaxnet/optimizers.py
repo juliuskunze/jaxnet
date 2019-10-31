@@ -3,12 +3,11 @@ from collections import namedtuple
 from functools import lru_cache
 
 import jax
-from jax import grad, value_and_grad, tree_map, \
-    tree_multimap, partial
+from jax import grad, value_and_grad, tree_map, tree_multimap, partial
 from jax.experimental import optimizers as experimental
 # noinspection PyUnresolvedReferences
 from jax.experimental.optimizers import constant, exponential_decay, inverse_time_decay, \
-    polynomial_decay, piecewise_constant, pack, OptimizerState, make_schedule
+    polynomial_decay, piecewise_constant
 
 State = namedtuple('optimizer', ('step', 'values'))
 
@@ -20,18 +19,6 @@ class Optimizer(ABC):
     a non-nested (named)tuple of numpy arrays for each parameter,
     arranged in a tree like the parameters themselves.
     """
-
-    @abstractmethod
-    def _init_for_parameter(self, parameter):
-        raise NotImplementedError
-
-    @abstractmethod
-    def _update_for_parameter(self, step, gradient, state):
-        raise NotImplementedError
-
-    @abstractmethod
-    def _get_parameter(self, state):
-        raise NotImplementedError
 
     def init(self, parameters):
         return State(0, tree_map(self._init_for_parameter, parameters))
@@ -56,6 +43,16 @@ class Optimizer(ABC):
         step, _ = state
         return step
 
+    def update(self, loss_fun, state, *inputs, jit=False):
+        return self._update(loss_fun, state, *inputs, jit=jit)
+
+    def update_and_get_loss(self, loss_fun, state, *inputs, jit=False):
+        return self._update(loss_fun, state, *inputs, jit=jit, return_loss=True)
+
+    def _update(self, loss_fun, state, *inputs, jit=False, return_loss=False):
+        inner = self._update_fun(loss_fun, return_loss=return_loss)
+        return (jax.jit(inner) if jit else inner)(state, *inputs)
+
     # To avoid recompilation on every call:
     @lru_cache()
     def _update_fun(self, loss_fun, return_loss=False):
@@ -70,15 +67,17 @@ class Optimizer(ABC):
 
         return update
 
-    def _update(self, loss_fun, state, *inputs, jit=False, return_loss=False):
-        inner = self._update_fun(loss_fun, return_loss=return_loss)
-        return (jax.jit(inner) if jit else inner)(state, *inputs)
+    @abstractmethod
+    def _init_for_parameter(self, parameter):
+        raise NotImplementedError
 
-    def update(self, loss_fun, state, *inputs, jit=False):
-        return self._update(loss_fun, state, *inputs, jit=jit)
+    @abstractmethod
+    def _update_for_parameter(self, step, gradient, state):
+        raise NotImplementedError
 
-    def update_and_get_loss(self, loss_fun, state, *inputs, jit=False):
-        return self._update(loss_fun, state, *inputs, jit=jit, return_loss=True)
+    @abstractmethod
+    def _get_parameter(self, state):
+        raise NotImplementedError
 
 
 _PARAMETER = 'parameter'
@@ -86,7 +85,7 @@ _PARAMETER = 'parameter'
 
 class Sgd(Optimizer):
     def __init__(self, step_size=0.01):
-        self.step_size = make_schedule(step_size)
+        self.step_size = experimental.make_schedule(step_size)
         self.ParameterState = namedtuple('sgd', (_PARAMETER,))
 
     def _init_for_parameter(self, parameter):
