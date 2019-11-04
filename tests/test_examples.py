@@ -48,7 +48,7 @@ def test_reuse_api():
     transfer_net = Sequential(net, relu, Dense(2))
     transfer_net_params = transfer_net.init_parameters(PRNGKey(1), inputs, reuse={net: net_params})
 
-    assert transfer_net_params[0] is net_params
+    assert net_params == transfer_net_params.dense0
 
     # train transfer_net_params...
 
@@ -139,7 +139,7 @@ def test_mnist_classifier():
     train_acc = accuracy.apply_from({loss: params}, *next_batch(), jit=True)
     assert () == train_acc.shape
 
-    predict_params = predict.parameters_from({loss: params}, *next_batch())
+    predict_params = predict.parameters_from({loss.shaped(*next_batch()): params}, next_batch()[0])
     predictions = predict.apply(predict_params, next_batch()[0], jit=True)
     assert (3, 10) == predictions.shape
 

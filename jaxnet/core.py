@@ -1,11 +1,12 @@
-from collections import namedtuple, OrderedDict, Counter, defaultdict
+from collections import namedtuple, Counter, defaultdict
 from pathlib import Path
 
 import dill
 import jax
 import numpy as onp
 from jax import lax, random, core as jc, linear_util as lu, \
-    unzip2, unzip3, safe_zip, safe_map, partial, WrapHashably, tree_util, api_util, split_list
+    unzip2, unzip3, safe_zip, safe_map, partial, WrapHashably, tree_util, api_util, split_list, \
+    raise_to_shaped
 from jax.abstract_arrays import ShapedArray
 from jax.interpreters import xla, partial_eval as pe
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal
@@ -42,7 +43,7 @@ def _parametrized_scan_impl(cell_parameters, *args, **kwargs):
         i = i if forward else length - i - 1
         carry, ys = split_list(vals, [num_carry])
         x = map(partial(_index_array, i), x_avals, xs)
-        # difference to _scan_impl: 'cell' instead of 'jaxpr_as_fun(jaxpr)':
+        # difference to _scan_impl: 'cell' instead of 'jc.jaxpr_as_fun(jaxpr)':
         out_flat = cell(*(consts + carry + x))
         carry_out, y_updates = split_list(out_flat, [num_carry])
         ys_out = map(partial(_update_array, i), y_avals, ys, y_updates)
@@ -52,27 +53,23 @@ def _parametrized_scan_impl(cell_parameters, *args, **kwargs):
     return fori_loop(0, length, body_fun, init + ys_init)
 
 
-def _scan_init(rng, submodule_params_dict,
-               *args, forward, length, num_consts, num_carry, jaxpr, linear, reuse, reuse_only):
-    consts, init, xs = split_list(args, [num_consts, num_carry])
-    _, _, x_avals = split_list(jaxpr.in_avals, [num_consts, num_carry])
+def _scan_init(rng, parameters_dict, *args, **kwargs):
+    jaxpr = kwargs['jaxpr']
+    split_sizes = [kwargs['num_consts'], kwargs['num_carry']]
+    consts, init, xs = split_list(args, split_sizes)
+    _, _, x_avals = split_list(jaxpr.in_avals, split_sizes)
     x = map(partial(_index_array, 0), x_avals, xs)
-    submodule_params_dict = _get_submodule_parameters(rng, jaxpr.jaxpr, jaxpr.literals, (),
-                                                      submodule_params_dict, *(consts + init + x),
-                                                      reuse=reuse, reuse_only=reuse_only)
+    parameters_dict = _get_parameters_dict(rng, jaxpr.jaxpr, jaxpr.literals, (),
+                                           parameters_dict, *(consts + init + x))
 
     def get_cell_params():
-        if len(submodule_params_dict) == 0:
+        if len(parameters_dict) == 0:
             return ()
 
-        primitive, = submodule_params_dict.keys()
-        return primitive._parameters_namedtuple(submodule_params_dict[primitive]),
+        primitive, = parameters_dict.keys()
+        return primitive._parameters_namedtuple(parameters_dict[primitive]),
 
-    carry_and_ys = _parametrized_scan_impl(
-        get_cell_params(), *args, forward=forward, length=length,
-        num_consts=num_consts, num_carry=num_carry, jaxpr=jaxpr, linear=linear)
-
-    return carry_and_ys, submodule_params_dict
+    return _parametrized_scan_impl(get_cell_params(), *args, **kwargs), parameters_dict
 
 
 def _scan_apply(submodule_parameter_iter, *args, **kwargs):
@@ -81,28 +78,25 @@ def _scan_apply(submodule_parameter_iter, *args, **kwargs):
     return _parametrized_scan_impl(cell_params, *args, **kwargs)
 
 
-def _get_primitive_init(primitive, reuse, reuse_only):
+def _get_primitive_init(primitive):
     if primitive in init_rules:
-        return partial(init_rules[primitive], reuse=reuse, reuse_only=reuse_only)
+        return partial(init_rules[primitive])
 
     if isinstance(primitive, parametrized):
-        def traced_submodule_init(rng, submodule_params_dict, *inputs):
-            if primitive not in submodule_params_dict:
-                params_dict = primitive._init_or_reuse_parameters_dict(rng, *inputs, reuse=reuse,
-                                                                       reuse_only=reuse_only)
-                submodule_params_dict[primitive] = params_dict
-            submodule_params = primitive._parameters_namedtuple(submodule_params_dict[primitive])
-            out, _ = jax.tree_flatten(primitive.apply(submodule_params, *inputs))
-            return out, submodule_params_dict
+        def parametrized_init(rng, parameters_dict, *inputs):
+            if primitive not in parameters_dict:
+                parameters_dict[primitive] = primitive._init_parameters_dict(rng, *inputs)
+            parameters = primitive._parameters_namedtuple(parameters_dict[primitive])
+            out, _ = jax.tree_flatten(primitive.apply(parameters, *inputs))
+            return out, parameters_dict
 
-        return traced_submodule_init
+        return parametrized_init
 
-    return (lambda _, submodule_params, *in_vals, **parameters:
-            (primitive.bind(*in_vals, **parameters), submodule_params))
+    return (lambda _, parameters_dict, *in_vals, **parameters:
+            (primitive.bind(*in_vals, **parameters), parameters_dict))
 
 
-def _get_submodule_parameters(rng, jaxpr, consts, freevar_vals, submodule_parameters, *args,
-                              reuse, reuse_only):
+def _get_parameters_dict(rng, jaxpr, consts, freevar_vals, submodule_parameters, *args):
     def read(v):
         return v.val if type(v) is jc.Literal else env[v]
 
@@ -118,7 +112,7 @@ def _get_submodule_parameters(rng, jaxpr, consts, freevar_vals, submodule_parame
         rng, prim_rng = random.split(rng)
         in_vals = map(read, eqn.invars)
 
-        primitive_init = _get_primitive_init(eqn.primitive, reuse=reuse, reuse_only=reuse_only)
+        primitive_init = _get_primitive_init(eqn.primitive)
         if eqn.bound_subjaxprs:
             subjaxprs, sub_consts, sub_freevar_vals = unzip3([(
                 subjaxpr,
@@ -287,72 +281,6 @@ class parametrized(jc.Primitive):
         flat_outs = self.bind(*flat_inputs)
         return jax.tree_unflatten(self._out_tree(*inputs), flat_outs)
 
-    def _init_or_reuse_parameters_dict(self, rng, *example_inputs, reuse=None, reuse_only=False):
-        if reuse:
-            parameters = reuse.get(self)
-            if parameters:
-                return parameters
-
-        return self._init_parameters_dict(rng, *example_inputs,
-                                          reuse=reuse, reuse_only=reuse_only)
-
-    def _init_parameters_dict(self, rng, *example_inputs, reuse, reuse_only):
-        flat_inputs, in_tree = tree_util.tree_flatten(example_inputs)
-        flat_fun, _ = api_util.flatten_fun_nokwargs(self._wrapped_fun, in_tree)
-        (jaxpr, _, consts), submodules_in_call_order = \
-            parametrized._submodule_call_order_tracing.nested(
-                self, lambda: pe.trace_to_jaxpr(flat_fun, parametrized._partialize(flat_inputs)),
-                do_trace_submodules=True)
-
-        submodule_params = _get_submodule_parameters(
-            rng, jaxpr, consts, [], OrderedDict(), *example_inputs,
-            reuse=reuse, reuse_only=reuse_only)
-
-        if len(submodule_params) <= 1:
-            return submodule_params
-
-        assert len(submodule_params) == len(submodules_in_call_order)
-
-        permutation = parametrized._permutation_to_jaxpr_order(jaxpr, submodules_in_call_order)
-        assert len(submodule_params) == len(permutation)
-        submodule_param_pairs_in_call_order = list(submodule_params.items())
-        submodule_param_pairs_in_jaxpr_order = list(submodule_param_pairs_in_call_order[i]
-                                                    for i in permutation)
-        return OrderedDict(submodule_param_pairs_in_jaxpr_order)
-
-    def init_parameters(self, rng, *example_inputs, reuse=None, reuse_only=False):
-        d = self._init_or_reuse_parameters_dict(rng, *example_inputs, reuse=reuse,
-                                                reuse_only=reuse_only)
-
-        return self._parameters_namedtuple(d)
-
-    def _parameters_namedtuple(self, parameters_dict):
-        if isinstance(parameters_dict, tuple):  # happens on reuse
-            return parameters_dict
-
-        if not isinstance(parameters_dict, dict):
-            assert hasattr(parameters_dict, 'shape')
-
-            return parameters_dict
-
-        index_by_prefix = defaultdict(lambda: 0)
-
-        prefix_param_pairs = [(module._name, module._parameters_namedtuple(parameters))
-                              for module, parameters in parameters_dict.items()]
-
-        prefix_counter = Counter([prefix for prefix, _ in prefix_param_pairs])
-
-        def next_name(prefix):
-            is_duplicate = prefix_counter[prefix] > 1
-            index = index_by_prefix[prefix]
-            name = prefix + str(index if is_duplicate else '')
-            index_by_prefix[prefix] = index + 1
-            return name
-
-        params = OrderedDict((next_name(prefix), params) for prefix, params in prefix_param_pairs)
-        Parameters = namedtuple(self._name, params.keys())
-        return Parameters(**params)
-
     def apply(self, parameters, *inputs, jit=False):
         def _apply(parameters, *inputs):
             def inner():
@@ -369,34 +297,129 @@ class parametrized(jc.Primitive):
 
         return (jax.jit(_apply) if jit else _apply)(parameters, *inputs)
 
-    def __str__(self):
-        return self.name
-
-    @staticmethod
-    def _expand_reuse_dict(reuse, *example_inputs):
-        expanded_reuse = {}
-
-        for module, parameters in reuse.items():
-            if isinstance(module, parametrized):
-                module = module.shaped(*example_inputs)
-
-            if not isinstance(module, ShapedParametrized):
-                raise ValueError('Keys for reuse must be parametrized or ShapedParametrized.')
-
-            expanded_reuse.update(module._get_reuse_dict(parameters))
-
-        return expanded_reuse
+    def init_parameters(self, rng, *example_inputs, reuse=None):
+        return self._init_parameters(rng, *example_inputs, reuse=reuse, reuse_only=False)
 
     def parameters_from(self, reuse, *example_inputs):
-        expanded_reuse = parametrized._expand_reuse_dict(reuse, *example_inputs)
-
         # TODO https://github.com/JuliusKunze/jaxnet/issues/8
-        return self.init_parameters(PRNGKey(0), *example_inputs, reuse=expanded_reuse,
-                                    reuse_only=True)
+        return self._init_parameters(PRNGKey(0), *example_inputs, reuse=reuse, reuse_only=True)
 
     def apply_from(self, reuse, *example_inputs, jit=False):
         parameters = self.parameters_from(reuse, *example_inputs)
         return (jax.jit(self.apply) if jit else self.apply)(parameters, *example_inputs)
+
+    def _init_parameters(self, rng, *example_inputs, reuse, reuse_only):
+        d = self._init_parameters_dict(rng, *example_inputs)
+
+        if reuse:
+            flat_reuse_dicts = parametrized._flat_reuse_dicts(reuse, *example_inputs)
+            d = self._merge_reuse_into(d, flat_reuse_dicts, reuse_only=reuse_only)
+
+        return self._parameters_namedtuple(d)
+
+    def _init_parameters_dict(self, rng, *example_inputs):
+        flat_inputs, in_tree = tree_util.tree_flatten(example_inputs)
+        flat_fun, _ = api_util.flatten_fun_nokwargs(self._wrapped_fun, in_tree)
+        (jaxpr, _, consts), submodules_in_call_order = \
+            parametrized._submodule_call_order_tracing.nested(
+                self, lambda: pe.trace_to_jaxpr(flat_fun, parametrized._partialize(flat_inputs)),
+                do_trace_submodules=True)
+
+        submodule_params = _get_parameters_dict(
+            rng, jaxpr, consts, [], dict(), *example_inputs)
+
+        if len(submodule_params) <= 1:
+            return submodule_params
+
+        assert len(submodule_params) == len(submodules_in_call_order)
+
+        permutation = parametrized._permutation_to_jaxpr_order(jaxpr, submodules_in_call_order)
+        assert len(submodule_params) == len(permutation)
+        submodule_param_pairs_in_call_order = list(submodule_params.items())
+        submodule_param_pairs_in_jaxpr_order = list(submodule_param_pairs_in_call_order[i]
+                                                    for i in permutation)
+        return dict(submodule_param_pairs_in_jaxpr_order)
+
+    @staticmethod
+    def _flat_reuse_dicts(reuse, *example_inputs):
+        r = {}
+
+        for module, parameters in reuse.items():
+            inputs = example_inputs
+            if isinstance(module, ShapedParametrized):
+                module, inputs = module.parametrized, module.example_inputs
+
+            if not isinstance(module, parametrized):
+                raise ValueError('Keys for reuse must be parametrized or ShapedParametrized.')
+
+            params_dict = parametrized._parameters_dict(parameters,
+                                                        module._init_parameters_dict(PRNGKey(0),
+                                                                                     *inputs))
+            r.update(module._flatten_dict(params_dict))
+
+        return r
+
+    def _merge_reuse_into(self, parameters_dict, flat_reuse_dicts, reuse_only, is_reused=False):
+        reused_dict = flat_reuse_dicts.get(self)
+        is_reused = reused_dict is not None or is_reused
+        parameters_dict = reused_dict if is_reused else parameters_dict
+
+        if not isinstance(parameters_dict, dict):
+            if reuse_only and not is_reused:
+                raise ValueError(f'No param value specified for {self}.')
+
+            return parameters_dict
+
+        r = {}
+        for module, params_d in parameters_dict.items():
+            r[module] = module._merge_reuse_into(params_d, flat_reuse_dicts, reuse_only, is_reused)
+
+        return r
+
+    def _flatten_dict(self, param_dict):
+        d = {self: param_dict}
+
+        if not isinstance(param_dict, dict):
+            return d
+
+        for module, parameters in param_dict.items():
+            d.update(module._flatten_dict(parameters))
+
+        return d
+
+    def __str__(self):
+        return self.name
+
+    def _parameters_namedtuple(self, parameters_dict):
+        if not isinstance(parameters_dict, dict):
+            return parameters_dict
+
+        index_by_prefix = defaultdict(lambda: 0)
+
+        prefix_param_pairs = [(module._name, module._parameters_namedtuple(parameters))
+                              for module, parameters in parameters_dict.items()]
+
+        prefix_counter = Counter([prefix for prefix, _ in prefix_param_pairs])
+
+        def next_name(prefix):
+            is_duplicate = prefix_counter[prefix] > 1
+            index = index_by_prefix[prefix]
+            name = prefix + str(index if is_duplicate else '')
+            index_by_prefix[prefix] = index + 1
+            return name
+
+        params = dict((next_name(prefix), params) for prefix, params in prefix_param_pairs)
+        Parameters = namedtuple(self._name, params.keys())
+        return Parameters(**params)
+
+    @staticmethod
+    def _parameters_dict(parameters, example_parameters_dict):
+        if not isinstance(parameters, tuple):
+            return parameters
+
+        return {submodule: parametrized._parameters_dict(params, submodule_example_parameters_dict)
+                for (submodule, submodule_example_parameters_dict), params
+                in zip(example_parameters_dict.items(), parameters)}
 
     def __eq__(self, obj):
         return isinstance(obj, parametrized) and self.name == obj.name
@@ -414,7 +437,7 @@ class parametrized(jc.Primitive):
             self._submodules_by_module = []
 
         def nested(self, primitive, body, do_trace_submodules=False):
-            submodules_init = OrderedDict() if do_trace_submodules else None
+            submodules_init = dict() if do_trace_submodules else None
             self._submodules_by_module.append((primitive, submodules_init))
 
             try:
@@ -463,8 +486,7 @@ class parametrized(jc.Primitive):
 
     @staticmethod
     def _partialize(flat_inputs):
-        return map(lambda x: pe.PartialVal((jax.raise_to_shaped(jc.get_aval(x)), jc.unit)),
-                   flat_inputs)
+        return map(lambda x: pe.PartialVal((raise_to_shaped(jc.get_aval(x)), jc.unit)), flat_inputs)
 
 
 class Parameter(parametrized):
@@ -475,52 +497,16 @@ class Parameter(parametrized):
     def apply(self, parameters, *inputs, jit=False):
         return parameters
 
-    def _init_parameters_dict(self, rng, *example_inputs, reuse, reuse_only):
-        if reuse_only:
-            raise ValueError(f'No param value specified for {self}.')
-
+    def _init_parameters_dict(self, rng, *example_inputs):
         return self._init_parameter(rng)
 
 
 class ShapedParametrized:
+    """Represents a parametrized module with given example inputs."""
+
     def __init__(self, parametrized, *example_inputs):
         self.parametrized = parametrized
         self.example_inputs = example_inputs
-        self._cached_params_dict = None
-
-    def _params_dict(self):
-        if self._cached_params_dict is None:
-            self._cached_params_dict = self.parametrized._init_or_reuse_parameters_dict(
-                PRNGKey(0), *self.example_inputs)
-
-        return self._cached_params_dict
-
-    @staticmethod
-    def _get_reuse_dict_form(module, parameters, params_dict):
-        assert len(params_dict) == len(parameters)
-        d = {module: parameters}
-
-        if not isinstance(params_dict, dict): return d
-
-        for ((module, submodule_params_dict), submodule_params) in zip(params_dict.items(),
-                                                                       parameters):
-            if isinstance(module, parametrized):
-                d[module] = submodule_params
-                reuse_dict = ShapedParametrized._get_reuse_dict_form(
-                    module, submodule_params, params_dict=submodule_params_dict)
-                for module, parameters in reuse_dict.items():
-                    params_ = d.get(module)
-                    if params_ is not None and not parameters is params_:
-                        # TODO: https://github.com/JuliusKunze/jaxnet/issues/13
-                        raise ValueError("Provided reuse parameters contradict each other.")
-
-                d.update(reuse_dict)
-
-        return d
-
-    def _get_reuse_dict(self, parameters):
-        return ShapedParametrized._get_reuse_dict_form(self.parametrized, parameters,
-                                                       self._params_dict())
 
     def apply_from(self, reuse, jit=False):
         return self.parametrized.apply_from(reuse, *self.example_inputs, jit=jit)

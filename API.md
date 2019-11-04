@@ -251,7 +251,7 @@ net_params = net.init_parameters(PRNGKey(0), inputs)
 transfer_net = Sequential(net, relu, Dense(2))
 transfer_net_params = transfer_net.init_parameters(PRNGKey(1), inputs, reuse={net: net_params})
 
-assert transfer_net_params[0] is net_params
+assert net_params == transfer_net_params.dense0
 
 # train transfer_net_params...
 ```

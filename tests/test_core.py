@@ -299,6 +299,11 @@ def test_submodule_reuse():
     assert_dense_parameters_equal(layer_params, net1_params[0])
     assert_dense_parameters_equal(layer_params, net2_params[0])
 
+    new_layer_params = layer.init_parameters(PRNGKey(3), inputs)
+    combined_params = net1.parameters_from({net1: net1_params, layer: new_layer_params}, inputs)
+    # TODO https://github.com/JuliusKunze/jaxnet/issues/13:
+    assert_dense_parameters_equal(new_layer_params, combined_params.dense0)
+    assert_dense_parameters_equal(net1_params.dense1, combined_params.dense1)
 
 def test_no_params():
     @parametrized
