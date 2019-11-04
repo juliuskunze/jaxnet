@@ -6,7 +6,7 @@ import jax
 import numpy as onp
 from jax import lax, random, core as jc, linear_util as lu, \
     unzip2, unzip3, safe_zip, safe_map, partial, WrapHashably, tree_util, api_util, split_list, \
-    raise_to_shaped
+    raise_to_shaped, curry
 from jax.abstract_arrays import ShapedArray
 from jax.interpreters import xla, partial_eval as pe
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal
@@ -18,16 +18,41 @@ zip = safe_zip
 map = safe_map
 
 
-def _call_init(rng, submodule_params, parameters, jaxpr, consts, freevar_vals, in_vals, **kwargs):
+def _get_primitive_init(primitive):
+    if primitive in init_rules:
+        return partial(init_rules[primitive])
+
+    if isinstance(primitive, parametrized):
+        return _parametrized_init(primitive)
+
+    return _default_init(primitive)
+
+
+@curry
+def _default_init(primitive, rng, parameters_dict, *in_vals, **kwargs):
+    return primitive.bind(*in_vals, **kwargs), parameters_dict
+
+
+@curry
+def _parametrized_init(parametrized, rng, parameters_dict, *inputs):
+    # TODO check on all nesting levels, not just parent:
+    if parametrized not in parameters_dict:
+        parameters_dict[parametrized] = parametrized._init_parameters_dict(rng, *inputs)
+    parameters = parametrized._parameters_namedtuple(parameters_dict[parametrized])
+    out, _ = jax.tree_flatten(parametrized.apply(parameters, *inputs))
+    return out, parameters_dict
+
+
+def _call_init(rng, parameters_dict, kwargs, jaxpr, consts, freevar_vals, in_vals):
     jaxpr, = jaxpr
     consts, = consts
     freevar_vals, = freevar_vals
     f = lu.wrap_init(partial(jc.eval_jaxpr, jaxpr, consts, freevar_vals))
-    return xla.xla_call_p.bind(f, *in_vals, **parameters), submodule_params
+    return xla.xla_call_p.bind(f, *in_vals, **kwargs), parameters_dict
 
 
 def _parametrized_scan_impl(cell_parameters, *args, **kwargs):
-    """Almost identical to lax_control_flow._scan_impl, but with a parametrized cell."""
+    """Almost identical to lax_control_flow._scan_impl, but allowing for a parametrized cell."""
 
     forward, length, num_consts, num_carry, jaxpr, linear = split_dict(
         kwargs, ["forward", "length", "num_consts", "num_carry", "jaxpr", "linear"])
@@ -78,25 +103,7 @@ def _scan_apply(submodule_parameter_iter, *args, **kwargs):
     return _parametrized_scan_impl(cell_params, *args, **kwargs)
 
 
-def _get_primitive_init(primitive):
-    if primitive in init_rules:
-        return partial(init_rules[primitive])
-
-    if isinstance(primitive, parametrized):
-        def parametrized_init(rng, parameters_dict, *inputs):
-            if primitive not in parameters_dict:
-                parameters_dict[primitive] = primitive._init_parameters_dict(rng, *inputs)
-            parameters = primitive._parameters_namedtuple(parameters_dict[primitive])
-            out, _ = jax.tree_flatten(primitive.apply(parameters, *inputs))
-            return out, parameters_dict
-
-        return parametrized_init
-
-    return (lambda _, parameters_dict, *in_vals, **parameters:
-            (primitive.bind(*in_vals, **parameters), parameters_dict))
-
-
-def _get_parameters_dict(rng, jaxpr, consts, freevar_vals, submodule_parameters, *args):
+def _get_parameters_dict(rng, jaxpr, consts, freevar_vals, parameters_dict, *args):
     def read(v):
         return v.val if type(v) is jc.Literal else env[v]
 
@@ -120,18 +127,15 @@ def _get_parameters_dict(rng, jaxpr, consts, freevar_vals, submodule_parameters,
                 map(read, bound_vars))
                 for subjaxpr, const_vars, bound_vars
                 in eqn.bound_subjaxprs])
-            ans, submodule_parameters = primitive_init(
-                prim_rng, submodule_parameters, eqn.params, subjaxprs,
-                sub_consts, sub_freevar_vals, in_vals)
+            ans, parameters_dict = primitive_init(prim_rng, parameters_dict, eqn.params,
+                                                  subjaxprs, sub_consts, sub_freevar_vals, in_vals)
         else:
-            ans, submodule_parameters = primitive_init(
-                prim_rng, submodule_parameters, *in_vals, **eqn.params)
-        if eqn.primitive.multiple_results:
-            map(write, eqn.outvars, ans)
-        else:
-            write(eqn.outvars[0], ans)
+            ans, parameters_dict = primitive_init(prim_rng, parameters_dict, *in_vals, **eqn.params)
 
-    return submodule_parameters
+        ans = ans if eqn.primitive.multiple_results else (ans,)
+        map(write, eqn.outvars, ans)
+
+    return parameters_dict
 
 
 init_rules = {xla.xla_call_p: _call_init,
@@ -140,95 +144,101 @@ init_rules = {xla.xla_call_p: _call_init,
 apply_rules = {lax.scan_p: _scan_apply}
 
 
+@lu.transformation
+def _apply_with_trace(master, parameters, *vals):
+    """Transforms a parametrized function into its corresponding apply function."""
+    trace = ApplyTrace(master, jc.cur_sublevel())
+    outs = yield map(partial(ApplyTracer, trace,
+                             ApplyParametersIterator(parameters.val)), vals), {}
+    out_tracers = map(trace.full_raise, outs)
+    yield [t.val for t in out_tracers]
+
+
 class ApplyTrace(jc.Trace):
-    class SubmoduleParameterIterator:
-        def __init__(self, submodule_parameters):
-            self.submodule_parameters = submodule_parameters
-            self.index = 0
-            self.submodule_parameters_by_primitive = {}
-
-        def get_parameters(self, primitive):
-            parameters = self.submodule_parameters_by_primitive.get(primitive)
-            if parameters is not None:
-                return parameters
-
-            parameters = self.submodule_parameters[self.index]
-            self.index += 1
-            self.submodule_parameters_by_primitive[primitive] = parameters
-            return parameters
-
-        def get_parameters_or_empty(self):
-            return (self.get_parameters(None),) if len(self.submodule_parameters) > 0 else ()
-
-    class Tracer(jc.Tracer):
-        __slots__ = ['val', 'submodule_params_iter']
-
-        def __init__(self, trace, submodule_params_iter, val):
-            super().__init__(trace)
-            self.val = val
-            self.submodule_params_iter = submodule_params_iter
-
-        @property
-        def aval(self):
-            return jc.get_aval(self.val)
-
-        def full_lower(self):
-            return self
-
-        @staticmethod
-        def merge(tracers):
-            flat_inputs, submodule_params_iters = unzip2((t.val, t.submodule_params_iter)
-                                                         for t in tracers)
-
-            submodule_param_iter = None
-            for iter in submodule_params_iters:
-                if isinstance(iter, ApplyTrace.SubmoduleParameterIterator):
-                    assert submodule_param_iter is None or iter is submodule_param_iter
-                    submodule_param_iter = iter
-                else:
-                    assert isinstance(iter, dict)
-                    assert len(iter) == 0
-
-            return flat_inputs, submodule_param_iter
+    """Trace used to transform a module function into its corresponding apply function."""
 
     def pure(self, val):
-        return ApplyTrace.Tracer(self, {}, val)
+        return ApplyTracer(self, None, val)
 
     def lift(self, val):
-        return ApplyTrace.Tracer(self, {}, val)
+        return ApplyTracer(self, None, val)
 
     def sublift(self, val):
-        return ApplyTrace.Tracer(self, {}, val.val)
+        return ApplyTracer(self, None, val.val)
 
     def process_primitive(self, primitive, tracers, parameters):
-        flat_inputs, submodule_params_iter = ApplyTrace.Tracer.merge(tracers)
+        """Processes a call of a primitive during 'apply' of a parametrized function."""
+        flat_inputs, parameter_iter = ApplyTracer.merge(tracers)
         if primitive in apply_rules:
-            out = apply_rules[primitive](submodule_params_iter, *flat_inputs, **parameters)
+            out = apply_rules[primitive](parameter_iter, *flat_inputs, **parameters)
         elif isinstance(primitive, parametrized):
-            out = primitive.apply(submodule_params_iter.get_parameters(primitive), *flat_inputs)
+            out = primitive.apply(parameter_iter.get_parameters(primitive), *flat_inputs)
             out, _ = jax.tree_flatten(out)
         else:
             out = primitive.bind(*flat_inputs, **parameters)
-        if primitive.multiple_results:
-            return map(partial(ApplyTrace.Tracer, self, submodule_params_iter), out)
-        else:
-            return ApplyTrace.Tracer(self, submodule_params_iter, out)
+
+        to_tracer = lambda out: ApplyTracer(self, parameter_iter, out)
+        return map(to_tracer, out) if primitive.multiple_results else to_tracer(out)
 
     def process_call(self, call_primitive, f, tracers, parameters):
-        flat_inputs, submodule_params_iter = ApplyTrace.Tracer.merge(tracers)
-        f = ApplyTrace._apply_subtrace(f, self.master, WrapHashably(submodule_params_iter))
+        """Processes an xla_call during 'apply' of a parametrized function."""
+        flat_inputs, parameters_iter = ApplyTracer.merge(tracers)
+        f = _apply_with_trace(f, self.master, WrapHashably(parameters_iter))
         flat_outs = call_primitive.bind(f, *flat_inputs, **parameters)
-        return map(partial(ApplyTrace.Tracer, self, submodule_params_iter), flat_outs)
+        return map(partial(ApplyTracer, self, parameters_iter), flat_outs)
+
+
+class ApplyParametersIterator:
+    """Allows supplying submodules with their respective parameters while calling a module's `apply`
+    function by iterating through the given parameters."""
+
+    def __init__(self, parameters):
+        self.parameters = parameters
+        self.index = 0
+        self.parameters_by_primitive = {}
+
+    def get_parameters(self, primitive):
+        parameters = self.parameters_by_primitive.get(primitive)
+        if parameters is not None:
+            return parameters
+
+        parameters = self.parameters[self.index]
+        self.index += 1
+        self.parameters_by_primitive[primitive] = parameters
+        return parameters
+
+    def get_parameters_or_empty(self):
+        return (self.get_parameters(None),) if len(self.parameters) > 0 else ()
+
+
+class ApplyTracer(jc.Tracer):
+    """Tracer used to transform a module function into its corresponding apply function."""
+    __slots__ = ['val', 'parameters_iter']
+
+    def __init__(self, trace, parameters_iter, val):
+        super().__init__(trace)
+        self.val = val
+        self.parameters_iter = parameters_iter
+
+    @property
+    def aval(self):
+        return jc.get_aval(self.val)
+
+    def full_lower(self):
+        return self
 
     @staticmethod
-    @lu.transformation
-    def _apply_subtrace(master, submodule_params, *vals):
-        submodule_params = submodule_params.val
-        trace = ApplyTrace(master, jc.cur_sublevel())
-        outs = yield map(partial(ApplyTrace.Tracer, trace,
-                                 ApplyTrace.SubmoduleParameterIterator(submodule_params)), vals), {}
-        out_tracers = map(trace.full_raise, outs)
-        yield [t.val for t in out_tracers]
+    def merge(tracers):
+        flat_inputs, parameters_iters = unzip2((t.val, t.parameters_iter) for t in tracers)
+
+        parameters_iter = None
+        for iter in parameters_iters:
+            if iter is not None:
+                assert parameters_iter is None or iter is parameters_iter
+                assert isinstance(iter, ApplyParametersIterator)
+                parameters_iter = iter
+
+        return flat_inputs, parameters_iter
 
 
 class parametrized(jc.Primitive):
@@ -287,8 +297,7 @@ class parametrized(jc.Primitive):
                 flat_inputs, in_tree = tree_util.tree_flatten(inputs)
                 flat_fun, out_tree = api_util.flatten_fun_nokwargs(self._wrapped_fun, in_tree)
                 with jc.new_master(ApplyTrace) as master:
-                    flat_fun = ApplyTrace._apply_subtrace(flat_fun, master,
-                                                          WrapHashably(parameters))
+                    flat_fun = _apply_with_trace(flat_fun, master, WrapHashably(parameters))
                     flat_outputs = flat_fun.call_wrapped(*inputs)
                     del master
                 return tree_util.tree_unflatten(out_tree(), flat_outputs)
@@ -325,17 +334,16 @@ class parametrized(jc.Primitive):
                 self, lambda: pe.trace_to_jaxpr(flat_fun, parametrized._partialize(flat_inputs)),
                 do_trace_submodules=True)
 
-        submodule_params = _get_parameters_dict(
-            rng, jaxpr, consts, [], dict(), *example_inputs)
+        parameters_dict = _get_parameters_dict(rng, jaxpr, consts, [], dict(), *example_inputs)
 
-        if len(submodule_params) <= 1:
-            return submodule_params
+        if len(parameters_dict) <= 1:
+            return parameters_dict
 
-        assert len(submodule_params) == len(submodules_in_call_order)
+        assert len(parameters_dict) == len(submodules_in_call_order)
 
         permutation = parametrized._permutation_to_jaxpr_order(jaxpr, submodules_in_call_order)
-        assert len(submodule_params) == len(permutation)
-        submodule_param_pairs_in_call_order = list(submodule_params.items())
+        assert len(parameters_dict) == len(permutation)
+        submodule_param_pairs_in_call_order = list(parameters_dict.items())
         submodule_param_pairs_in_jaxpr_order = list(submodule_param_pairs_in_call_order[i]
                                                     for i in permutation)
         return dict(submodule_param_pairs_in_jaxpr_order)
@@ -352,9 +360,8 @@ class parametrized(jc.Primitive):
             if not isinstance(module, parametrized):
                 raise ValueError('Keys for reuse must be parametrized or ShapedParametrized.')
 
-            params_dict = parametrized._parameters_dict(parameters,
-                                                        module._init_parameters_dict(PRNGKey(0),
-                                                                                     *inputs))
+            params_dict = parametrized._parameters_dict(
+                parameters, module._init_parameters_dict(PRNGKey(0), *inputs))
             r.update(module._flatten_dict(params_dict))
 
         return r
@@ -467,7 +474,8 @@ class parametrized(jc.Primitive):
     @staticmethod
     def _permutation_to_jaxpr_order(jaxpr, submodules_in_call_order):
         """
-        Needed to supply parameter values (in order of appearance in jaxpr) to the right submodule.
+        Needed to supply parameter values (in order of appearance in jaxpr)
+        to the corresponding submodules (in call order).
         This is done by reordering submodules from call order to jaxpr order.
         """
         permutation = []
