@@ -301,9 +301,9 @@ def test_submodule_reuse():
 
     new_layer_params = layer.init_parameters(PRNGKey(3), inputs)
     combined_params = net1.parameters_from({net1: net1_params, layer: new_layer_params}, inputs)
-    # TODO https://github.com/JuliusKunze/jaxnet/issues/13:
     assert_dense_parameters_equal(new_layer_params, combined_params.dense0)
     assert_dense_parameters_equal(net1_params.dense1, combined_params.dense1)
+
 
 def test_no_params():
     @parametrized
@@ -321,6 +321,7 @@ def test_no_params():
     assert np.array_equal(out, out_)
 
 
+@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/15')
 def test_scan_unparametrized_cell():
     def cell(carry, x):
         return np.array([2]) * carry * x, np.array([2]) * carry * x

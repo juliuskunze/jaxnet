@@ -52,7 +52,6 @@ def main():
         e = error.apply_from({cross_entropy: params}, test.data, test.target, jit=True)
         print(f'Epoch {epoch} error {e * 100:.1f}')
 
-        break  # TODO https://github.com/JuliusKunze/jaxnet/issues/2
         for _ in range(100):
             batch = train.sample(batch_size)
             state = opt.update(cross_entropy.apply, state, batch.data, batch.target, jit=True)

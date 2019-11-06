@@ -191,7 +191,16 @@ def test_ocr_rnn():
     assert np.array_equal(np.zeros((7, 3)), cell.compute_kernel)
 
     out = net.apply(params, inputs)
-    assert np.array_equal(.25 * np.ones((1, 5, 4)), out)
+
+    @parametrized
+    def cross_entropy(images, targets):
+        prediction = net(images)
+        return np.mean(-np.sum(targets * np.log(prediction), (1, 2)))
+
+    opt = optimizers.RmsProp(0.003)
+    state = opt.init(cross_entropy.init_parameters(random.PRNGKey(0), inputs, out))
+    state = opt.update(cross_entropy.apply, state, inputs, out)
+    opt.update(cross_entropy.apply, state, inputs, out, jit=True)
 
 
 @pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/10')

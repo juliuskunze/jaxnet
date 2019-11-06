@@ -10,9 +10,9 @@ from jax import lax, random, core as jc, linear_util as lu, \
 from jax.abstract_arrays import ShapedArray
 from jax.interpreters import xla, partial_eval as pe
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal
-from jax.lax.lax_control_flow import _index_array, _update_array, _empty_array, fori_loop
+from jax.lax.lax_control_flow import _index_array, scan_p, _abstractify
 from jax.random import PRNGKey
-from jax.util import split_dict
+from jax.util import split_dict, cache
 
 zip = safe_zip
 map = safe_map
@@ -51,31 +51,39 @@ def _call_init(rng, parameters_dict, kwargs, jaxpr, consts, freevar_vals, in_val
     return xla.xla_call_p.bind(f, *in_vals, **kwargs), parameters_dict
 
 
+@cache()
+def _flat_initial_style_jaxpr(fun, in_avals):
+    """lax_control_flow._initial_style_jaxpr, but for arguments and results."""
+    in_pvals = [pe.PartialVal((aval, jc.unit)) for aval in in_avals]
+    jaxpr, out_pvals, consts = pe.trace_to_jaxpr(fun, in_pvals, instantiate=True)
+    out_avals = map(raise_to_shaped, unzip2(out_pvals)[0])
+    const_avals = tuple(raise_to_shaped(jc.get_aval(c)) for c in consts)
+    typed_jaxpr = jc.TypedJaxpr(pe.closure_convert_jaxpr(jaxpr),
+                                (), const_avals + in_avals, out_avals)
+    return typed_jaxpr, consts
+
 def _parametrized_scan_impl(cell_parameters, *args, **kwargs):
-    """Almost identical to lax_control_flow._scan_impl, but allowing for a parametrized cell."""
+    """lax_control_flow._scan_impl, but allowing for a parametrized cell."""
 
     forward, length, num_consts, num_carry, jaxpr, linear = split_dict(
         kwargs, ["forward", "length", "num_consts", "num_carry", "jaxpr", "linear"])
 
     consts, init, xs = split_list(args, [num_consts, num_carry])
     _, _, x_avals = split_list(jaxpr.in_avals, [num_consts, num_carry])
-    _, y_avals = split_list(jaxpr.out_avals, [num_carry])
 
     cell_primitive = parametrized(jc.jaxpr_as_fun(jaxpr))
-    cell = partial(cell_primitive.apply, cell_parameters)
+    cell = lu.wrap_init(partial(cell_primitive.apply, cell_parameters))
+    cell_args = consts + init + map(partial(_index_array, 0), x_avals, xs)
 
-    def body_fun(i, vals):
-        i = i if forward else length - i - 1
-        carry, ys = split_list(vals, [num_carry])
-        x = map(partial(_index_array, i), x_avals, xs)
-        # difference to _scan_impl: 'cell' instead of 'jc.jaxpr_as_fun(jaxpr)':
-        out_flat = cell(*(consts + carry + x))
-        carry_out, y_updates = split_list(out_flat, [num_carry])
-        ys_out = map(partial(_update_array, i), y_avals, ys, y_updates)
-        return carry_out + ys_out
+    jaxpr, new_consts = _flat_initial_style_jaxpr(cell,
+                                                  in_avals=tuple(map(_abstractify, cell_args)))
 
-    ys_init = map(partial(_empty_array, length), y_avals)
-    return fori_loop(0, length, body_fun, init + ys_init)
+    args = list(new_consts) + init + xs
+    kwargs['jaxpr'] = jaxpr
+    kwargs['num_consts'] = len(new_consts)
+    kwargs['linear'] = (False,) * len(args)
+
+    return scan_p.bind(*args, **kwargs)
 
 
 def _scan_init(rng, parameters_dict, *args, **kwargs):
