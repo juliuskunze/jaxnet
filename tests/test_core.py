@@ -595,7 +595,7 @@ def test_parameters_from_shared_submodules():
     assert np.array_equal(out, out_)
 
 
-def test_parameters_from_sharing_between_differing_parents():
+def test_parameters_from_sharing_between_multiple_parents():
     a = Dense(2)
     b = Sequential(a, np.sum)
 
@@ -616,7 +616,7 @@ def test_parameters_from_sharing_between_differing_parents():
     assert np.array_equal(out, out_)
 
 @pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/8')
-def test_parameter_sharing_between_differing_parents():
+def test_parameter_sharing_between_multiple_parents():
     a = Parameter(lambda rng: np.ones(()))
     b = Sequential(a)
 
