@@ -1,21 +1,86 @@
 from collections import namedtuple, Counter, defaultdict
 from pathlib import Path
+from typing import Iterable, Optional
 
 import dill
 import jax
 import numpy as onp
-from jax import lax, random, core as jc, linear_util as lu, \
-    unzip2, unzip3, safe_zip, safe_map, partial, WrapHashably, tree_util, api_util, split_list, \
-    raise_to_shaped, curry
+from jax import lax, random, unzip2, unzip3, safe_zip, safe_map, partial, WrapHashably, tree_util, \
+    api_util, split_list, raise_to_shaped, curry, eval_jaxpr
 from jax.abstract_arrays import ShapedArray
-from jax.interpreters import xla, partial_eval as pe
-from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal
+from jax.core import TypedJaxpr, new_master, get_aval, Tracer, unit, cur_sublevel, Trace, Literal, \
+    unitvar, jaxpr_as_fun, Primitive
+from jax.interpreters import xla
+from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal, closure_convert_jaxpr
 from jax.lax.lax_control_flow import _index_array, scan_p, _abstractify
+from jax.linear_util import wrap_init, transformation
 from jax.random import PRNGKey
 from jax.util import split_dict, cache
 
 zip = safe_zip
 map = safe_map
+
+
+def _abstractified(vals):
+    return map(_abstractify, vals)
+
+
+def _partialized(avals):
+    return map(lambda aval: PartialVal((aval, unit)), avals)
+
+
+def _partialized_abstractified(vals):
+    return _partialized(_abstractified(vals))
+
+
+class ValueTracer(Tracer):
+    __slots__ = ['val']
+
+    def __init__(self, trace, val):
+        super().__init__(trace)
+        self.val = val
+
+    @property
+    def aval(self):
+        return get_aval(self.val)
+
+    def full_lower(self):
+        return self
+
+
+def _init_parameters_dict(rng, jaxpr, consts, freevar_vals, parameters_dict, *args):
+    def read(v):
+        return v.val if type(v) is Literal else env[v]
+
+    def write(v, val):
+        env[v] = val
+
+    env = {}
+    write(unitvar, unit)
+    map(write, jaxpr.constvars, consts)
+    map(write, jaxpr.invars, args)
+    map(write, jaxpr.freevars, freevar_vals)
+    for eqn in jaxpr.eqns:
+        rng, prim_rng = random.split(rng)
+        in_vals = map(read, eqn.invars)
+
+        primitive_init = _get_primitive_init(eqn.primitive)
+        if eqn.bound_subjaxprs:
+            subjaxprs, sub_consts, sub_freevar_vals = unzip3([(
+                subjaxpr,
+                map(read, const_vars),
+                map(read, bound_vars))
+                for subjaxpr, const_vars, bound_vars
+                in eqn.bound_subjaxprs])
+            ans, parameters_dict = primitive_init(prim_rng, parameters_dict, eqn.params,
+                                                  subjaxprs, sub_consts, sub_freevar_vals, in_vals)
+        else:
+            ans, parameters_dict = primitive_init(prim_rng, parameters_dict, *in_vals, **eqn.params)
+
+        ans = ans if eqn.primitive.multiple_results else (ans,)
+        map(write, eqn.outvars, ans)
+
+    return parameters_dict
 
 
 def _get_primitive_init(primitive):
@@ -47,20 +112,19 @@ def _call_init(rng, parameters_dict, kwargs, jaxpr, consts, freevar_vals, in_val
     jaxpr, = jaxpr
     consts, = consts
     freevar_vals, = freevar_vals
-    f = lu.wrap_init(partial(jc.eval_jaxpr, jaxpr, consts, freevar_vals))
+    f = wrap_init(partial(eval_jaxpr, jaxpr, consts, freevar_vals))
     return xla.xla_call_p.bind(f, *in_vals, **kwargs), parameters_dict
 
 
 @cache()
 def _flat_initial_style_jaxpr(fun, in_avals):
     """lax_control_flow._initial_style_jaxpr, but for arguments and results."""
-    in_pvals = [pe.PartialVal((aval, jc.unit)) for aval in in_avals]
-    jaxpr, out_pvals, consts = pe.trace_to_jaxpr(fun, in_pvals, instantiate=True)
+    jaxpr, out_pvals, consts = trace_to_jaxpr(fun, _partialized(in_avals), instantiate=True)
     out_avals = map(raise_to_shaped, unzip2(out_pvals)[0])
-    const_avals = tuple(raise_to_shaped(jc.get_aval(c)) for c in consts)
-    typed_jaxpr = jc.TypedJaxpr(pe.closure_convert_jaxpr(jaxpr),
-                                (), const_avals + in_avals, out_avals)
+    avals = tuple(_abstractified(consts)) + in_avals
+    typed_jaxpr = TypedJaxpr(closure_convert_jaxpr(jaxpr), (), avals, out_avals)
     return typed_jaxpr, consts
+
 
 def _parametrized_scan_impl(cell_parameters, *args, **kwargs):
     """lax_control_flow._scan_impl, but allowing for a parametrized cell."""
@@ -71,12 +135,11 @@ def _parametrized_scan_impl(cell_parameters, *args, **kwargs):
     consts, init, xs = split_list(args, [num_consts, num_carry])
     _, _, x_avals = split_list(jaxpr.in_avals, [num_consts, num_carry])
 
-    cell_primitive = parametrized(jc.jaxpr_as_fun(jaxpr))
-    cell = lu.wrap_init(partial(cell_primitive.apply, cell_parameters))
+    cell_primitive = parametrized(jaxpr_as_fun(jaxpr))
+    cell = wrap_init(partial(cell_primitive.apply, cell_parameters))
     cell_args = consts + init + map(partial(_index_array, 0), x_avals, xs)
 
-    jaxpr, new_consts = _flat_initial_style_jaxpr(cell,
-                                                  in_avals=tuple(map(_abstractify, cell_args)))
+    jaxpr, new_consts = _flat_initial_style_jaxpr(cell, tuple(_abstractified(cell_args)))
 
     args = list(new_consts) + init + xs
     kwargs['jaxpr'] = jaxpr
@@ -92,8 +155,8 @@ def _scan_init(rng, parameters_dict, *args, **kwargs):
     consts, init, xs = split_list(args, split_sizes)
     _, _, x_avals = split_list(jaxpr.in_avals, split_sizes)
     x = map(partial(_index_array, 0), x_avals, xs)
-    parameters_dict = _get_parameters_dict(rng, jaxpr.jaxpr, jaxpr.literals, (),
-                                           parameters_dict, *(consts + init + x))
+    parameters_dict = _init_parameters_dict(rng, jaxpr.jaxpr, jaxpr.literals, (),
+                                            parameters_dict, *(consts + init + x))
 
     def get_cell_params():
         if len(parameters_dict) == 0:
@@ -105,95 +168,52 @@ def _scan_init(rng, parameters_dict, *args, **kwargs):
     return _parametrized_scan_impl(get_cell_params(), *args, **kwargs), parameters_dict
 
 
-def _scan_apply(submodule_parameter_iter, *args, **kwargs):
-    # TODO fix param sharing
-    cell_params = submodule_parameter_iter.get_parameters_or_empty()
-    return _parametrized_scan_impl(cell_params, *args, **kwargs)
-
-
-def _get_parameters_dict(rng, jaxpr, consts, freevar_vals, parameters_dict, *args):
-    def read(v):
-        return v.val if type(v) is jc.Literal else env[v]
-
-    def write(v, val):
-        env[v] = val
-
-    env = {}
-    write(jc.unitvar, jc.unit)
-    map(write, jaxpr.constvars, consts)
-    map(write, jaxpr.invars, args)
-    map(write, jaxpr.freevars, freevar_vals)
-    for eqn in jaxpr.eqns:
-        rng, prim_rng = random.split(rng)
-        in_vals = map(read, eqn.invars)
-
-        primitive_init = _get_primitive_init(eqn.primitive)
-        if eqn.bound_subjaxprs:
-            subjaxprs, sub_consts, sub_freevar_vals = unzip3([(
-                subjaxpr,
-                map(read, const_vars),
-                map(read, bound_vars))
-                for subjaxpr, const_vars, bound_vars
-                in eqn.bound_subjaxprs])
-            ans, parameters_dict = primitive_init(prim_rng, parameters_dict, eqn.params,
-                                                  subjaxprs, sub_consts, sub_freevar_vals, in_vals)
-        else:
-            ans, parameters_dict = primitive_init(prim_rng, parameters_dict, *in_vals, **eqn.params)
-
-        ans = ans if eqn.primitive.multiple_results else (ans,)
-        map(write, eqn.outvars, ans)
-
-    return parameters_dict
-
-
 init_rules = {xla.xla_call_p: _call_init,
               lax.scan_p: _scan_init}
 
-apply_rules = {lax.scan_p: _scan_apply}
 
-
-@lu.transformation
-def _apply_with_trace(master, parameters, *vals):
+@transformation
+def _apply_transform(master, parameters, *vals):
     """Transforms a parametrized function into its corresponding apply function."""
-    trace = ApplyTrace(master, jc.cur_sublevel())
-    outs = yield map(partial(ApplyTracer, trace,
-                             ApplyParametersIterator(parameters.val)), vals), {}
+    parameters_iter = ApplyParametersIterator(parameters.val)
+    trace = ApplyTrace(master, cur_sublevel())
+    outs = yield map(lambda o: ApplyTracer(trace, o, parameters_iter), vals), {}
     out_tracers = map(trace.full_raise, outs)
     yield [t.val for t in out_tracers]
 
 
-class ApplyTrace(jc.Trace):
+class ApplyTrace(Trace):
     """Trace used to transform a module function into its corresponding apply function."""
 
     def pure(self, val):
-        return ApplyTracer(self, None, val)
+        return ApplyTracer(self, val, None)
 
     def lift(self, val):
-        return ApplyTracer(self, None, val)
+        return ApplyTracer(self, val, None)
 
     def sublift(self, val):
-        return ApplyTracer(self, None, val.val)
+        return ApplyTracer(self, val.val, None)
 
-    def process_primitive(self, primitive, tracers, parameters):
+    def process_primitive(self, primitive, tracers, kwargs):
         """Processes a call of a primitive during 'apply' of a parametrized function."""
-        flat_inputs, parameter_iter = ApplyTracer.merge(tracers)
+        flat_inputs, parameters_iter = ApplyTracer.merge(tracers)
         if primitive in apply_rules:
-            out = apply_rules[primitive](parameter_iter, *flat_inputs, **parameters)
+            out = apply_rules[primitive](parameters_iter, *flat_inputs, **kwargs)
         elif isinstance(primitive, parametrized):
-            out = primitive.apply(parameter_iter.get_parameters(primitive), *flat_inputs)
+            out = primitive.apply(parameters_iter.get_parameters(primitive), *flat_inputs)
             out, _ = jax.tree_flatten(out)
         else:
-            out = primitive.bind(*flat_inputs, **parameters)
+            out = primitive.bind(*flat_inputs, **kwargs)
 
-        to_tracer = lambda out: ApplyTracer(self, parameter_iter, out)
+        to_tracer = lambda out: ApplyTracer(self, out, parameters_iter)
         return map(to_tracer, out) if primitive.multiple_results else to_tracer(out)
 
-    def process_call(self, call_primitive, f, tracers, parameters):
+    def process_call(self, call_primitive, f, tracers, kwargs):
         """Processes an xla_call during 'apply' of a parametrized function."""
         flat_inputs, parameters_iter = ApplyTracer.merge(tracers)
-        f = _apply_with_trace(f, self.master, WrapHashably(parameters_iter))
-        flat_outs = call_primitive.bind(f, *flat_inputs, **parameters)
-        return map(partial(ApplyTracer, self, parameters_iter), flat_outs)
+        f = _apply_transform(f, self.master, WrapHashably(parameters_iter))
+        flat_outs = call_primitive.bind(f, *flat_inputs, **kwargs)
+        return map(lambda out: ApplyTracer(self, out, parameters_iter), flat_outs)
 
 
 class ApplyParametersIterator:
@@ -205,7 +225,7 @@ class ApplyParametersIterator:
         self.index = 0
         self.parameters_by_primitive = {}
 
-    def get_parameters(self, primitive):
+    def get_parameters(self, primitive: Optional[Primitive]):
         parameters = self.parameters_by_primitive.get(primitive)
         if parameters is not None:
             return parameters
@@ -219,45 +239,39 @@ class ApplyParametersIterator:
         return (self.get_parameters(None),) if len(self.parameters) > 0 else ()
 
 
-class ApplyTracer(jc.Tracer):
+class ApplyTracer(ValueTracer):
     """Tracer used to transform a module function into its corresponding apply function."""
-    __slots__ = ['val', 'parameters_iter']
+    __slots__ = ValueTracer.__slots__ + ['parameters_iter']
 
-    def __init__(self, trace, parameters_iter, val):
-        super().__init__(trace)
-        self.val = val
+    def __init__(self, trace: ApplyTrace, val, parameters_iter: Optional[ApplyParametersIterator]):
+        super().__init__(trace, val)
+        assert parameters_iter is None or isinstance(parameters_iter, ApplyParametersIterator)
         self.parameters_iter = parameters_iter
 
-    @property
-    def aval(self):
-        return jc.get_aval(self.val)
-
-    def full_lower(self):
-        return self
-
     @staticmethod
-    def merge(tracers):
-        flat_inputs, parameters_iters = unzip2((t.val, t.parameters_iter) for t in tracers)
-
-        parameters_iter = None
-        for iter in parameters_iters:
-            if iter is not None:
-                assert parameters_iter is None or iter is parameters_iter
-                assert isinstance(iter, ApplyParametersIterator)
-                parameters_iter = iter
-
-        return flat_inputs, parameters_iter
+    def merge(tracers: Iterable['ApplyTracer']):
+        parameters_iter, = set(t.parameters_iter for t in tracers if t.parameters_iter)
+        return map(lambda t: t.val, tracers), parameters_iter
 
 
-class parametrized(jc.Primitive):
+def _scan_apply(parameters_iter, *args, **kwargs):
+    # TODO fix param sharing
+    cell_params = parameters_iter.get_parameters_or_empty()
+    return _parametrized_scan_impl(cell_params, *args, **kwargs)
+
+
+apply_rules = {lax.scan_p: _scan_apply}
+
+
+class parametrized(Primitive):
     def __init__(self, fun, name=None):
         self._name = name if name else fun.__name__
-        self._wrapped_fun = lu.wrap_init(fun) if fun else None
+        self._wrapped_fun = wrap_init(fun) if fun else None
         self.multiple_results = True
 
         super().__init__(f'{self._name}_{id(self)}')
 
-        @lu.wrap_init
+        @wrap_init
         def init_and_apply(rng, *inputs):
             parameters = self.init_parameters(rng, *inputs)
             return self.apply(parameters, *inputs)
@@ -271,9 +285,8 @@ class parametrized(jc.Primitive):
             flat_rng_and_inputs, in_tree_with_rng = jax.tree_flatten(key_and_inputs)
             flat_fun, self._cached_out_tree = jax.flatten_fun_nokwargs(self._init_and_apply,
                                                                        in_tree_with_rng)
-            flat_partial_inputs = [PartialVal((a, jc.unit)) for a in flat_rng_and_inputs]
             _, flat_partial_outs, _ = trace_to_jaxpr(
-                flat_fun, flat_partial_inputs, instantiate=True)
+                flat_fun, _partialized(flat_rng_and_inputs), instantiate=True)
             flat_outs, _ = unzip2(flat_partial_outs)
             return flat_outs
 
@@ -290,7 +303,7 @@ class parametrized(jc.Primitive):
         flat_rng_and_inputs, in_tree_with_rng = jax.tree_flatten((parametrized.dummy_rng,) + inputs)
         flat_fun, out_tree = jax.flatten_fun_nokwargs(self._init_and_apply, in_tree_with_rng)
         # Need to abstract eval in order to build out tree:
-        pe.trace_to_jaxpr(flat_fun, parametrized._partialize(flat_rng_and_inputs), instantiate=True)
+        trace_to_jaxpr(flat_fun, _partialized_abstractified(flat_rng_and_inputs), instantiate=True)
         return out_tree()
 
     def __call__(self, *inputs):
@@ -304,8 +317,8 @@ class parametrized(jc.Primitive):
             def inner():
                 flat_inputs, in_tree = tree_util.tree_flatten(inputs)
                 flat_fun, out_tree = api_util.flatten_fun_nokwargs(self._wrapped_fun, in_tree)
-                with jc.new_master(ApplyTrace) as master:
-                    flat_fun = _apply_with_trace(flat_fun, master, WrapHashably(parameters))
+                with new_master(ApplyTrace) as master:
+                    flat_fun = _apply_transform(flat_fun, master, WrapHashably(parameters))
                     flat_outputs = flat_fun.call_wrapped(*inputs)
                     del master
                 return tree_util.tree_unflatten(out_tree(), flat_outputs)
@@ -339,10 +352,10 @@ class parametrized(jc.Primitive):
         flat_fun, _ = api_util.flatten_fun_nokwargs(self._wrapped_fun, in_tree)
         (jaxpr, _, consts), submodules_in_call_order = \
             parametrized._submodule_call_order_tracing.nested(
-                self, lambda: pe.trace_to_jaxpr(flat_fun, parametrized._partialize(flat_inputs)),
+                self, lambda: trace_to_jaxpr(flat_fun, _partialized_abstractified(flat_inputs)),
                 do_trace_submodules=True)
 
-        parameters_dict = _get_parameters_dict(rng, jaxpr, consts, [], dict(), *example_inputs)
+        parameters_dict = _init_parameters_dict(rng, jaxpr, consts, [], dict(), *example_inputs)
 
         if len(parameters_dict) <= 1:
             return parameters_dict
@@ -499,10 +512,6 @@ class parametrized(jc.Primitive):
         assert len(permutation) == len(submodules_in_call_order)
 
         return parametrized.inverse_permutation(permutation)
-
-    @staticmethod
-    def _partialize(flat_inputs):
-        return map(lambda x: pe.PartialVal((raise_to_shaped(jc.get_aval(x)), jc.unit)), flat_inputs)
 
 
 class Parameter(parametrized):
