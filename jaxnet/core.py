@@ -100,7 +100,7 @@ def _default_init(primitive, rng, parameters_dict, *in_vals, **kwargs):
 
 @curry
 def _parametrized_init(parametrized, rng, parameters_dict, *inputs):
-    # TODO check on all nesting levels, not just parent:
+    # TODO https://github.com/JuliusKunze/jaxnet/issues/8 check all nesting levels, not just parent:
     if parametrized not in parameters_dict:
         parameters_dict[parametrized] = parametrized._init_parameters_dict(rng, *inputs)
     parameters = parametrized._parameters_namedtuple(parameters_dict[parametrized])

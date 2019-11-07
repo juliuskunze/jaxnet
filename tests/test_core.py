@@ -595,10 +595,9 @@ def test_parameters_from_shared_submodules():
     assert np.array_equal(out, out_)
 
 
-def test_parameters_from_diamond_shared_submodules():
-    sublayer = Dense(2)
-    a = Sequential(sublayer, relu)
-    b = Sequential(sublayer, np.sum)
+def test_parameters_from_sharing_between_differing_parents():
+    a = Dense(2)
+    b = Sequential(a, np.sum)
 
     @parametrized
     def net(inputs):
@@ -609,19 +608,17 @@ def test_parameters_from_diamond_shared_submodules():
     out = a.apply(a_params, inputs)
 
     params = net.parameters_from({a: a_params}, inputs)
-    assert_dense_parameters_equal(a_params.dense, params.sequential0.dense)
-    assert_dense_parameters_equal(a_params.dense, params.sequential1.dense)
+    assert_dense_parameters_equal(a_params, params.dense)
+    assert_dense_parameters_equal(a_params, params.sequential.dense)
     # TODO https://github.com/JuliusKunze/jaxnet/issues/8
     # assert 1 == len(params)
     out_, _ = net.apply(params, inputs)
     assert np.array_equal(out, out_)
 
-
 @pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/8')
-def test_diamond_shared_submodules():
-    p = Parameter(lambda rng: np.ones(()))
-    a = Sequential(Sequential(p))
-    b = Sequential(p)
+def test_parameter_sharing_between_differing_parents():
+    a = Parameter(lambda rng: np.ones(()))
+    b = Sequential(a)
 
     @parametrized
     def net(inputs):
