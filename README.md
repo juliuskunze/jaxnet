@@ -1,4 +1,4 @@
-# JAXnet [![Build Status](https://travis-ci.org/JuliusKunze/jaxnet.svg?branch=master)](https://travis-ci.org/JuliusKunze/jaxnet) [![PyPI](https://img.shields.io/pypi/v/jaxnet.svg)](https://pypi.python.org/pypi/jaxnet/#history)
+# JAXnet [![Build Status](https://travis-ci.org/JuliusKunze/jaxnet.svg?branch=master)](https://travis-ci.org/JuliusKunze/jaxnet) 
 
 JAXnet is a deep learning library based on [JAX](https://github.com/google/jax).
 JAXnet's functional API provides unique benefits over TensorFlow2, Keras and PyTorch,
@@ -138,7 +138,7 @@ See JAXnet in action in your browser:
 [ResNet](https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN) and
 [WaveNet](https://colab.research.google.com/drive/111cKRfwYX4YFuPH3FF4V46XLfsPG1icZ).
 
-## Installation
+## Installation [![PyPI](https://img.shields.io/pypi/v/jaxnet.svg)](https://pypi.python.org/pypi/jaxnet/#history)
 **This is a preview. Expect breaking changes!** Install with
 
 ```
