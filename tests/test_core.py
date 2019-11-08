@@ -372,9 +372,9 @@ def test_scan_parametrized_cell():
 
     inputs = np.zeros((3,))
 
-    params = rnn.init_parameters(PRNGKey(0), inputs)
-
-    outs = rnn.apply(params, inputs)
+    rnn_params = rnn.init_parameters(PRNGKey(0), inputs)
+    assert (2,) == rnn_params.cell.parameter.shape
+    outs = rnn.apply(rnn_params, inputs)
 
     assert (3, 2) == outs.shape
 
