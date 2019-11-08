@@ -4,16 +4,16 @@ from typing import Iterable, Optional
 
 import dill
 import jax
-from jax import lax, random, unzip2, safe_zip, safe_map, partial, WrapHashably, tree_util, \
-    api_util, split_list, raise_to_shaped, curry, tree_leaves
+from jax import lax, random, unzip2, safe_zip, safe_map, partial, curry, WrapHashably, \
+    raise_to_shaped, tree_leaves, tree_flatten, tree_unflatten, flatten_fun_nokwargs
 from jax.abstract_arrays import ShapedArray
-from jax.core import TypedJaxpr, new_master, get_aval, Tracer, unit, cur_sublevel, Trace, \
-    jaxpr_as_fun, Primitive
+from jax.core import new_master, cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, \
+    jaxpr_as_fun, TypedJaxpr
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal, closure_convert_jaxpr
 from jax.lax.lax_control_flow import _index_array, scan_p, _abstractify
 from jax.linear_util import wrap_init, transformation, transformation_with_aux
 from jax.random import PRNGKey
-from jax.util import split_dict, cache
+from jax.util import split_list, split_dict, cache
 
 zip = safe_zip
 map = safe_map
@@ -126,7 +126,7 @@ def _parametrized_init(parametrized, rng, parameters_dict, *inputs):
     if parametrized not in parameters_dict:
         parameters_dict[parametrized] = parametrized._init_parameters_dict(rng, *inputs)
     parameters = parametrized._parameters_namedtuple(parameters_dict[parametrized])
-    out, _ = jax.tree_flatten(parametrized.apply(parameters, *inputs))
+    out, _ = tree_flatten(parametrized.apply(parameters, *inputs))
     return out, parameters_dict
 
 
@@ -305,9 +305,9 @@ class parametrized(Primitive):
 
         def abstract_call(*inputs):
             key_and_inputs = (ShapedArray((2,), 'uint32'),) + inputs
-            flat_rng_and_inputs, in_tree_with_rng = jax.tree_flatten(key_and_inputs)
-            flat_fun, self._cached_out_tree = jax.flatten_fun_nokwargs(self._init_and_apply,
-                                                                       in_tree_with_rng)
+            flat_rng_and_inputs, in_tree_with_rng = tree_flatten(key_and_inputs)
+            flat_fun, self._cached_out_tree = flatten_fun_nokwargs(self._init_and_apply,
+                                                                   in_tree_with_rng)
             _, flat_partial_outs, _ = trace_to_jaxpr(
                 flat_fun, _partialized(flat_rng_and_inputs), instantiate=True)
             flat_outs, _ = unzip2(flat_partial_outs)
@@ -323,28 +323,28 @@ class parametrized(Primitive):
             self._cached_out_tree = None
             return result
 
-        flat_rng_and_inputs, in_tree_with_rng = jax.tree_flatten((parametrized.dummy_rng,) + inputs)
-        flat_fun, out_tree = jax.flatten_fun_nokwargs(self._init_and_apply, in_tree_with_rng)
+        flat_rng_and_inputs, in_tree_with_rng = tree_flatten((parametrized.dummy_rng,) + inputs)
+        flat_fun, out_tree = flatten_fun_nokwargs(self._init_and_apply, in_tree_with_rng)
         # Need to abstract eval in order to build out tree:
         trace_to_jaxpr(flat_fun, _partialized_abstractified(flat_rng_and_inputs), instantiate=True)
         return out_tree()
 
     def __call__(self, *inputs):
         self._register_call()
-        flat_inputs, _ = jax.tree_flatten(inputs)
+        flat_inputs, _ = tree_flatten(inputs)
         flat_outs = self.bind(*flat_inputs)
-        return jax.tree_unflatten(self._out_tree(*inputs), flat_outs)
+        return tree_unflatten(self._out_tree(*inputs), flat_outs)
 
     def apply(self, parameters, *inputs, jit=False):
         def _apply(parameters, *inputs):
             def inner():
-                flat_inputs, in_tree = tree_util.tree_flatten(inputs)
-                flat_fun, out_tree = api_util.flatten_fun_nokwargs(self._wrapped_fun, in_tree)
+                flat_inputs, in_tree = tree_flatten(inputs)
+                flat_fun, out_tree = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
                 with new_master(ApplyTrace) as master:
                     flat_fun = _apply_transform(flat_fun, master, WrapHashably(parameters))
                     flat_outputs = flat_fun.call_wrapped(*inputs)
                     del master
-                return tree_util.tree_unflatten(out_tree(), flat_outputs)
+                return tree_unflatten(out_tree(), flat_outputs)
 
             return self._run_with_submodules_stack_frame(inner)
 
