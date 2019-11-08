@@ -47,20 +47,39 @@ class ValueTracer(Tracer):
 
 
 @transformation_with_aux
-def _init_transform(inputs):
+def _init_transform(rng, inputs):
     """Transforms a parametrized function into its corresponding init_parameters function."""
     with new_master(InitTrace) as master:
         trace = InitTrace(master, cur_sublevel())
+        master._rng = rng
+
+        def next_rng():
+            master._rng, rng = random.split(master._rng)
+            return rng
+
+        master.next_rng = next_rng
+
+        master._submodules_in_call_order = dict()
+
+        def register_submodule_call(primitive):
+            master._submodules_in_call_order[primitive] = None
+
+        master.register_submodule_call = register_submodule_call
+
         outs = yield map(lambda x: InitTracer(trace, x, {}), inputs), {}
         multiple_results = isinstance(outs, tuple)
         out_tracers = map(trace.full_raise, outs if multiple_results else (outs,))
         out_val, parameters_dict = InitTracer.merge(out_tracers)
+        submodules_in_call_order = master._submodules_in_call_order.keys()
         del master, out_tracers
-    yield out_val if multiple_results else out_val[0], parameters_dict
+    yield out_val if multiple_results else out_val[0], (parameters_dict, submodules_in_call_order)
 
 
 class InitTrace(Trace):
     """Trace used to transform a module into its corresponding `init_parameters` function."""
+
+    def __init__(self, master, sublevel):
+        super().__init__(master, sublevel)
 
     def pure(self, val):
         return InitTracer(self, val, {})
@@ -74,7 +93,7 @@ class InitTrace(Trace):
     def process_primitive(self, primitive, tracers, kwargs):
         """Processes a primitive during tracing for `init_parameters`."""
         inputs, parameters_dict = InitTracer.merge(tracers)
-        rng = parametrized._sample_rng()
+        rng = tracers[0].trace.master.next_rng()
         out, parameters_dict = _get_init_for(primitive)(rng, parameters_dict, *inputs, **kwargs)
         to_tracer = lambda out: InitTracer(self, out, parameters_dict)
 
@@ -330,23 +349,24 @@ class parametrized(Primitive):
         return out_tree()
 
     def __call__(self, *inputs):
-        self._register_call()
         flat_inputs, _ = tree_flatten(inputs)
+
+        master = flat_inputs[0].trace.master
+        if master.trace_type == InitTrace:
+            master.register_submodule_call(self)
+
         flat_outs = self.bind(*flat_inputs)
         return tree_unflatten(self._out_tree(*inputs), flat_outs)
 
     def apply(self, parameters, *inputs, jit=False):
         def _apply(parameters, *inputs):
-            def inner():
-                flat_inputs, in_tree = tree_flatten(inputs)
-                flat_fun, out_tree = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
-                with new_master(ApplyTrace) as master:
-                    flat_fun = _apply_transform(flat_fun, master, WrapHashably(parameters))
-                    flat_outputs = flat_fun.call_wrapped(*inputs)
-                    del master
-                return tree_unflatten(out_tree(), flat_outputs)
-
-            return self._run_with_submodules_stack_frame(inner)
+            flat_inputs, in_tree = tree_flatten(inputs)
+            flat_fun, out_tree = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
+            with new_master(ApplyTrace) as master:
+                flat_fun = _apply_transform(flat_fun, master, WrapHashably(parameters))
+                flat_outputs = flat_fun.call_wrapped(*inputs)
+                del master
+            return tree_unflatten(out_tree(), flat_outputs)
 
         return (jax.jit(_apply) if jit else _apply)(parameters, *inputs)
 
@@ -370,13 +390,9 @@ class parametrized(Primitive):
         return self._parameters_namedtuple(d)
 
     def _init_parameters_dict(self, rng, *example_inputs):
-        init_fun, parameters_dict_fun = _init_transform(self._wrapped_fun)
-        wrapped_init_fun = lambda: init_fun.call_wrapped(example_inputs)
-        as_nested = lambda: self._run_with_submodules_stack_frame(wrapped_init_fun,
-                                                                  do_trace_submodules=True)
-        _, submodules_in_call_order = parametrized._run_with_rng(rng, as_nested)
-
-        parameters_dict = parameters_dict_fun()
+        init_fun, aux_fun = _init_transform(self._wrapped_fun, rng)
+        init_fun.call_wrapped(example_inputs)
+        parameters_dict, submodules_in_call_order = aux_fun()
         if len(parameters_dict) <= 1:  # only needed for scan
             return parameters_dict
 
@@ -471,47 +487,6 @@ class parametrized(Primitive):
 
     def shaped(self, *inputs):
         return ShapedParametrized(self, *inputs)
-
-    _submodules_stack = []
-
-    def _run_with_submodules_stack_frame(self, body, do_trace_submodules=False):
-        submodules = dict() if do_trace_submodules else None
-        parametrized._submodules_stack.append(submodules)
-
-        try:
-            result = body()
-        finally:
-            submodules = parametrized._submodules_stack.pop()
-
-        return (result, submodules.keys()) if do_trace_submodules else result
-
-    def _register_call(self):
-        submodules = parametrized._submodules_stack[-1]
-        do_trace_submodules = submodules is not None
-        if not do_trace_submodules:
-            return
-
-        if self not in submodules:
-            # used as ordered set:
-            submodules[self] = None
-
-    _rng_stack = []
-
-    @staticmethod
-    def _run_with_rng(rng, body):
-        parametrized._rng_stack.append(rng)
-
-        try:
-            return body()
-        finally:
-            parametrized._rng_stack.pop()
-
-    @staticmethod
-    def _sample_rng():
-        rng1, rng2 = random.split(parametrized._rng_stack.pop())
-        parametrized._rng_stack.append(rng1)
-        return rng2
-
 
 class Parameter(parametrized):
     def __init__(self, init_parameter, name=None):

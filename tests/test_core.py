@@ -56,14 +56,18 @@ def test_parameter_with_multiple_arrays_submodule():
 def test_submodule_order():
     @parametrized
     def net(dummy_inputs):
-        a = parameter((1,), zeros, dummy_inputs)
+        a_submodule = Parameter(lambda rng: np.zeros((1,)))
+        a = a_submodule(dummy_inputs)
         b = parameter((2,), zeros, dummy_inputs)
         c = parameter((3,), zeros, dummy_inputs)
         d = parameter((4,), zeros, dummy_inputs)
         e = parameter((5,), zeros, dummy_inputs)
         f = parameter((6,), zeros, dummy_inputs)
 
-        return np.concatenate([a, f]) + np.concatenate([b, e]) + np.concatenate([c, d])
+        # must not mess up order (decided by first submodule call):
+        k = a_submodule(dummy_inputs)
+
+        return np.concatenate([a, f]) + np.concatenate([b, e]) + np.concatenate([c, d]) + k
 
     params = net.init_parameters(PRNGKey(0), np.zeros(()))
 
