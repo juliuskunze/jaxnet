@@ -83,6 +83,7 @@ class InitTrace(Trace):
     def process_call(self, call_primitive, f, tracers, kwargs):
         """Processes an xla_call (jitted function etc) during tracing for `init_parameters`."""
         inputs, parameters_dict = InitTracer.merge(tracers)
+        # TODO https://github.com/JuliusKunze/jaxnet/issues/14
         outs = call_primitive.bind(f, *inputs, **kwargs)
         return map(lambda out: InitTracer(self, out, parameters_dict), outs)
 
@@ -131,7 +132,7 @@ def _parametrized_init(parametrized, rng, parameters_dict, *inputs):
 
 @cache()
 def _flat_initial_style_jaxpr(fun, in_avals):
-    """lax_control_flow._initial_style_jaxpr, but for arguments and results."""
+    """lax_control_flow._initial_style_jaxpr, but for flat arguments and results."""
     jaxpr, out_pvals, consts = trace_to_jaxpr(fun, _partialized(in_avals), instantiate=True)
     out_avals = map(raise_to_shaped, unzip2(out_pvals)[0])
     avals = tuple(_abstractified(consts)) + in_avals
@@ -168,12 +169,12 @@ def _scan_init(rng, parameters_dict, *args, **kwargs):
 
     eqn, = jaxpr.jaxpr.eqns
     parametrized_cell = eqn.primitive
-    parameters_dict = parametrized_cell._init_parameters_dict(rng, *(consts + init + x))
-    cell_parameters_dict = {parametrized_cell: parameters_dict}
-    cell_parameters = parametrized_cell._parameters_namedtuple(parameters_dict)
+    cell_parameters_dict = parametrized_cell._init_parameters_dict(rng, *(consts + init + x))
+    parameters_dict[parametrized_cell] = cell_parameters_dict
+    cell_parameters = parametrized_cell._parameters_namedtuple(cell_parameters_dict)
     cell = partial(parametrized_cell.apply, cell_parameters)
 
-    return _parametrized_scan_impl(cell, *args, **kwargs), cell_parameters_dict
+    return _parametrized_scan_impl(cell, *args, **kwargs), parameters_dict
 
 
 init_rules = {lax.scan_p: _scan_init}
