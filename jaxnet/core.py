@@ -23,7 +23,7 @@ def _abstractified(vals):
     return map(_abstractify, vals)
 
 
-def _abstractified_to_shape_only(vals):
+def _abstractified_to_shapes_only(vals):
     return map(raise_to_shaped, map(make_shaped_array, vals))
 
 
@@ -63,7 +63,7 @@ def _parametrized_scan_impl(cell, *args, **kwargs):
     return scan_p.bind(*args, **kwargs)
 
 
-class ValueTracer(Tracer):
+class ParametrizedTracer(Tracer):
     __slots__ = ['val']
 
     def __init__(self, trace, val):
@@ -78,9 +78,28 @@ class ValueTracer(Tracer):
         return self
 
 
-class ValueTrace(Trace):
+class ParametrizedTraceState:
+    def __init__(self):
+        self._out_tree = None
+
+    def set_out_tree(self, out_tree):
+        assert self._out_tree is None
+        self._out_tree = out_tree
+
+    def get_out_tree(self):
+        assert self._out_tree is not None
+        out_tree = self._out_tree
+        self._out_tree = None
+        return out_tree
+
+
+class ParametrizedTrace(Trace):
     """Base for the two trace classes used to transform a `parameterized` function
     into its corresponding `init_parameters` or `apply` function."""
+
+    @property
+    def state(self) -> ParametrizedTraceState:
+        return self.master.state
 
     def process_primitive(self, primitive: Primitive, tracers, kwargs):
         out = self._process_primitive(primitive, self.values(tracers), kwargs)
@@ -96,7 +115,10 @@ class ValueTrace(Trace):
             return InitTrace._rules[primitive](self)(*inputs, **kwargs)
 
         if isinstance(primitive, parametrized):
-            return self._process_parametrized(primitive, *inputs)
+            outputs = self._process_parametrized(primitive, *inputs)
+            flat_outputs, out_tree = tree_flatten(outputs)
+            self.state.set_out_tree(out_tree)
+            return flat_outputs
 
         return primitive.bind(*inputs, **kwargs)
 
@@ -121,12 +143,12 @@ class ValueTrace(Trace):
         return self.tracer(val.val)
 
     def tracer(self, val):
-        return ValueTracer(self, val)
+        return ParametrizedTracer(self, val)
 
     def tracers(self, values):
         return map(self.tracer, values)
 
-    def values(self, tracers: Iterable[ValueTracer]):
+    def values(self, tracers: Iterable[ParametrizedTracer]):
         return tuple(t.val for t in tracers)
 
 
@@ -147,8 +169,10 @@ def _init_transform(rng, inputs):
     yield out_val if multiple_results else out_val[0], parameters_dict
 
 
-class InitTraceState:
+class InitTraceState(ParametrizedTraceState):
     def __init__(self, rng):
+        super().__init__()
+
         self._rng = rng
         # used as ordered set:
         self._submodules_in_call_order = dict()
@@ -172,26 +196,27 @@ class InitTraceState:
         return {m: self.parameters_dict[m] for m in submodules_in_call_order}
 
 
-class InitTrace(ValueTrace):
-    """Trace used to transform a module into its corresponding `init_parameters` function."""
+class InitTrace(ParametrizedTrace):
+    """Trace used to transform a `parametrized` function
+     into its corresponding `init_parameters` function."""
 
     @property
     def state(self) -> InitTraceState:
         return self.master.state
 
     def _process_parametrized(self, parametrized, *inputs):
-        self.state.register_parametrized(parametrized)
+        state = self.state
+        state.register_parametrized(parametrized)
 
         # TODO https://github.com/JuliusKunze/jaxnet/issues/8 check all frames, not just parent:
-        if parametrized not in self.state.parameters_dict:
+        if parametrized not in state.parameters_dict:
             parameters_dict, outputs = parametrized._init_and_apply_parameters_dict(
-                self.state.next_rng(), *inputs)
-            self.state.parameters_dict[parametrized] = parameters_dict
-            return tree_leaves(outputs)
+                state.next_rng(), *inputs)
+            state.parameters_dict[parametrized] = parameters_dict
+            return outputs
         else:
-            parameters = parametrized._parameters_namedtuple(
-                self.state.parameters_dict[parametrized])
-            return tree_leaves(parametrized.apply(parameters, *inputs))
+            parameters = parametrized._parameters_namedtuple(state.parameters_dict[parametrized])
+            return parametrized.apply(parameters, *inputs)
 
     def _process_call(self, call_primitive, f, *inputs, **kwargs):
         """Processes an xla_call (jitted function etc) during tracing for `init_parameters`."""
@@ -216,11 +241,21 @@ class InitTrace(ValueTrace):
         return _parametrized_scan_impl(cell, *args, **kwargs)
 
 
-class ApplyTraceState:
+@transformation
+def _apply_transform(master: MasterTrace, *inputs):
+    """Transforms a `parametrized` function into its corresponding `apply` function."""
+    trace = ApplyTrace(master, cur_sublevel())
+    outs = yield trace.tracers(inputs), {}
+    yield [trace.full_raise(o).val for o in outs]
+
+
+class ApplyTraceState(ParametrizedTraceState):
     """Allows supplying submodules with their respective parameters while calling a module's `apply`
     function by iterating through the given parameters."""
 
     def __init__(self, parameters):
+        super().__init__()
+
         self.parameters = parameters
         self._index = 0
         self._parameters_by_primitive = {}
@@ -236,16 +271,15 @@ class ApplyTraceState:
         return parameters
 
 
-class ApplyTrace(ValueTrace):
-    """Trace used to transform a module into its corresponding `apply` function."""
+class ApplyTrace(ParametrizedTrace):
+    """Trace used to transform a `parametrized` function into its corresponding `apply` function."""
 
     @property
     def state(self) -> ApplyTraceState:
         return self.master.state
 
     def _process_parametrized(self, parametrized, *inputs):
-        return tree_leaves(
-            parametrized.apply(self.state.next_parameters_for(parametrized), *inputs))
+        return parametrized.apply(self.state.next_parameters_for(parametrized), *inputs)
 
     def _process_call(self, call_primitive, f, *inputs, **kwargs):
         """Processes an xla_call (jitted function etc) during 'apply' of a parametrized function."""
@@ -259,14 +293,6 @@ class ApplyTrace(ValueTrace):
             state.parameters) > 0 else ()
         cell = partial(cell_primitive.apply, cell_params)
         return _parametrized_scan_impl(cell, *args, **kwargs)
-
-
-@transformation
-def _apply_transform(master: MasterTrace, *inputs):
-    """Transforms a `parametrized` function into its corresponding `apply` function."""
-    trace = ApplyTrace(master, cur_sublevel())
-    outs = yield trace.tracers(inputs), {}
-    yield [trace.full_raise(o).val for o in outs]
 
 
 class parametrized(Primitive):
@@ -299,13 +325,18 @@ class parametrized(Primitive):
         flat_rng_and_inputs, in_tree_with_rng = tree_flatten((parametrized.dummy_rng,) + inputs)
         flat_fun, out_tree = flatten_fun_nokwargs(self._init_and_apply, in_tree_with_rng)
         # Need to abstract_eval in order to build out tree:
-        _instantiated_trace_to_jaxpr(flat_fun, _abstractified_to_shape_only(flat_rng_and_inputs))
+        _instantiated_trace_to_jaxpr(flat_fun, _abstractified_to_shapes_only(flat_rng_and_inputs))
         return out_tree()
 
     def __call__(self, *inputs):
         flat_inputs = tree_leaves(inputs)
         flat_outs = self.bind(*flat_inputs)
-        return tree_unflatten(self._out_tree(*inputs), flat_outs)
+        master = flat_inputs[0].trace.master
+
+        is_out_tree_cached = issubclass(master.trace_type, ParametrizedTrace)
+        out_tree = master.state.get_out_tree() if is_out_tree_cached else self._out_tree(*inputs)
+
+        return tree_unflatten(out_tree, flat_outs)
 
     def apply(self, parameters, *inputs, jit=False):
         def _apply(parameters, *inputs):

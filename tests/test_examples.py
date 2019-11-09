@@ -1,7 +1,6 @@
 import time
 from collections import namedtuple
 
-import pytest
 from jax import numpy as np, random
 from jax.random import PRNGKey
 
@@ -203,7 +202,6 @@ def test_ocr_rnn():
     opt.update(cross_entropy.apply, state, inputs, out, jit=True)
 
 
-@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/10')
 def test_wavenet():
     filter_width = 2
     initial_filter_width = 3
