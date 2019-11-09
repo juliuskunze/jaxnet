@@ -66,7 +66,7 @@ The `Parameter` module is roughly equivalent to:
 class Parameter:
     def __init__(self, init_parameter): self.init_parameter = init_parameter
 
-    def apply(self, params, *inputs): return params
+    def apply(self, parameters, *inputs): return parameters
 
     def init_parameters(self, rng, *example_inputs): return self.init_parameter(rng)
 ```
@@ -77,24 +77,21 @@ All other modules are composed from this primitive via `@parametrized` functions
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parametrized
     def dense(inputs):
-        kernel = Parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))(inputs)
-        bias = Parameter(lambda rng: bias_init(rng, (out_dim,)))(inputs)
+        kernel = Parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))()
+        bias = Parameter(lambda rng: bias_init(rng, (out_dim,)))()
         return np.dot(inputs, kernel) + bias
 
     return dense
 ```
 
-(For technical reasons, `Parameter` is required to be called with any dummy argument
-that depends on the module input.
-This is planned to be removed in a future version.)
 The `parameter` function allows to express the same more concisely:
 
 ```python
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parametrized
     def dense(inputs):
-        kernel = parameter((inputs.shape[-1], out_dim), kernel_init, inputs)
-        bias = parameter((out_dim,), bias_init, inputs)
+        kernel = parameter((inputs.shape[-1], out_dim), kernel_init)
+        bias = parameter((out_dim,), bias_init)
         return np.dot(inputs, kernel) + bias
 
     return dense
@@ -111,8 +108,8 @@ class Dense:
         self.kernel_init = kernel_init
         self.out_dim = out_dim
 
-    def apply(self, params, inputs):
-        kernel, bias = params
+    def apply(self, parameters, inputs):
+        kernel, bias = parameters
         return np.dot(inputs, kernel) + bias
 
     def init_parameters(self, rng, example_inputs):
@@ -127,8 +124,8 @@ This allows creation and usage of models as described in the [readme](README.md)
 Parameters can optionally be named (see next section for effect):
 
 ```python
-        kernel = parameter((inputs.shape[-1], out_dim), kernel_init, inputs, 'kernel')
-        bias = parameter((out_dim,), bias_init, inputs, 'name')
+        kernel = parameter((inputs.shape[-1], out_dim), kernel_init, 'kernel')
+        bias = parameter((out_dim,), bias_init, 'name')
 ```
 
 ## How are parameters named?
@@ -171,7 +168,7 @@ Reparametrization is similarly simple:
     def Scaled():
         @parametrized
         def learnable_scale(params):
-            return 2 * parameter((), ones, params) * params
+            return 2 * parameter((), ones) * params
 
         return learnable_scale
 
@@ -195,7 +192,7 @@ Implementing `Reparametrized` is straight-forward:
 def Reparametrized(model, reparametrization_factory):
     @parametrized
     def reparametrized(*inputs):
-        params = Parameter(lambda rng: model.init_parameters(rng, *inputs))(*inputs)
+        params = Parameter(lambda rng: model.init_parameters(rng, *inputs))()
         transformed_params = tree_map(lambda param: reparametrization_factory()(param), params)
         return model.apply(transformed_params, *inputs)
 

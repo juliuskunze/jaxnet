@@ -67,8 +67,8 @@ def test_parameter_Dense_equivalent():
     def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
         @parametrized
         def dense(inputs):
-            kernel = Parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))(inputs)
-            bias = Parameter(lambda rng: bias_init(rng, (out_dim,)))(inputs)
+            kernel = Parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))()
+            bias = Parameter(lambda rng: bias_init(rng, (out_dim,)))()
             return np.dot(inputs, kernel) + bias
 
         return dense
@@ -104,8 +104,8 @@ def test_Parameter_dense():
     def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
         @parametrized
         def dense(inputs):
-            kernel = parameter((inputs.shape[-1], out_dim), kernel_init, inputs)
-            bias = parameter((out_dim,), bias_init, inputs)
+            kernel = parameter((inputs.shape[-1], out_dim), kernel_init)
+            bias = parameter((out_dim,), bias_init)
             return np.dot(inputs, kernel) + bias
 
         return dense

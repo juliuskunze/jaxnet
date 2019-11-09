@@ -9,8 +9,8 @@ while retaining the functional character of stax. Advantages of JAXnet include:
 def Dense(out_dim, W_init=glorot(), b_init=randn()):
     @parametrized
     def dense(inputs):
-        W = parameter((inputs.shape[-1], out_dim), W_init, inputs)
-        b = parameter((out_dim,), b_init, inputs)
+        W = parameter((inputs.shape[-1], out_dim), W_init)
+        b = parameter((out_dim,), b_init)
         return np.dot(inputs, W) + b
 
     return dense

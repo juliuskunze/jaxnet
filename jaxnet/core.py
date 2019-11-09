@@ -8,7 +8,7 @@ from jax import lax, random, unzip2, safe_zip, safe_map, partial, raise_to_shape
     tree_flatten, tree_unflatten, flatten_fun_nokwargs, tree_structure
 from jax.abstract_arrays import ShapedArray, make_shaped_array
 from jax.core import new_master, cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, \
-    jaxpr_as_fun, TypedJaxpr, MasterTrace
+    jaxpr_as_fun, TypedJaxpr, MasterTrace, full_lower, find_top_trace, valid_jaxtype, skip_checks
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal, closure_convert_jaxpr
 from jax.lax.lax_control_flow import _index_array, scan_p, _abstractify
 from jax.linear_util import wrap_init, transformation, transformation_with_aux
@@ -331,12 +331,33 @@ class parametrized(Primitive):
     def __call__(self, *inputs):
         flat_inputs = tree_leaves(inputs)
         flat_outs = self.bind(*flat_inputs)
-        master = flat_inputs[0].trace.master
+        master = self._find_master()
 
         is_out_tree_cached = issubclass(master.trace_type, ParametrizedTrace)
         out_tree = master.state.get_out_tree() if is_out_tree_cached else self._out_tree(*inputs)
 
         return tree_unflatten(out_tree, flat_outs)
+
+    def bind(self, *args, **kwargs):
+        """Like Primitive.bind, but finds the master trace even when no arguments are provided."""
+        assert skip_checks or all(isinstance(arg, Tracer)
+                                  or valid_jaxtype(arg) for arg in args), args
+        top_trace = find_top_trace(args)
+        if top_trace is None:
+            assert len(args) == 0
+            master = self._find_master()
+            top_trace = master.trace_type(master, cur_sublevel())
+
+        tracers = map(top_trace.full_raise, args)
+        out_tracers = top_trace.process_primitive(self, tracers, kwargs)
+        return map(full_lower, out_tracers)
+
+    def _find_master(self):
+        """Find the current master trace.
+        Needed when parametrized function has no arguments provided,
+        so it cannot retrieve the trace from its input tracers."""
+        return jax.core.trace_state.trace_stack.upward[-1]
+
 
     def apply(self, parameters, *inputs, jit=False):
         def _apply(parameters, *inputs):
@@ -472,9 +493,11 @@ class Parameter(parametrized):
         super().__init__(fun=None, name=name if name else 'parameter')
 
     def apply(self, parameters, *inputs, jit=False):
+        assert len(inputs) == 0
         return parameters
 
     def _init_and_apply_parameters_dict(self, rng, *example_inputs):
+        assert len(example_inputs) == 0
         parameter = self._init_parameter(rng)
         return parameter, parameter
 

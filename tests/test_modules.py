@@ -200,8 +200,8 @@ def test_Sequential_graceful_update_message():
 def test_Regularized():
     @parametrized
     def loss(inputs):
-        a = parameter((), ones, inputs, 'a')
-        b = parameter((), lambda rng, shape: 2 * np.ones(shape), inputs, 'b')
+        a = parameter((), ones, 'a')
+        b = parameter((), lambda rng, shape: 2 * np.ones(shape), 'b')
 
         return a + b
 
@@ -220,8 +220,8 @@ def test_Regularized():
 def test_L2Regularized():
     @parametrized
     def loss(inputs):
-        a = parameter((), ones, inputs, 'a')
-        b = parameter((), lambda rng, shape: 2 * np.ones(shape), inputs, 'b')
+        a = parameter((), ones, 'a')
+        b = parameter((), lambda rng, shape: 2 * np.ones(shape), 'b')
 
         return a + b
 
@@ -257,23 +257,19 @@ def test_Reparametrized_unparametrized_transform():
         return 2 * params
 
     @parametrized
-    def net(inputs):
-        return parameter((), lambda rng, shape: 2 * np.ones(shape), inputs)
+    def net():
+        return parameter((), lambda rng, shape: 2 * np.ones(shape))
 
     scared_params = Reparametrized(net, reparametrization_factory=lambda: doubled)
-
-    inputs = np.zeros(())
-    params = scared_params.init_parameters(PRNGKey(0), inputs)
-
-    reg_loss_out = scared_params.apply(params, inputs)
-
+    params = scared_params.init_parameters(PRNGKey(0))
+    reg_loss_out = scared_params.apply(params)
     assert 4 == reg_loss_out
 
 
 def Scaled():
     @parametrized
     def learnable_scale(params):
-        return 2 * parameter((), ones, params) * params
+        return 2 * parameter((), ones) * params
 
     return learnable_scale
 
@@ -281,7 +277,7 @@ def Scaled():
 def test_Reparametrized():
     @parametrized
     def net(inputs):
-        return parameter((), lambda rng, shape: 2 * np.ones(shape), inputs)
+        return parameter((), lambda rng, shape: 2 * np.ones(shape))
 
     scaled_net = Reparametrized(net, reparametrization_factory=Scaled)
 

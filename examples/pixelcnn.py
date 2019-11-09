@@ -18,14 +18,14 @@ def Dense(out_chan, init_scale=1.):
 
     @parametrized
     def dense(inputs):
-        V = parameter((out_chan, inputs.shape[1]), randn(stddev=.05), inputs, 'V')
+        V = parameter((out_chan, inputs.shape[1]), randn(stddev=.05), 'V')
 
         # TODO apply = vmap(apply, (0, None, None, None))
         example_output = lambda: apply(inputs, V, g=np.ones(out_chan), b=np.zeros(out_chan))
 
         g = Parameter(lambda rng: init_scale / np.sqrt(
-            np.var(example_output(), 0) + 1e-10), 'g')(inputs)
-        b = Parameter(lambda rng: np.mean(example_output(), 0) * g, 'b')(inputs)
+            np.var(example_output(), 0) + 1e-10), 'g')()
+        b = Parameter(lambda rng: np.mean(example_output(), 0) * g, 'b')()
         return apply(inputs, V, g, b)
 
     return dense
@@ -49,14 +49,14 @@ def ConvOrConvTranspose(out_chan, filter_shape=(3, 3), strides=None, padding='SA
     @parametrized
     def conv_or_conv_transpose(inputs):
         V = Parameter(lambda rng: randn(.05)(rng, tuple(filter_shape) +
-                                             (inputs.shape[-1], out_chan)), 'V')(inputs)
+                                             (inputs.shape[-1], out_chan)), 'V')()
 
         # TODO apply = vmap(apply, (0, None, None, None))
         example_output = lambda: apply(inputs, V=V, g=np.ones(out_chan), b=np.zeros(out_chan))
 
         g = Parameter(lambda rng: init_scale / np.sqrt(np.var(example_output(), (0, 1, 2)) + 1e-10),
-                      'g')(inputs)
-        b = Parameter(lambda rng: np.mean(example_output(), (0, 1, 2)) * g, 'b')(inputs)
+                      'g')()
+        b = Parameter(lambda rng: np.mean(example_output(), (0, 1, 2)) * g, 'b')()
 
         return apply(inputs, V, b, g)
 
