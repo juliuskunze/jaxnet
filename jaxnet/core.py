@@ -123,7 +123,7 @@ class ValueTrace(Trace):
         return map(self.tracer, values)
 
     def values(self, tracers: Iterable[ValueTracer]):
-        return (t.val for t in tracers)
+        return tuple(t.val for t in tracers)
 
 
 @transformation_with_aux
@@ -140,7 +140,7 @@ def _init_transform(rng, inputs):
         out_val = trace.values(out_tracers)
         parameters_dict = state.parameters_dict_in_call_order
         del master, state, out_tracers
-    yield out_val if multiple_results else next(out_val), parameters_dict
+    yield out_val if multiple_results else out_val[0], parameters_dict
 
 
 class InitTraceState:
@@ -180,8 +180,8 @@ class InitTrace(ValueTrace):
 
         # TODO https://github.com/JuliusKunze/jaxnet/issues/8 check all frames, not just parent:
         if parametrized not in self.state.parameters_dict:
-            self.state.parameters_dict[parametrized] = \
-                parametrized._init_parameters_dict(self.state.next_rng(), *inputs)
+            _, parameters_dict = parametrized._init_parameters_dict(self.state.next_rng(), *inputs)
+            self.state.parameters_dict[parametrized] = parameters_dict
         parameters = parametrized._parameters_namedtuple(self.state.parameters_dict[parametrized])
         return tree_leaves(parametrized.apply(parameters, *inputs))
 
@@ -199,8 +199,8 @@ class InitTrace(ValueTrace):
 
         eqn, = jaxpr.jaxpr.eqns
         cell_prim = eqn.primitive
-        cell_parameters_dict = cell_prim._init_parameters_dict(self.state.next_rng(),
-                                                               *(consts + init + x))
+        _, cell_parameters_dict = cell_prim._init_parameters_dict(self.state.next_rng(),
+                                                                  *(consts + init + x))
         self.state.parameters_dict[cell_prim] = cell_parameters_dict
         cell_parameters = cell_prim._parameters_namedtuple(cell_parameters_dict)
         cell = partial(cell_prim.apply, cell_parameters)
@@ -271,15 +271,15 @@ class parametrized(Primitive):
 
         @wrap_init
         def init_and_apply(rng, *inputs):
-            parameters = self.init_parameters(rng, *inputs)
-            return self.apply(parameters, *inputs)
+            outputs, _ = self._init_parameters_dict(rng, *inputs)
+            return outputs
 
         self._init_and_apply = init_and_apply
         # Avoids running trace_to_jaxpr twice during initialization just for out_tree:
         self._cached_out_tree_fun = None
 
-        def abstract_eval(*inputs):
-            rng_and_inputs = (ShapedArray((2,), 'uint32'),) + inputs
+        def abstract_eval(*avals):
+            rng_and_inputs = (ShapedArray((2,), 'uint32'),) + avals
             flat_rng_and_inputs, in_tree_with_rng = tree_flatten(rng_and_inputs)
             flat_fun, self._cached_out_tree_fun = flatten_fun_nokwargs(self._init_and_apply,
                                                                        in_tree_with_rng)
@@ -331,7 +331,7 @@ class parametrized(Primitive):
         return (jax.jit(self.apply) if jit else self.apply)(parameters, *example_inputs)
 
     def _init_parameters(self, rng, *example_inputs, reuse, reuse_only):
-        d = self._init_parameters_dict(rng, *example_inputs)
+        _, d = self._init_parameters_dict(rng, *example_inputs)
 
         if reuse:
             flat_reuse_dicts = parametrized._flat_reuse_dicts(reuse, *example_inputs)
@@ -340,9 +340,9 @@ class parametrized(Primitive):
         return self._parameters_namedtuple(d)
 
     def _init_parameters_dict(self, rng, *example_inputs):
-        init_fun, aux_fun = _init_transform(self._wrapped_fun, rng)
-        init_fun.call_wrapped(example_inputs)
-        return aux_fun()
+        init_fun, get_parameters_dict = _init_transform(self._wrapped_fun, rng)
+        out_vals = init_fun.call_wrapped(example_inputs)
+        return out_vals, get_parameters_dict()
 
     @staticmethod
     def _flat_reuse_dicts(reuse, *example_inputs):
@@ -356,8 +356,8 @@ class parametrized(Primitive):
             if not isinstance(module, parametrized):
                 raise ValueError('Keys for reuse must be parametrized or ShapedParametrized.')
 
-            params_dict = parametrized._parameters_dict(
-                parameters, module._init_parameters_dict(PRNGKey(0), *inputs))
+            _, example_dict = module._init_parameters_dict(parametrized.dummy_rng, *inputs)
+            params_dict = parametrized._parameters_dict(parameters, example_dict)
             r.update(module._flatten_dict(params_dict))
 
         return r
@@ -443,7 +443,8 @@ class Parameter(parametrized):
         return parameters
 
     def _init_parameters_dict(self, rng, *example_inputs):
-        return self._init_parameter(rng)
+        parameter = self._init_parameter(rng)
+        return parameter, parameter
 
 
 class ShapedParametrized:
