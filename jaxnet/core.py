@@ -184,10 +184,14 @@ class InitTrace(ValueTrace):
 
         # TODO https://github.com/JuliusKunze/jaxnet/issues/8 check all frames, not just parent:
         if parametrized not in self.state.parameters_dict:
-            _, parameters_dict = parametrized._init_parameters_dict(self.state.next_rng(), *inputs)
+            parameters_dict, outputs = parametrized._init_and_apply_parameters_dict(
+                self.state.next_rng(), *inputs)
             self.state.parameters_dict[parametrized] = parameters_dict
-        parameters = parametrized._parameters_namedtuple(self.state.parameters_dict[parametrized])
-        return tree_leaves(parametrized.apply(parameters, *inputs))
+            return tree_leaves(outputs)
+        else:
+            parameters = parametrized._parameters_namedtuple(
+                self.state.parameters_dict[parametrized])
+            return tree_leaves(parametrized.apply(parameters, *inputs))
 
     def _process_call(self, call_primitive, f, *inputs, **kwargs):
         """Processes an xla_call (jitted function etc) during tracing for `init_parameters`."""
@@ -203,8 +207,8 @@ class InitTrace(ValueTrace):
 
         eqn, = jaxpr.jaxpr.eqns
         cell_prim = eqn.primitive
-        _, cell_parameters_dict = cell_prim._init_parameters_dict(self.state.next_rng(),
-                                                                  *(consts + init + x))
+        cell_parameters_dict, _ = cell_prim._init_and_apply_parameters_dict(self.state.next_rng(),
+                                                                            *(consts + init + x))
         self.state.parameters_dict[cell_prim] = cell_parameters_dict
         cell_parameters = cell_prim._parameters_namedtuple(cell_parameters_dict)
         cell = partial(cell_prim.apply, cell_parameters)
@@ -275,7 +279,7 @@ class parametrized(Primitive):
 
         @wrap_init
         def init_and_apply(rng, *inputs):
-            outputs, _ = self._init_parameters_dict(rng, *inputs)
+            _, outputs = self._init_and_apply_parameters_dict(rng, *inputs)
             return outputs
 
         self._init_and_apply = init_and_apply
@@ -335,7 +339,7 @@ class parametrized(Primitive):
         return (jax.jit(self.apply) if jit else self.apply)(parameters, *example_inputs)
 
     def _init_parameters(self, rng, *example_inputs, reuse, reuse_only):
-        _, d = self._init_parameters_dict(rng, *example_inputs)
+        d, _ = self._init_and_apply_parameters_dict(rng, *example_inputs)
 
         if reuse:
             flat_reuse_dicts = parametrized._flat_reuse_dicts(reuse, *example_inputs)
@@ -343,10 +347,10 @@ class parametrized(Primitive):
 
         return self._parameters_namedtuple(d)
 
-    def _init_parameters_dict(self, rng, *example_inputs):
+    def _init_and_apply_parameters_dict(self, rng, *example_inputs):
         init_fun, get_parameters_dict = _init_transform(self._wrapped_fun, rng)
         out_vals = init_fun.call_wrapped(example_inputs)
-        return out_vals, get_parameters_dict()
+        return get_parameters_dict(), out_vals
 
     @staticmethod
     def _flat_reuse_dicts(reuse, *example_inputs):
@@ -360,7 +364,8 @@ class parametrized(Primitive):
             if not isinstance(module, parametrized):
                 raise ValueError('Keys for reuse must be parametrized or ShapedParametrized.')
 
-            _, example_dict = module._init_parameters_dict(parametrized.dummy_rng, *inputs)
+            example_dict, _ = module._init_and_apply_parameters_dict(parametrized.dummy_rng,
+                                                                     *inputs)
             params_dict = parametrized._parameters_dict(parameters, example_dict)
             r.update(module._flatten_dict(params_dict))
 
@@ -446,7 +451,7 @@ class Parameter(parametrized):
     def apply(self, parameters, *inputs, jit=False):
         return parameters
 
-    def _init_parameters_dict(self, rng, *example_inputs):
+    def _init_and_apply_parameters_dict(self, rng, *example_inputs):
         parameter = self._init_parameter(rng)
         return parameter, parameter
 
