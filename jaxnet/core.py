@@ -1,14 +1,14 @@
 from collections import namedtuple, Counter, defaultdict
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable
 
 import dill
 import jax
-from jax import lax, random, unzip2, safe_zip, safe_map, partial, curry, WrapHashably, \
-    raise_to_shaped, tree_leaves, tree_flatten, tree_unflatten, flatten_fun_nokwargs
+from jax import lax, random, unzip2, safe_zip, safe_map, partial, raise_to_shaped, tree_leaves, \
+    tree_flatten, tree_unflatten, flatten_fun_nokwargs, tree_structure
 from jax.abstract_arrays import ShapedArray
 from jax.core import new_master, cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, \
-    jaxpr_as_fun, TypedJaxpr
+    jaxpr_as_fun, TypedJaxpr, MasterTrace
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal, closure_convert_jaxpr
 from jax.lax.lax_control_flow import _index_array, scan_p, _abstractify
 from jax.linear_util import wrap_init, transformation, transformation_with_aux
@@ -23,140 +23,20 @@ def _abstractified(vals):
     return map(_abstractify, vals)
 
 
-def _partialized(avals):
-    return map(lambda aval: PartialVal((aval, unit)), avals)
-
-
-def _partialized_abstractified(vals):
-    return _partialized(_abstractified(vals))
-
-
-class ValueTracer(Tracer):
-    __slots__ = ['val']
-
-    def __init__(self, trace, val):
-        super().__init__(trace)
-        self.val = val
-
-    @property
-    def aval(self):
-        return get_aval(self.val)
-
-    def full_lower(self):
-        return self
-
-
-@transformation_with_aux
-def _init_transform(rng, inputs):
-    """Transforms a parametrized function into its corresponding init_parameters function."""
-    with new_master(InitTrace) as master:
-        trace = InitTrace(master, cur_sublevel())
-        master._rng = rng
-
-        def next_rng():
-            master._rng, rng = random.split(master._rng)
-            return rng
-
-        master.next_rng = next_rng
-
-        master._submodules_in_call_order = dict()
-
-        def register_submodule_call(primitive):
-            master._submodules_in_call_order[primitive] = None
-
-        master.register_submodule_call = register_submodule_call
-
-        outs = yield map(lambda x: InitTracer(trace, x, {}), inputs), {}
-        multiple_results = isinstance(outs, tuple)
-        out_tracers = map(trace.full_raise, outs if multiple_results else (outs,))
-        out_val, parameters_dict = InitTracer.merge(out_tracers)
-        submodules_in_call_order = master._submodules_in_call_order.keys()
-        del master, out_tracers
-    yield out_val if multiple_results else out_val[0], (parameters_dict, submodules_in_call_order)
-
-
-class InitTrace(Trace):
-    """Trace used to transform a module into its corresponding `init_parameters` function."""
-
-    def __init__(self, master, sublevel):
-        super().__init__(master, sublevel)
-
-    def pure(self, val):
-        return InitTracer(self, val, {})
-
-    def lift(self, val):
-        return InitTracer(self, val, {})
-
-    def sublift(self, val):
-        return InitTracer(self, val.val, {})
-
-    def process_primitive(self, primitive, tracers, kwargs):
-        """Processes a primitive during tracing for `init_parameters`."""
-        inputs, parameters_dict = InitTracer.merge(tracers)
-        rng = tracers[0].trace.master.next_rng()
-        out, parameters_dict = _get_init_for(primitive)(rng, parameters_dict, *inputs, **kwargs)
-        to_tracer = lambda out: InitTracer(self, out, parameters_dict)
-
-        return map(to_tracer, out) if primitive.multiple_results else to_tracer(out)
-
-    def process_call(self, call_primitive, f, tracers, kwargs):
-        """Processes an xla_call (jitted function etc) during tracing for `init_parameters`."""
-        inputs, parameters_dict = InitTracer.merge(tracers)
-        # TODO https://github.com/JuliusKunze/jaxnet/issues/14
-        outs = call_primitive.bind(f, *inputs, **kwargs)
-        return map(lambda out: InitTracer(self, out, parameters_dict), outs)
-
-
-class InitTracer(ValueTracer):
-    """Tracer used to transform a module into its corresponding `init_parameters` function."""
-    __slots__ = ValueTracer.__slots__ + ['parameters_dict']
-
-    def __init__(self, trace: InitTrace, val, parameters_dict):
-        super().__init__(trace, val)
-        self.parameters_dict = parameters_dict
-
-    @staticmethod
-    def merge(tracers: Iterable['InitTracer']):
-        parameters_dict = {}
-        for t in tracers:
-            parameters_dict.update(t.parameters_dict)
-
-        return map(lambda t: t.val, tracers), parameters_dict
-
-
-def _get_init_for(primitive):
-    if primitive in init_rules:
-        return init_rules[primitive]
-
-    if isinstance(primitive, parametrized):
-        return _parametrized_init(primitive)
-
-    return _unparametrized_init(primitive)
-
-
-@curry
-def _unparametrized_init(primitive, rng, parameters_dict, *in_vals, **kwargs):
-    return primitive.bind(*in_vals, **kwargs), parameters_dict
-
-
-@curry
-def _parametrized_init(parametrized, rng, parameters_dict, *inputs):
-    # TODO https://github.com/JuliusKunze/jaxnet/issues/8 check all nesting levels, not just parent:
-    if parametrized not in parameters_dict:
-        parameters_dict[parametrized] = parametrized._init_parameters_dict(rng, *inputs)
-    parameters = parametrized._parameters_namedtuple(parameters_dict[parametrized])
-    out, _ = tree_flatten(parametrized.apply(parameters, *inputs))
-    return out, parameters_dict
+def _instantiated_trace_to_jaxpr(fun, avals):
+    pvals = map(lambda aval: PartialVal((aval, unit)), avals)
+    jaxpr, out_pvals, consts = trace_to_jaxpr(fun, pvals, instantiate=True)
+    out_avals, _ = unzip2(out_pvals)
+    return jaxpr, out_avals, consts
 
 
 @cache()
 def _flat_initial_style_jaxpr(fun, in_avals):
     """lax_control_flow._initial_style_jaxpr, but for flat arguments and results."""
-    jaxpr, out_pvals, consts = trace_to_jaxpr(fun, _partialized(in_avals), instantiate=True)
-    out_avals = map(raise_to_shaped, unzip2(out_pvals)[0])
-    avals = tuple(_abstractified(consts)) + in_avals
-    typed_jaxpr = TypedJaxpr(closure_convert_jaxpr(jaxpr), (), avals, out_avals)
-    return typed_jaxpr, consts
+    jaxpr, out_avals, consts = _instantiated_trace_to_jaxpr(fun, in_avals)
+    return TypedJaxpr(closure_convert_jaxpr(jaxpr), (),
+                      in_avals=tuple(_abstractified(consts)) + in_avals,
+                      out_avals=map(raise_to_shaped, out_avals)), consts
 
 
 def _parametrized_scan_impl(cell, *args, **kwargs):
@@ -179,130 +59,206 @@ def _parametrized_scan_impl(cell, *args, **kwargs):
     return scan_p.bind(*args, **kwargs)
 
 
-def _scan_init(rng, parameters_dict, *args, **kwargs):
-    jaxpr = kwargs['jaxpr']
-    split_sizes = [kwargs['num_consts'], kwargs['num_carry']]
-    consts, init, xs = split_list(args, split_sizes)
-    _, _, x_avals = split_list(jaxpr.in_avals, split_sizes)
-    x = map(partial(_index_array, 0), x_avals, xs)
+class ValueTracer(Tracer):
+    __slots__ = ['val']
 
-    eqn, = jaxpr.jaxpr.eqns
-    parametrized_cell = eqn.primitive
-    cell_parameters_dict = parametrized_cell._init_parameters_dict(rng, *(consts + init + x))
-    parameters_dict[parametrized_cell] = cell_parameters_dict
-    cell_parameters = parametrized_cell._parameters_namedtuple(cell_parameters_dict)
-    cell = partial(parametrized_cell.apply, cell_parameters)
+    def __init__(self, trace, val):
+        super().__init__(trace)
+        self.val = val
 
-    return _parametrized_scan_impl(cell, *args, **kwargs), parameters_dict
+    @property
+    def aval(self):
+        return get_aval(self.val)
+
+    def full_lower(self):
+        return self
 
 
-init_rules = {lax.scan_p: _scan_init}
+class ValueTrace(Trace):
+    """Base for the two trace classes used to transform a `parameterized` function
+    into its corresponding `init_parameters` or `apply` function."""
 
-
-@transformation
-def _apply_transform(master, parameters, *vals):
-    """Transforms a module into its corresponding `apply` function."""
-    parameters_iter = ApplyParametersIterator(parameters.val)
-    trace = ApplyTrace(master, cur_sublevel())
-    outs = yield map(lambda o: ApplyTracer(trace, o, parameters_iter), vals), {}
-    out_tracers = map(trace.full_raise, outs)
-    yield [t.val for t in out_tracers]
-
-
-class ApplyTrace(Trace):
-    """Trace used to transform a module into its corresponding `apply` function."""
-
-    def pure(self, val):
-        return ApplyTracer(self, val, None)
-
-    def lift(self, val):
-        return ApplyTracer(self, val, None)
-
-    def sublift(self, val):
-        return ApplyTracer(self, val.val, None)
-
-    def process_primitive(self, primitive, tracers, kwargs):
-        """Processes a call of a primitive during 'apply' of a parametrized function."""
-        flat_inputs, parameters_iter = ApplyTracer.merge(tracers)
-        out = _get_apply_for(primitive)(parameters_iter, *flat_inputs, **kwargs)
-        to_tracer = lambda out: ApplyTracer(self, out, parameters_iter)
-        return map(to_tracer, out) if primitive.multiple_results else to_tracer(out)
+    def process_primitive(self, primitive: Primitive, tracers, kwargs):
+        out = self._process_primitive(primitive, self.values(tracers), kwargs)
+        return self.tracers(out) if primitive.multiple_results else self.tracer(out)
 
     def process_call(self, call_primitive, f, tracers, kwargs):
-        """Processes an xla_call (jitted function etc) during 'apply' of a parametrized function."""
-        inputs, parameters_iter = ApplyTracer.merge(tracers)
-        f = _apply_transform(f, self.master, WrapHashably(parameters_iter))
-        outputs = call_primitive.bind(f, *inputs, **kwargs)
-        return map(lambda out: ApplyTracer(self, out, parameters_iter), outputs)
+        """Processes an xla_call (jitted function etc) during tracing."""
+        return self.tracers(self._process_call(call_primitive, f, *self.values(tracers), **kwargs))
+
+    def _process_primitive(self, primitive: Primitive, inputs, kwargs):
+        """Process a primitive during tracing."""
+        if primitive in InitTrace._rules:
+            return InitTrace._rules[primitive](self)(*inputs, **kwargs)
+
+        if isinstance(primitive, parametrized):
+            return self._process_parametrized(primitive, *inputs)
+
+        return primitive.bind(*inputs, **kwargs)
+
+    def _process_parametrized(self, parametrized, *inputs):
+        assert False
+
+    def _process_call(self, call_primitive, f, *inputs, **kwargs):
+        assert False
+
+    _rules = {lax.scan_p: lambda self: self._process_scan}
+
+    def _process_scan(self, *args, **kwargs):
+        assert False
+
+    def pure(self, val):
+        return self.tracer(val)
+
+    def lift(self, val):
+        return self.tracer(val)
+
+    def sublift(self, val):
+        return self.tracer(val.val)
+
+    def tracer(self, val):
+        return ValueTracer(self, val)
+
+    def tracers(self, values):
+        return map(self.tracer, values)
+
+    def values(self, tracers: Iterable[ValueTracer]):
+        return (t.val for t in tracers)
 
 
-class ApplyParametersIterator:
+@transformation_with_aux
+def _init_transform(rng, inputs):
+    """Transforms a `parametrized` function into its corresponding `init_parameters` function."""
+    with new_master(InitTrace) as master:
+        trace = InitTrace(master, cur_sublevel())
+        state = InitTraceState(rng)
+        master.state = state
+
+        outs = yield map(trace.tracer, inputs), {}
+        multiple_results = isinstance(outs, tuple)
+        out_tracers = map(trace.full_raise, outs if multiple_results else (outs,))
+        out_val = trace.values(out_tracers)
+        parameters_dict = state.parameters_dict_in_call_order
+        del master, state, out_tracers
+    yield out_val if multiple_results else next(out_val), parameters_dict
+
+
+class InitTraceState:
+    def __init__(self, rng):
+        self._rng = rng
+        # used as ordered set:
+        self._submodules_in_call_order = dict()
+        self.parameters_dict = {}
+
+    def next_rng(self):
+        self._rng, rng = random.split(self._rng)
+        return rng
+
+    def register_parametrized(self, primitive):
+        self._submodules_in_call_order[primitive] = None
+
+    @property
+    def parameters_dict_in_call_order(self):
+        if len(self.parameters_dict) <= 1:  # only needed for scan
+            return self.parameters_dict
+
+        submodules_in_call_order = self._submodules_in_call_order.keys()
+
+        assert len(self.parameters_dict) == len(submodules_in_call_order)
+        return {m: self.parameters_dict[m] for m in submodules_in_call_order}
+
+
+class InitTrace(ValueTrace):
+    """Trace used to transform a module into its corresponding `init_parameters` function."""
+
+    @property
+    def state(self) -> InitTraceState:
+        return self.master.state
+
+    def _process_parametrized(self, parametrized, *inputs):
+        self.state.register_parametrized(parametrized)
+
+        # TODO https://github.com/JuliusKunze/jaxnet/issues/8 check all frames, not just parent:
+        if parametrized not in self.state.parameters_dict:
+            self.state.parameters_dict[parametrized] = \
+                parametrized._init_parameters_dict(self.state.next_rng(), *inputs)
+        parameters = parametrized._parameters_namedtuple(self.state.parameters_dict[parametrized])
+        return tree_leaves(parametrized.apply(parameters, *inputs))
+
+    def _process_call(self, call_primitive, f, *inputs, **kwargs):
+        """Processes an xla_call (jitted function etc) during tracing for `init_parameters`."""
+        # TODO https://github.com/JuliusKunze/jaxnet/issues/14
+        return call_primitive.bind(f, *inputs, **kwargs)
+
+    def _process_scan(self, *args, **kwargs):
+        jaxpr = kwargs['jaxpr']
+        split_sizes = [kwargs['num_consts'], kwargs['num_carry']]
+        consts, init, xs = split_list(args, split_sizes)
+        _, _, x_avals = split_list(jaxpr.in_avals, split_sizes)
+        x = map(partial(_index_array, 0), x_avals, xs)
+
+        eqn, = jaxpr.jaxpr.eqns
+        cell_prim = eqn.primitive
+        cell_parameters_dict = cell_prim._init_parameters_dict(self.state.next_rng(),
+                                                               *(consts + init + x))
+        self.state.parameters_dict[cell_prim] = cell_parameters_dict
+        cell_parameters = cell_prim._parameters_namedtuple(cell_parameters_dict)
+        cell = partial(cell_prim.apply, cell_parameters)
+
+        return _parametrized_scan_impl(cell, *args, **kwargs)
+
+
+class ApplyTraceState:
     """Allows supplying submodules with their respective parameters while calling a module's `apply`
     function by iterating through the given parameters."""
 
     def __init__(self, parameters):
         self.parameters = parameters
-        self.index = 0
-        self.parameters_by_primitive = {}
+        self._index = 0
+        self._parameters_by_primitive = {}
 
-    def get_parameters(self, primitive: Optional[Primitive]):
-        parameters = self.parameters_by_primitive.get(primitive)
+    def next_parameters_for(self, primitive: Primitive):
+        parameters = self._parameters_by_primitive.get(primitive)
         if parameters is not None:
             return parameters
 
-        parameters = self.parameters[self.index]
-        self.index += 1
-        self.parameters_by_primitive[primitive] = parameters
+        parameters = self.parameters[self._index]
+        self._index += 1
+        self._parameters_by_primitive[primitive] = parameters
         return parameters
 
-    def get_parameters_or_empty(self):
-        return (self.get_parameters(None),) if len(self.parameters) > 0 else ()
+
+class ApplyTrace(ValueTrace):
+    """Trace used to transform a module into its corresponding `apply` function."""
+
+    @property
+    def state(self) -> ApplyTraceState:
+        return self.master.state
+
+    def _process_parametrized(self, parametrized, *inputs):
+        return tree_leaves(
+            parametrized.apply(self.state.next_parameters_for(parametrized), *inputs))
+
+    def _process_call(self, call_primitive, f, *inputs, **kwargs):
+        """Processes an xla_call (jitted function etc) during 'apply' of a parametrized function."""
+        return call_primitive.bind(_apply_transform(f, self.master), *inputs, **kwargs)
+
+    def _process_scan(self, *args, **kwargs):
+        state = self.state
+        # TODO fix param sharing
+        cell_primitive = parametrized(jaxpr_as_fun(kwargs['jaxpr']))
+        cell_params = (state.next_parameters_for(cell_primitive),) if len(
+            state.parameters) > 0 else ()
+        cell = partial(cell_primitive.apply, cell_params)
+        return _parametrized_scan_impl(cell, *args, **kwargs)
 
 
-class ApplyTracer(ValueTracer):
-    """Tracer used to transform a parametrized function into its corresponding apply function."""
-    __slots__ = ValueTracer.__slots__ + ['parameters_iter']
-
-    def __init__(self, trace: ApplyTrace, val, parameters_iter: Optional[ApplyParametersIterator]):
-        super().__init__(trace, val)
-        assert parameters_iter is None or isinstance(parameters_iter, ApplyParametersIterator)
-        self.parameters_iter = parameters_iter
-
-    @staticmethod
-    def merge(tracers: Iterable['ApplyTracer']):
-        parameters_iter, = set(t.parameters_iter for t in tracers if t.parameters_iter)
-        return map(lambda t: t.val, tracers), parameters_iter
-
-
-def _get_apply_for(primitive):
-    if primitive in apply_rules:
-        return apply_rules[primitive]
-
-    if isinstance(primitive, parametrized):
-        return _parametrized_apply(primitive)
-
-    return _unparametrized_apply(primitive)
-
-
-@curry
-def _unparametrized_apply(primitive, parameters_iter, *args, **kwargs):
-    return primitive.bind(*args, **kwargs)
-
-
-@curry
-def _parametrized_apply(primitive, parameters_iter, *args, **kwargs):
-    return tree_leaves(primitive.apply(parameters_iter.get_parameters(primitive), *args))
-
-
-def _scan_apply(parameters_iter, *args, **kwargs):
-    # TODO fix param sharing
-    cell_params = parameters_iter.get_parameters_or_empty()
-    cell_primitive = parametrized(jaxpr_as_fun(kwargs['jaxpr']))
-    cell = partial(cell_primitive.apply, cell_params)
-    return _parametrized_scan_impl(cell, *args, **kwargs)
-
-
-apply_rules = {lax.scan_p: _scan_apply}
+@transformation
+def _apply_transform(master: MasterTrace, *inputs):
+    """Transforms a `parametrized` function into its corresponding `apply` function."""
+    trace = ApplyTrace(master, cur_sublevel())
+    outs = yield trace.tracers(inputs), {}
+    yield [trace.full_raise(o).val for o in outs]
 
 
 class parametrized(Primitive):
@@ -323,13 +279,11 @@ class parametrized(Primitive):
         self._cached_out_tree_fun = None
 
         def abstract_eval(*inputs):
-            key_and_inputs = (ShapedArray((2,), 'uint32'),) + inputs
-            flat_rng_and_inputs, in_tree_with_rng = tree_flatten(key_and_inputs)
+            rng_and_inputs = (ShapedArray((2,), 'uint32'),) + inputs
+            flat_rng_and_inputs, in_tree_with_rng = tree_flatten(rng_and_inputs)
             flat_fun, self._cached_out_tree_fun = flatten_fun_nokwargs(self._init_and_apply,
                                                                        in_tree_with_rng)
-            _, flat_partial_outs, _ = trace_to_jaxpr(
-                flat_fun, _partialized(flat_rng_and_inputs), instantiate=True)
-            flat_outs, _ = unzip2(flat_partial_outs)
+            _, flat_outs, _ = _instantiated_trace_to_jaxpr(flat_fun, flat_rng_and_inputs)
             return flat_outs
 
         self.def_abstract_eval(abstract_eval)
@@ -345,27 +299,23 @@ class parametrized(Primitive):
         flat_rng_and_inputs, in_tree_with_rng = tree_flatten((parametrized.dummy_rng,) + inputs)
         flat_fun, out_tree = flatten_fun_nokwargs(self._init_and_apply, in_tree_with_rng)
         # Need to abstract_eval in order to build out tree:
-        trace_to_jaxpr(flat_fun, _partialized_abstractified(flat_rng_and_inputs), instantiate=True)
+        _instantiated_trace_to_jaxpr(flat_fun, _abstractified(flat_rng_and_inputs))
         return out_tree()
 
     def __call__(self, *inputs):
-        flat_inputs, _ = tree_flatten(inputs)
-
-        master = flat_inputs[0].trace.master
-        if master.trace_type == InitTrace:
-            master.register_submodule_call(self)
-
+        flat_inputs = tree_leaves(inputs)
         flat_outs = self.bind(*flat_inputs)
         return tree_unflatten(self._out_tree(*inputs), flat_outs)
 
     def apply(self, parameters, *inputs, jit=False):
         def _apply(parameters, *inputs):
-            flat_inputs, in_tree = tree_flatten(inputs)
-            flat_fun, out_tree = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
+            flat_fun, out_tree = flatten_fun_nokwargs(self._wrapped_fun, tree_structure(inputs))
             with new_master(ApplyTrace) as master:
-                flat_fun = _apply_transform(flat_fun, master, WrapHashably(parameters))
+                state = ApplyTraceState(parameters)
+                master.state = state
+                flat_fun = _apply_transform(flat_fun, master)
                 flat_outputs = flat_fun.call_wrapped(*inputs)
-                del master
+                del master, state
             return tree_unflatten(out_tree(), flat_outputs)
 
         return (jax.jit(_apply) if jit else _apply)(parameters, *inputs)
@@ -392,12 +342,7 @@ class parametrized(Primitive):
     def _init_parameters_dict(self, rng, *example_inputs):
         init_fun, aux_fun = _init_transform(self._wrapped_fun, rng)
         init_fun.call_wrapped(example_inputs)
-        parameters_dict, submodules_in_call_order = aux_fun()
-        if len(parameters_dict) <= 1:  # only needed for scan
-            return parameters_dict
-
-        assert len(parameters_dict) == len(submodules_in_call_order)
-        return {m: parameters_dict[m] for m in submodules_in_call_order}
+        return aux_fun()
 
     @staticmethod
     def _flat_reuse_dicts(reuse, *example_inputs):
@@ -488,6 +433,7 @@ class parametrized(Primitive):
     def shaped(self, *inputs):
         return ShapedParametrized(self, *inputs)
 
+
 class Parameter(parametrized):
     def __init__(self, init_parameter, name=None):
         self._init_parameter = init_parameter
@@ -501,7 +447,7 @@ class Parameter(parametrized):
 
 
 class ShapedParametrized:
-    """Represents a parametrized module with given example inputs."""
+    """Represents a parametrized function with given example inputs."""
 
     def __init__(self, parametrized, *example_inputs):
         self.parametrized = parametrized
