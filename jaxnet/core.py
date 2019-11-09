@@ -283,14 +283,11 @@ class parametrized(Primitive):
             return outputs
 
         self._init_and_apply = init_and_apply
-        # Avoids running trace_to_jaxpr twice during initialization just for out_tree:
-        self._cached_out_tree_fun = None
 
         def abstract_eval(*avals):
             rng_and_inputs = (ShapedArray((2,), 'uint32'),) + avals
             flat_rng_and_inputs, in_tree_with_rng = tree_flatten(rng_and_inputs)
-            flat_fun, self._cached_out_tree_fun = flatten_fun_nokwargs(self._init_and_apply,
-                                                                       in_tree_with_rng)
+            flat_fun, _ = flatten_fun_nokwargs(self._init_and_apply, in_tree_with_rng)
             _, flat_outs, _ = _instantiated_trace_to_jaxpr(flat_fun, flat_rng_and_inputs)
             return flat_outs
 
@@ -299,11 +296,6 @@ class parametrized(Primitive):
     dummy_rng = PRNGKey(0)
 
     def _out_tree(self, *inputs):
-        if self._cached_out_tree_fun is not None:
-            result = self._cached_out_tree_fun()
-            self._cached_out_tree_fun = None
-            return result
-
         flat_rng_and_inputs, in_tree_with_rng = tree_flatten((parametrized.dummy_rng,) + inputs)
         flat_fun, out_tree = flatten_fun_nokwargs(self._init_and_apply, in_tree_with_rng)
         # Need to abstract_eval in order to build out tree:
