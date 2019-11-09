@@ -39,9 +39,11 @@ def elbo(rng, images):
     mu_z, sigmasq_z = encode(images)
     logits_x = decode(gaussian_sample(rng, mu_z, sigmasq_z))
     return bernoulli_logpdf(logits_x, images) - gaussian_kl(mu_z, sigmasq_z)
+
+params = loss.init_parameters(PRNGKey(2), example_rng, example_batch)
 ```
 
-The same in stax:
+The equivalent from the [stax example](https://github.com/google/jax/blob/master/examples/mnist_vae.py):
 
 ```python
 def elbo(rng, params, images):
@@ -49,6 +51,11 @@ def elbo(rng, params, images):
     mu_z, sigmasq_z = encode(enc_params, images)
     logits_x = decode(dec_params, gaussian_sample(rng, mu_z, sigmasq_z))
     return bernoulli_logpdf(logits_x, images) - gaussian_kl(mu_z, sigmasq_z)
+
+enc_init_rng, dec_init_rng = random.split(PRNGKey(2))
+_, encoder_params = encoder_init(enc_init_rng, (batch_size, 28 * 28))
+_, decoder_params = decoder_init(dec_init_rng, (batch_size, 10))
+params = encoder_params, decoder_params
 ```
 
 JAXnet does not require boilerplate parameter initialization (output shape inference, random key splitting) and handling code (destructuring, passing to submodules).
