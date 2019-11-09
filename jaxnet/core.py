@@ -6,7 +6,7 @@ import dill
 import jax
 from jax import lax, random, unzip2, safe_zip, safe_map, partial, raise_to_shaped, tree_leaves, \
     tree_flatten, tree_unflatten, flatten_fun_nokwargs, tree_structure
-from jax.abstract_arrays import ShapedArray
+from jax.abstract_arrays import ShapedArray, make_shaped_array
 from jax.core import new_master, cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, \
     jaxpr_as_fun, TypedJaxpr, MasterTrace
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal, closure_convert_jaxpr
@@ -21,6 +21,10 @@ map = safe_map
 
 def _abstractified(vals):
     return map(_abstractify, vals)
+
+
+def _abstractified_to_shape_only(vals):
+    return map(raise_to_shaped, map(make_shaped_array, vals))
 
 
 def _instantiated_trace_to_jaxpr(fun, avals):
@@ -299,7 +303,7 @@ class parametrized(Primitive):
         flat_rng_and_inputs, in_tree_with_rng = tree_flatten((parametrized.dummy_rng,) + inputs)
         flat_fun, out_tree = flatten_fun_nokwargs(self._init_and_apply, in_tree_with_rng)
         # Need to abstract_eval in order to build out tree:
-        _instantiated_trace_to_jaxpr(flat_fun, _abstractified(flat_rng_and_inputs))
+        _instantiated_trace_to_jaxpr(flat_fun, _abstractified_to_shape_only(flat_rng_and_inputs))
         return out_tree()
 
     def __call__(self, *inputs):
