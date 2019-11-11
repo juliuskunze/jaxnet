@@ -5,7 +5,7 @@ from typing import Iterable
 import dill
 import jax
 from jax import lax, random, unzip2, safe_zip, safe_map, partial, raise_to_shaped, tree_leaves, \
-    tree_flatten, tree_unflatten, flatten_fun_nokwargs, tree_structure
+    tree_flatten, tree_unflatten, flatten_fun_nokwargs
 from jax.abstract_arrays import ShapedArray
 from jax.core import new_master, cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, \
     jaxpr_as_fun, TypedJaxpr, MasterTrace, full_lower, find_top_trace, valid_jaxtype, skip_checks
@@ -157,18 +157,18 @@ class ParametrizedTrace(Trace):
 
 @transformation_with_aux
 def _init_transform(rng, inputs):
-    """Transforms a `parametrized` function into its corresponding `init_parameters` function."""
+    """Transforms a flattended `parametrized` function
+    into its corresponding `init_parameters` function."""
     with new_master(InitTrace) as master:
         trace = InitTrace(master, cur_sublevel())
         master.state = InitTraceState(rng)
 
         outs = yield map(trace.tracer, inputs), {}
-        multiple_results = isinstance(outs, tuple)
-        out_tracers = map(trace.full_raise, outs if multiple_results else (outs,))
-        out_val = trace.values(out_tracers)
+        out_tracers = map(trace.full_raise, outs)
+        out_values = trace.values(out_tracers)
         parameters_dict = master.state.parameters_dict_in_call_order
         del master, out_tracers
-    yield out_val if multiple_results else out_val[0], parameters_dict
+    yield out_values, parameters_dict
 
 
 class InitTraceState(ParametrizedTraceState):
@@ -245,7 +245,7 @@ class InitTrace(ParametrizedTrace):
 
 @transformation
 def _apply_transform(master: MasterTrace, *inputs):
-    """Transforms a `parametrized` function into its corresponding `apply` function."""
+    """Transforms a flattened `parametrized` function into its corresponding `apply` function."""
     trace = ApplyTrace(master, cur_sublevel())
     outs = yield trace.tracers(inputs), {}
     yield [trace.full_raise(o).val for o in outs]
@@ -352,10 +352,11 @@ class parametrized(Primitive):
 
     def apply(self, parameters, *inputs, jit=False):
         def _apply(parameters, *inputs):
-            flat_fun, out_tree = flatten_fun_nokwargs(self._wrapped_fun, tree_structure(inputs))
+            flat_inputs, in_tree = tree_flatten(inputs)
+            flat_fun, out_tree = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
             with new_master(ApplyTrace) as master:
                 master.state = ApplyTraceState(parameters)
-                flat_outputs = _apply_transform(flat_fun, master).call_wrapped(*inputs)
+                flat_outputs = _apply_transform(flat_fun, master).call_wrapped(*flat_inputs)
                 del master
             return tree_unflatten(out_tree(), flat_outputs)
 
@@ -381,9 +382,12 @@ class parametrized(Primitive):
         return self._parameters_namedtuple(d)
 
     def _init_and_apply_parameters_dict(self, rng, *example_inputs):
-        init_fun, get_parameters_dict = _init_transform(self._wrapped_fun, rng)
-        outputs = init_fun.call_wrapped(example_inputs)
-        return get_parameters_dict(), outputs
+        flat_inputs, in_tree = tree_flatten(example_inputs)
+        flat_fun, out_tree_thunk = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
+        flat_init_fun, get_parameters_thunk = _init_transform(flat_fun, rng)
+        flat_outputs = flat_init_fun.call_wrapped(flat_inputs)
+        outputs = tree_unflatten(out_tree_thunk(), flat_outputs)
+        return get_parameters_thunk(), outputs
 
     @staticmethod
     def _flat_reuse_dicts(reuse, *example_inputs):

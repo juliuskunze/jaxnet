@@ -636,28 +636,26 @@ def test_parameter_sharing_between_multiple_parents():
     assert np.array_equal(np.ones(()), b)
 
 
-@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/9')
 def test_tuple_input():
     @parametrized
     def net(input_tuple):
         return input_tuple[0] * input_tuple[1] * parameter((), zeros)
 
-    inputs = (np.zeros((2,)), np.zeros((2,)))
+    inputs = (np.zeros(2), np.zeros(2))
     params = net.init_parameters(PRNGKey(0), inputs)
     out = net.apply(params, inputs)
-    assert np.array_equal(np.zeros((2, 10)), out)
+    assert np.array_equal(np.zeros(2), out)
 
 
-@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/9')
 def test_dict_input():
     @parametrized
     def net(input_dict):
         return input_dict['a'] * input_dict['b'] * parameter((), zeros)
 
-    inputs = {'a': np.zeros((2,)), 'b': np.zeros((2,))}
+    inputs = {'a': np.zeros(2), 'b': np.zeros(2)}
     params = net.init_parameters(PRNGKey(0), inputs)
     out = net.apply(params, inputs)
-    assert np.array_equal(np.zeros((2, 10)), out)
+    assert np.array_equal(np.zeros(2), out)
 
 
 def test_tuple_output():
