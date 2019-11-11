@@ -414,8 +414,8 @@ def _init_transform(rng, *inputs):
     """Transforms a flattened `parametrized` function
     into its corresponding `init_parameters` function."""
     with new_master(InitTrace) as master:
-        trace = InitTrace(master, cur_sublevel())
         master.state = InitTraceState(rng)
+        trace = InitTrace(master, cur_sublevel())
 
         outs = yield map(trace.tracer, inputs), {}
         out_tracers = map(trace.full_raise, outs)
