@@ -156,8 +156,8 @@ class ParametrizedTrace(Trace):
 
 
 @transformation_with_aux
-def _init_transform(rng, inputs):
-    """Transforms a flattended `parametrized` function
+def _init_transform(rng, *inputs):
+    """Transforms a flattened `parametrized` function
     into its corresponding `init_parameters` function."""
     with new_master(InitTrace) as master:
         trace = InitTrace(master, cur_sublevel())
@@ -385,7 +385,7 @@ class parametrized(Primitive):
         flat_inputs, in_tree = tree_flatten(example_inputs)
         flat_fun, out_tree_thunk = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
         flat_init_fun, get_parameters_thunk = _init_transform(flat_fun, rng)
-        flat_outputs = flat_init_fun.call_wrapped(flat_inputs)
+        flat_outputs = flat_init_fun.call_wrapped(*flat_inputs)
         outputs = tree_unflatten(out_tree_thunk(), flat_outputs)
         return get_parameters_thunk(), outputs
 

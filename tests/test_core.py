@@ -621,12 +621,15 @@ def test_parameters_from_sharing_between_multiple_parents():
 
 @pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/8')
 def test_parameter_sharing_between_multiple_parents():
-    a = Parameter(lambda rng: np.ones(()))
-    b = Sequential(a)
+    p = Parameter(lambda rng: np.ones(()))
+
+    @parametrized
+    def wrapped():
+        return p()
 
     @parametrized
     def net():
-        return a(), b()
+        return wrapped(), p()
 
     params = net.init_parameters(PRNGKey(0))
     assert 1 == len(params)
