@@ -6,7 +6,7 @@ import dill
 import jax
 from jax import lax, random, unzip2, safe_zip, safe_map, partial, raise_to_shaped, tree_leaves, \
     tree_flatten, tree_unflatten, flatten_fun_nokwargs, tree_structure
-from jax.abstract_arrays import ShapedArray, make_shaped_array
+from jax.abstract_arrays import ShapedArray
 from jax.core import new_master, cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, \
     jaxpr_as_fun, TypedJaxpr, MasterTrace, full_lower, find_top_trace, valid_jaxtype, skip_checks
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal, closure_convert_jaxpr
@@ -20,11 +20,7 @@ map = safe_map
 
 
 def _abstractified(vals):
-    return map(_abstractify, vals)
-
-
-def _abstractified_to_shapes_only(vals):
-    return map(raise_to_shaped, map(make_shaped_array, vals))
+    return tuple(map(_abstractify, vals))
 
 
 def _instantiated_trace_to_jaxpr(fun, avals):
@@ -32,6 +28,13 @@ def _instantiated_trace_to_jaxpr(fun, avals):
     jaxpr, out_pvals, consts = trace_to_jaxpr(fun, pvals, instantiate=True)
     out_avals, _ = unzip2(out_pvals)
     return jaxpr, out_avals, consts
+
+
+def _top_trace():
+    """Needed when parametrized function has no arguments provided,
+    so it cannot retrieve the trace from its input tracers."""
+    master = jax.core.trace_state.trace_stack.upward[-1]
+    return master.trace_type(master, cur_sublevel())
 
 
 @cache()
@@ -53,7 +56,7 @@ def _parametrized_scan_impl(cell, *args, **kwargs):
     _, _, x_avals = split_list(jaxpr.in_avals, [num_consts, num_carry])
     cell_args = consts + init + map(partial(_index_array, 0), x_avals, xs)
 
-    jaxpr, new_consts = _flat_initial_style_jaxpr(wrap_init(cell), tuple(_abstractified(cell_args)))
+    jaxpr, new_consts = _flat_initial_style_jaxpr(wrap_init(cell), _abstractified(cell_args))
 
     args = list(new_consts) + init + xs
     kwargs['jaxpr'] = jaxpr
@@ -107,30 +110,30 @@ class ParametrizedTrace(Trace):
 
     def process_call(self, call_primitive, f, tracers, kwargs):
         """Processes an xla_call (jitted function etc) during tracing."""
-        return self.tracers(self._process_call(call_primitive, f, *self.values(tracers), **kwargs))
+        return self.tracers(self._process_call(call_primitive, f, self.values(tracers), kwargs))
 
     def _process_primitive(self, primitive: Primitive, inputs, kwargs):
         """Process a primitive during tracing."""
         if primitive in InitTrace._rules:
-            return InitTrace._rules[primitive](self)(*inputs, **kwargs)
+            return InitTrace._rules[primitive](self)(inputs, kwargs)
 
         if isinstance(primitive, parametrized):
-            outputs = self._process_parametrized(primitive, *inputs)
+            outputs = self._process_parametrized(primitive, inputs)
             flat_outputs, out_tree = tree_flatten(outputs)
             self.state.set_out_tree(out_tree)
             return flat_outputs
 
         return primitive.bind(*inputs, **kwargs)
 
-    def _process_parametrized(self, parametrized, *inputs):
+    def _process_parametrized(self, parametrized, inputs):
         assert False
 
-    def _process_call(self, call_primitive, f, *inputs, **kwargs):
+    def _process_call(self, call_primitive, f, inputs, kwargs):
         assert False
 
     _rules = {lax.scan_p: lambda self: self._process_scan}
 
-    def _process_scan(self, *args, **kwargs):
+    def _process_scan(self, args, kwargs):
         assert False
 
     def pure(self, val):
@@ -204,7 +207,7 @@ class InitTrace(ParametrizedTrace):
     def state(self) -> InitTraceState:
         return self.master.state
 
-    def _process_parametrized(self, parametrized, *inputs):
+    def _process_parametrized(self, parametrized, inputs):
         state = self.state
         state.register_parametrized(parametrized)
 
@@ -218,12 +221,12 @@ class InitTrace(ParametrizedTrace):
             parameters = parametrized._parameters_namedtuple(state.parameters_dict[parametrized])
             return parametrized.apply(parameters, *inputs)
 
-    def _process_call(self, call_primitive, f, *inputs, **kwargs):
+    def _process_call(self, call_primitive, f, inputs, kwargs):
         """Processes an xla_call (jitted function etc) during tracing for `init_parameters`."""
         # TODO https://github.com/JuliusKunze/jaxnet/issues/14
         return call_primitive.bind(f, *inputs, **kwargs)
 
-    def _process_scan(self, *args, **kwargs):
+    def _process_scan(self, args, kwargs):
         jaxpr = kwargs['jaxpr']
         split_sizes = [kwargs['num_consts'], kwargs['num_carry']]
         consts, init, xs = split_list(args, split_sizes)
@@ -278,14 +281,14 @@ class ApplyTrace(ParametrizedTrace):
     def state(self) -> ApplyTraceState:
         return self.master.state
 
-    def _process_parametrized(self, parametrized, *inputs):
+    def _process_parametrized(self, parametrized, inputs):
         return parametrized.apply(self.state.next_parameters_for(parametrized), *inputs)
 
-    def _process_call(self, call_primitive, f, *inputs, **kwargs):
+    def _process_call(self, call_primitive, f, inputs, kwargs):
         """Processes an xla_call (jitted function etc) during 'apply' of a parametrized function."""
         return call_primitive.bind(_apply_transform(f, self.master), *inputs, **kwargs)
 
-    def _process_scan(self, *args, **kwargs):
+    def _process_scan(self, args, kwargs):
         state = self.state
         # TODO fix param sharing
         cell_primitive = parametrized(jaxpr_as_fun(kwargs['jaxpr']))
@@ -298,66 +301,55 @@ class ApplyTrace(ParametrizedTrace):
 class parametrized(Primitive):
     def __init__(self, fun, name=None):
         self._name = name if name else fun.__name__
-        self._wrapped_fun = wrap_init(fun) if fun else None
-        self.multiple_results = True
 
         super().__init__(f'{self._name}_{id(self)}')
 
-        @wrap_init
-        def init_and_apply(rng, *inputs):
-            _, outputs = self._init_and_apply_parameters_dict(rng, *inputs)
-            return outputs
-
-        self._init_and_apply = init_and_apply
-
-        def abstract_eval(*avals):
-            rng_and_inputs = (ShapedArray((2,), 'uint32'),) + avals
-            flat_rng_and_inputs, in_tree_with_rng = tree_flatten(rng_and_inputs)
-            flat_fun, _ = flatten_fun_nokwargs(self._init_and_apply, in_tree_with_rng)
-            _, flat_outs, _ = _instantiated_trace_to_jaxpr(flat_fun, flat_rng_and_inputs)
-            return flat_outs
-
-        self.def_abstract_eval(abstract_eval)
-
-    dummy_rng = PRNGKey(0)
-
-    def _out_tree(self, *inputs):
-        flat_rng_and_inputs, in_tree_with_rng = tree_flatten((parametrized.dummy_rng,) + inputs)
-        flat_fun, out_tree = flatten_fun_nokwargs(self._init_and_apply, in_tree_with_rng)
-        # Need to abstract_eval in order to build out tree:
-        _instantiated_trace_to_jaxpr(flat_fun, _abstractified_to_shapes_only(flat_rng_and_inputs))
-        return out_tree()
+        self.multiple_results = True
+        self._wrapped_fun = wrap_init(fun) if fun else None
+        self._wrapped_example_outputs_fun = wrap_init(self._example_outputs)
 
     def __call__(self, *inputs):
         flat_inputs = tree_leaves(inputs)
         flat_outs = self.bind(*flat_inputs)
-        master = self._find_master()
 
-        is_out_tree_cached = issubclass(master.trace_type, ParametrizedTrace)
-        out_tree = master.state.get_out_tree() if is_out_tree_cached else self._out_tree(*inputs)
-
+        trace = _top_trace()
+        is_out_tree_cached = isinstance(trace, ParametrizedTrace)
+        out_tree = trace.state.get_out_tree() if is_out_tree_cached else self._out_tree(*inputs)
         return tree_unflatten(out_tree, flat_outs)
 
+    def _abstract_eval_with_tree(self, avals):
+        flat_rng_and_inputs, in_tree_with_rng = tree_flatten((ShapedArray((2,), 'uint32'),) + avals)
+        flat_outs_fun, out_tree_thunk = flatten_fun_nokwargs(self._wrapped_example_outputs_fun,
+                                                             in_tree_with_rng)
+        # populates out_tree_thunk, so that it returns the output tree:
+        _, flat_outs, _ = _instantiated_trace_to_jaxpr(flat_outs_fun, flat_rng_and_inputs)
+        return flat_outs, out_tree_thunk()
+
+    def _example_outputs(self, rng, *inputs):
+        _, outputs = self._init_and_apply_parameters_dict(rng, *inputs)
+        return outputs
+
+    def _out_tree(self, *inputs):
+        _, out_tree = self._abstract_eval_with_tree(_abstractified(inputs))
+        return out_tree
+
+    def abstract_eval(self, *avals):
+        flat_outs, _ = self._abstract_eval_with_tree(avals)
+        return flat_outs
+
     def bind(self, *args, **kwargs):
-        """Like Primitive.bind, but finds the master trace even when no arguments are provided."""
+        """Like Primitive.bind, but finds the top trace even when no arguments are provided."""
         assert skip_checks or all(isinstance(arg, Tracer)
                                   or valid_jaxtype(arg) for arg in args), args
-        top_trace = find_top_trace(args)
-        if top_trace is None:
-            assert len(args) == 0
-            master = self._find_master()
-            top_trace = master.trace_type(master, cur_sublevel())
+
+        top_trace = _top_trace()
+
+        assert (skip_checks or find_top_trace(args) is None or
+                find_top_trace(args).master is top_trace.master, args)
 
         tracers = map(top_trace.full_raise, args)
         out_tracers = top_trace.process_primitive(self, tracers, kwargs)
         return map(full_lower, out_tracers)
-
-    def _find_master(self):
-        """Find the current master trace.
-        Needed when parametrized function has no arguments provided,
-        so it cannot retrieve the trace from its input tracers."""
-        return jax.core.trace_state.trace_stack.upward[-1]
-
 
     def apply(self, parameters, *inputs, jit=False):
         def _apply(parameters, *inputs):
@@ -365,8 +357,7 @@ class parametrized(Primitive):
             with new_master(ApplyTrace) as master:
                 state = ApplyTraceState(parameters)
                 master.state = state
-                flat_fun = _apply_transform(flat_fun, master)
-                flat_outputs = flat_fun.call_wrapped(*inputs)
+                flat_outputs = _apply_transform(flat_fun, master).call_wrapped(*inputs)
                 del master, state
             return tree_unflatten(out_tree(), flat_outputs)
 
@@ -393,8 +384,8 @@ class parametrized(Primitive):
 
     def _init_and_apply_parameters_dict(self, rng, *example_inputs):
         init_fun, get_parameters_dict = _init_transform(self._wrapped_fun, rng)
-        out_vals = init_fun.call_wrapped(example_inputs)
-        return get_parameters_dict(), out_vals
+        outputs = init_fun.call_wrapped(example_inputs)
+        return get_parameters_dict(), outputs
 
     @staticmethod
     def _flat_reuse_dicts(reuse, *example_inputs):
@@ -408,8 +399,7 @@ class parametrized(Primitive):
             if not isinstance(module, parametrized):
                 raise ValueError('Keys for reuse must be parametrized or ShapedParametrized.')
 
-            example_dict, _ = module._init_and_apply_parameters_dict(parametrized.dummy_rng,
-                                                                     *inputs)
+            example_dict, _ = module._init_and_apply_parameters_dict(PRNGKey(0), *inputs)
             params_dict = parametrized._parameters_dict(parameters, example_dict)
             r.update(module._flatten_dict(params_dict))
 
