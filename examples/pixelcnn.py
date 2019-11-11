@@ -261,8 +261,8 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, **resnet_kwargs)
         image = np.concatenate((image, np.ones((h, w, 1))), -1)
 
         us = [down_shift(ConvDown(filter_shape=[2, 3])(image))]
-        uls = [down_shift(ConvDown(filter_shape=[1, 3])(image)) + right_shift(
-            ConvDownRight(filter_shape=[2, 1])(image))]
+        uls = [down_shift(ConvDown(filter_shape=[1, 3])(image)) +
+               right_shift(ConvDownRight(filter_shape=[2, 1])(image))]
         us, uls = ResnetUpBlock()(us, uls, rng)
         us.append(HalveDown()(us[-1]))
         uls.append(HalveDownRight()(uls[-1]))
