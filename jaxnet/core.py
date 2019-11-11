@@ -160,15 +160,14 @@ def _init_transform(rng, inputs):
     """Transforms a `parametrized` function into its corresponding `init_parameters` function."""
     with new_master(InitTrace) as master:
         trace = InitTrace(master, cur_sublevel())
-        state = InitTraceState(rng)
-        master.state = state
+        master.state = InitTraceState(rng)
 
         outs = yield map(trace.tracer, inputs), {}
         multiple_results = isinstance(outs, tuple)
         out_tracers = map(trace.full_raise, outs if multiple_results else (outs,))
         out_val = trace.values(out_tracers)
-        parameters_dict = state.parameters_dict_in_call_order
-        del master, state, out_tracers
+        parameters_dict = master.state.parameters_dict_in_call_order
+        del master, out_tracers
     yield out_val if multiple_results else out_val[0], parameters_dict
 
 
@@ -317,7 +316,7 @@ class parametrized(Primitive):
         out_tree = trace.state.get_out_tree() if is_out_tree_cached else self._out_tree(*inputs)
         return tree_unflatten(out_tree, flat_outs)
 
-    def _abstract_eval_with_tree(self, avals):
+    def _abstract_example_outputs_with_tree(self, avals):
         flat_rng_and_inputs, in_tree_with_rng = tree_flatten((ShapedArray((2,), 'uint32'),) + avals)
         flat_outs_fun, out_tree_thunk = flatten_fun_nokwargs(self._wrapped_example_outputs_fun,
                                                              in_tree_with_rng)
@@ -330,11 +329,11 @@ class parametrized(Primitive):
         return outputs
 
     def _out_tree(self, *inputs):
-        _, out_tree = self._abstract_eval_with_tree(_abstractified(inputs))
+        _, out_tree = self._abstract_example_outputs_with_tree(_abstractified(inputs))
         return out_tree
 
     def abstract_eval(self, *avals):
-        flat_outs, _ = self._abstract_eval_with_tree(avals)
+        flat_outs, _ = self._abstract_example_outputs_with_tree(avals)
         return flat_outs
 
     def bind(self, *args, **kwargs):
@@ -355,10 +354,9 @@ class parametrized(Primitive):
         def _apply(parameters, *inputs):
             flat_fun, out_tree = flatten_fun_nokwargs(self._wrapped_fun, tree_structure(inputs))
             with new_master(ApplyTrace) as master:
-                state = ApplyTraceState(parameters)
-                master.state = state
+                master.state = ApplyTraceState(parameters)
                 flat_outputs = _apply_transform(flat_fun, master).call_wrapped(*inputs)
-                del master, state
+                del master
             return tree_unflatten(out_tree(), flat_outputs)
 
         return (jax.jit(_apply) if jit else _apply)(parameters, *inputs)
