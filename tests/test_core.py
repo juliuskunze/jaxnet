@@ -155,7 +155,7 @@ def test_partial_jit():
 
 
 @pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/14')
-def test_compiled_submodule():
+def test_compiled_parametrized():
     @parametrized
     @jit
     def net(inputs):
