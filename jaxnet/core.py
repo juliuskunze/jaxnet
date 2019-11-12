@@ -8,7 +8,8 @@ from jax import lax, random, unzip2, safe_zip, safe_map, partial, raise_to_shape
     tree_flatten, tree_unflatten, flatten_fun_nokwargs
 from jax.abstract_arrays import ShapedArray
 from jax.core import new_master, cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, \
-    jaxpr_as_fun, TypedJaxpr, MasterTrace, full_lower, find_top_trace, valid_jaxtype, skip_checks
+    jaxpr_as_fun, TypedJaxpr, MasterTrace, full_lower, find_top_trace, valid_jaxtype, skip_checks, \
+    trace_state
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal, closure_convert_jaxpr
 from jax.lax.lax_control_flow import _index_array, scan_p, _abstractify
 from jax.linear_util import wrap_init, transformation, transformation_with_aux
@@ -72,8 +73,11 @@ class parametrized(Primitive):
         def _apply(parameters, *inputs):
             flat_inputs, in_tree = tree_flatten(inputs)
             flat_fun, out_tree = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
+            apply_trace = parametrized._top_trace(filter_type=ApplyTrace)
             with new_master(ApplyTrace) as master:
-                master.state = ApplyTraceState(parameters)
+                global_parameters_by_primitive = apply_trace.state.global_parameters_by_primitive \
+                    if apply_trace else {}
+                master.state = ApplyTraceState(parameters, global_parameters_by_primitive)
                 flat_outputs = _apply_transform(flat_fun, master).call_wrapped(*flat_inputs)
                 del master
             return tree_unflatten(out_tree(), flat_outputs)
@@ -225,10 +229,17 @@ class parametrized(Primitive):
                 in zip(example_parameters_dict.items(), parameters)}
 
     @staticmethod
-    def _top_trace():
+    def _top_trace(filter_type=Trace):
         """Needed when parametrized function has no arguments provided,
         so it cannot retrieve the trace from its input tracers."""
-        master = jax.core.trace_state.trace_stack.upward[-1]
+
+        traces = [trace for trace in trace_state.trace_stack.upward if
+                  issubclass(trace.trace_type, filter_type)]
+
+        if len(traces) == 0:
+            return None
+
+        master = traces[-1]
         return master.trace_type(master, cur_sublevel())
 
     def __eq__(self, obj):
@@ -362,9 +373,9 @@ class ParametrizedTrace(Trace):
         out = self._process_primitive(primitive, self.values(tracers), kwargs)
         return self.tracers(out) if primitive.multiple_results else self.tracer(out)
 
-    def process_call(self, call_primitive, f, tracers, kwargs):
+    def process_call(self, primitive: Primitive, f, tracers, kwargs):
         """Processes an xla_call (jitted function etc) during tracing."""
-        return self.tracers(self._process_call(call_primitive, f, self.values(tracers), kwargs))
+        return self.tracers(self._process_call(primitive, f, self.values(tracers), kwargs))
 
     def _process_primitive(self, primitive: Primitive, inputs, kwargs):
         """Process a primitive during tracing."""
@@ -409,47 +420,24 @@ class ParametrizedTrace(Trace):
         return tuple(t.val for t in tracers)
 
 
-@transformation_with_aux
-def _init_transform(rng, *inputs):
-    """Transforms a flattened `parametrized` function
-    into its corresponding `init_parameters` function."""
-    with new_master(InitTrace) as master:
-        master.state = InitTraceState(rng)
-        trace = InitTrace(master, cur_sublevel())
-
-        outs = yield map(trace.tracer, inputs), {}
-        out_tracers = map(trace.full_raise, outs)
-        out_values = trace.values(out_tracers)
-        parameters_dict = master.state.parameters_dict_in_call_order
-        del master, out_tracers
-    yield out_values, parameters_dict
-
-
 class InitTraceState(ParametrizedTraceState):
-    def __init__(self, rng):
+    def __init__(self, rng, global_parameters_dict):
         super().__init__()
 
         self._rng = rng
-        # used as ordered set:
-        self._submodules_in_call_order = dict()
         self.parameters_dict = {}
+        self.global_parameters_dict = global_parameters_dict
 
     def next_rng(self):
         self._rng, rng = random.split(self._rng)
         return rng
 
-    def register_parametrized(self, primitive):
-        self._submodules_in_call_order[primitive] = None
+    def get_parameters_dict_for(self, primitive):
+        return self.global_parameters_dict.get(primitive)
 
-    @property
-    def parameters_dict_in_call_order(self):
-        if len(self.parameters_dict) <= 1:  # only needed for scan
-            return self.parameters_dict
-
-        submodules_in_call_order = self._submodules_in_call_order.keys()
-
-        assert len(self.parameters_dict) == len(submodules_in_call_order)
-        return {m: self.parameters_dict[m] for m in submodules_in_call_order}
+    def set_parameters_dict_for(self, primitive, parameters_dict):
+        self.parameters_dict[primitive] = parameters_dict
+        self.global_parameters_dict[primitive] = parameters_dict
 
 
 class InitTrace(ParametrizedTrace):
@@ -462,16 +450,14 @@ class InitTrace(ParametrizedTrace):
 
     def _process_parametrized(self, primitive: parametrized, inputs):
         state = self.state
-        state.register_parametrized(primitive)
 
-        # TODO https://github.com/JuliusKunze/jaxnet/issues/8 check all frames, not just parent:
-        if primitive in state.parameters_dict:
-            parameters = primitive._parameters_namedtuple(state.parameters_dict[primitive])
-            return primitive.apply(parameters, *inputs)
+        parameters_dict = state.get_parameters_dict_for(primitive)
+        if parameters_dict is not None:
+            return primitive.apply(primitive._parameters_namedtuple(parameters_dict), *inputs)
 
         parameters_dict, outputs = primitive._init_and_apply_parameters_dict(
             state.next_rng(), *inputs)
-        state.parameters_dict[primitive] = parameters_dict
+        state.set_parameters_dict_for(primitive, parameters_dict)
         return outputs
 
     def _process_call(self, primitive, f, inputs, kwargs):
@@ -497,6 +483,24 @@ class InitTrace(ParametrizedTrace):
         return _parametrized_scan_impl(cell, *args, **kwargs)
 
 
+@transformation_with_aux
+def _init_transform(rng, *inputs):
+    """Transforms a flattened `parametrized` function
+    into its corresponding `init_parameters` function."""
+    init_trace = parametrized._top_trace(filter_type=InitTrace)
+    with new_master(InitTrace) as master:
+        global_parameters_dict = init_trace.state.global_parameters_dict if init_trace else {}
+        master.state = InitTraceState(rng, global_parameters_dict)
+        trace = InitTrace(master, cur_sublevel())
+
+        outs = yield map(trace.tracer, inputs), {}
+        out_tracers = map(trace.full_raise, outs)
+        out_values = trace.values(out_tracers)
+        parameters_dict = master.state.parameters_dict
+        del master, out_tracers
+    yield out_values, parameters_dict
+
+
 @transformation
 def _apply_transform(master: MasterTrace, *inputs):
     """Transforms a flattened `parametrized` function into its corresponding `apply` function."""
@@ -509,21 +513,21 @@ class ApplyTraceState(ParametrizedTraceState):
     """Allows supplying submodules with their respective parameters while calling a module's `apply`
     function by iterating through the given parameters."""
 
-    def __init__(self, parameters):
+    def __init__(self, parameters, global_parameters_by_primitive):
         super().__init__()
 
         self.parameters = parameters
         self._index = 0
-        self._parameters_by_primitive = {}
+        self.global_parameters_by_primitive = global_parameters_by_primitive
 
     def next_parameters_for(self, primitive: Primitive):
-        parameters = self._parameters_by_primitive.get(primitive)
+        parameters = self.global_parameters_by_primitive.get(primitive)
         if parameters is not None:
             return parameters
 
         parameters = self.parameters[self._index]
         self._index += 1
-        self._parameters_by_primitive[primitive] = parameters
+        self.global_parameters_by_primitive[primitive] = parameters
         return parameters
 
 

@@ -570,7 +570,7 @@ def test_parameters_from_shared_submodules():
 
     params = net.parameters_from({a: a_params}, inputs)
     assert_parameters_equal(a_params.dense.kernel, params.sequential0.dense.kernel)
-    assert_parameters_equal(a_params.dense.kernel, params.sequential1.dense.kernel)
+    assert_parameters_equal((), params.sequential1)
     out = net.apply(params, inputs)
 
     out_ = net.apply_from({a: a_params}, inputs)
@@ -612,14 +612,12 @@ def test_parameters_from_sharing_between_multiple_parents():
 
     params = net.parameters_from({a: a_params}, inputs)
     assert_dense_parameters_equal(a_params, params.dense)
-    assert_dense_parameters_equal(a_params, params.sequential.dense)
-    # TODO https://github.com/JuliusKunze/jaxnet/issues/8
-    # assert 1 == len(params)
+    assert_parameters_equal((), params.sequential)
+    assert 2 == len(params)
     out_, _ = net.apply(params, inputs)
     assert np.array_equal(out, out_)
 
 
-@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/8')
 def test_parameter_sharing_between_multiple_parents():
     p = Parameter(lambda rng: np.ones(()))
 
@@ -633,7 +631,7 @@ def test_parameter_sharing_between_multiple_parents():
 
     params = net.init_parameters(PRNGKey(0))
     assert 1 == len(params)
-    assert np.array_equal(np.ones(()), params.sequential)
+    assert np.array_equal(np.ones(()), params.wrapped.parameter)
     a, b = net.apply(params)
     assert np.array_equal(np.ones(()), a)
     assert np.array_equal(np.ones(()), b)
