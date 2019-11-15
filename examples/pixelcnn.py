@@ -331,7 +331,7 @@ def loss_apply_fun(unbatched_loss, parameters, rng, batch):
 
 
 def main(batch_size=32, epochs=10, step_size=.001, decay_rate=.999995):
-    unbatched_loss = PixelCNNPP()
+    unbatched_loss = PixelCNNPP(nr_filters=8)
     loss_apply = loss_apply_fun(unbatched_loss)
     get_train_batches, test_batches = dataset(batch_size)
     rng, rng_init_1, rng_init_2 = random.split(PRNGKey(0), 3)
