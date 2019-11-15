@@ -1,5 +1,6 @@
-import tensorflow_datasets as tfds
-from jax import numpy as np, lax, vmap, random
+# Run this example in your browser: https://colab.research.google.com/drive/1DMRbUPAxTlk0Awf3D_HR3Oz3P3MBahaJ
+
+from jax import np, lax, vmap, random, curry
 from jax.random import PRNGKey
 from jax.util import partial
 
@@ -20,12 +21,14 @@ def Dense(out_chan, init_scale=1.):
     def dense(inputs):
         V = parameter((out_chan, inputs.shape[1]), randn(stddev=.05), 'V')
 
+        # TODO https://github.com/JuliusKunze/jaxnet/issues/17
         # TODO apply = vmap(apply, (0, None, None, None))
-        example_output = lambda: apply(inputs, V, g=np.ones(out_chan), b=np.zeros(out_chan))
+        # TODO remove np.zeros
+        example_out = np.zeros(apply(inputs, V, g=np.ones(out_chan), b=np.zeros(out_chan)).shape)
 
         g = Parameter(lambda rng: init_scale / np.sqrt(
-            np.var(example_output(), 0) + 1e-10), 'g')()
-        b = Parameter(lambda rng: np.mean(example_output(), 0) * g, 'b')()
+            np.var(example_out, 0) + 1e-10), 'g')()
+        b = Parameter(lambda rng: np.mean(example_out, 0) * g, 'b')()
         return apply(inputs, V, g, b)
 
     return dense
@@ -51,12 +54,15 @@ def ConvOrConvTranspose(out_chan, filter_shape=(3, 3), strides=None, padding='SA
         V = Parameter(lambda rng: randn(.05)(rng, tuple(filter_shape) +
                                              (inputs.shape[-1], out_chan)), 'V')()
 
+        # TODO https://github.com/JuliusKunze/jaxnet/issues/17
         # TODO apply = vmap(apply, (0, None, None, None))
-        example_output = lambda: apply(inputs, V=V, g=np.ones(out_chan), b=np.zeros(out_chan))
+        # TODO remove np.zeros
+        example_out = np.zeros(apply(inputs, V=V, g=np.ones(out_chan), b=np.zeros(out_chan)).shape)
 
-        g = Parameter(lambda rng: init_scale / np.sqrt(np.var(example_output(), (0, 1, 2)) + 1e-10),
+        g = Parameter(lambda rng: init_scale / np.sqrt(np.var(example_out, (0, 1, 2)) + 1e-10),
                       'g')()
-        b = Parameter(lambda rng: np.mean(example_output(), (0, 1, 2)) * g, 'b')()
+        # TODO remove np.zeros
+        b = Parameter(lambda rng: np.mean(example_out, (0, 1, 2)) * np.zeros(g.shape), 'b')()
 
         return apply(inputs, V, b, g)
 
@@ -298,6 +304,7 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, **resnet_kwargs)
 
 
 def dataset(batch_size):
+    import tensorflow_datasets as tfds
     import tensorflow as tf
 
     tf.random.set_random_seed(0)
@@ -312,41 +319,36 @@ def dataset(batch_size):
     return get_train_batches, test_batches
 
 
+@curry
+def loss_apply_fun(unbatched_loss, parameters, rng, batch):
+    batch_size = batch.shape[0]
+    # TODO https://github.com/JuliusKunze/jaxnet/issues/16
+    loss = vmap(partial(unbatched_loss.apply, parameters), (0, 0))
+    rngs = random.split(rng, batch_size)
+    losses = loss(rngs, batch)
+    assert losses.shape == (batch_size,)
+    return np.mean(losses)
+
+
 def main(batch_size=32, epochs=10, step_size=.001, decay_rate=.999995,
          nr_filters=1, nr_resnet=0, dropout_p=.5):
-    unbatched_loss = PixelCNNPP(nr_filters=nr_filters,
-                                nr_resnet=nr_resnet, dropout_p=dropout_p)
-
-    @parametrized
-    def loss(rng, batch):
-        batch_size = batch.shape[0]
-        loss = vmap(unbatched_loss, (None, 0, 0))
-        rngs = random.split(rng, batch_size)
-        losses = loss(rngs, batch)
-        assert losses.shape == (batch_size,)
-        return np.mean(losses)
-
+    unbatched_loss = PixelCNNPP(nr_filters=nr_filters, nr_resnet=nr_resnet, dropout_p=dropout_p)
+    loss_apply = loss_apply_fun(unbatched_loss)
     get_train_batches, test_batches = dataset(batch_size)
     rng, rng_init_1, rng_init_2 = random.split(PRNGKey(0), 3)
-    # TODO https://github.com/JuliusKunze/jaxnet/issues/5 fix:
-    params = unbatched_loss.init_parameters(rng_init_1, rng_init_2, next(test_batches)[0])
-    # TODO fix batched version:
-    # TODO rng_init_2 = random.split(rng_init_2, test_batch_size)
-    # TODO vmap(loss, (0, 0))
-    params = loss.init_parameters(rng_init_1, rng_init_2, next(test_batches))
-
     opt = optimizers.Adam(optimizers.exponential_decay(step_size, 1, decay_rate))
-    state = opt.init(params)
+    state = opt.init(unbatched_loss.init_parameters(rng_init_1, rng_init_2, next(test_batches)[0]))
 
     for epoch in range(epochs):
         for batch in get_train_batches():
             rng, rng_update = random.split(rng)
             i = opt.get_step(state)
-            state, train_loss = opt.update_and_get_loss(loss.apply, state, rng_update, batch)
+
+            state, train_loss = opt.update_and_get_loss(loss_apply, state, rng_update, batch)
 
             if i % 100 == 0 or i < 10:
                 rng, rng_test = random.split(rng)
-                test_loss = loss(opt.get_parameters(state), rng_test, next(test_batches))
+                test_loss = loss_apply(opt.get_parameters(state), rng_test, next(test_batches))
                 print(f"Epoch {epoch}, iteration {i}, "
                       f"train loss {train_loss:.3f}, "
                       f"test loss {test_loss:.3f} ")

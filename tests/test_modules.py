@@ -6,8 +6,9 @@ from pytest import raises
 from jaxnet import Dense, Sequential, relu, Conv, Conv1D, ConvTranspose, Conv1DTranspose, flatten, \
     MaxPool, AvgPool, zeros, GRUCell, Rnn, SumPool, Dropout, BatchNorm, parametrized, parameter, \
     Regularized, ones, Reparametrized, L2Regularized
-from tests.util import random_inputs, assert_parameters_equal
+from tests.util import random_inputs, assert_parameters_equal, enable_checks
 
+enable_checks()
 
 def test_Dense_shape(Dense=Dense):
     net = Dense(2, kernel_init=zeros, bias_init=zeros)

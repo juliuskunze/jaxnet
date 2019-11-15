@@ -33,7 +33,7 @@ class Optimizer(ABC):
 
         def _get_parameters(state):
             # assumes state is non-nested (named)tuple of numpy arrays for each parameter:
-            if all(map(lambda n: isinstance(n, jax.numpy.ndarray), state)):
+            if all(map(lambda n: isinstance(n, jax.numpy.ndarray), state)) and len(state) > 0:
                 return self._get_parameter(state)
 
             # TODO assumes parameters to be a nested (named)tuple / list:

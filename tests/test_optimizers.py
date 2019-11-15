@@ -5,15 +5,25 @@ from jax.random import PRNGKey
 
 from jaxnet import *
 from jaxnet.optimizers import *
+from tests.util import enable_checks
+
+enable_checks()
+
+
+@parametrized
+def loss_with_parameters(inputs, targets):
+    return -np.mean(Sequential(Dense(4), relu, Dense(4), logsoftmax)(inputs) * targets)
+
+
+@parametrized
+def loss_without_parameters(inputs, targets):
+    return np.mean(inputs) + np.mean(targets)
 
 
 @pytest.mark.parametrize('jit', (False, True))
 @pytest.mark.parametrize('opt', (Sgd(), Momentum(.1, .1), Adagrad(), RmsProp(.1), Adam(), Sm3(.1)))
-def test(jit, opt):
-    @parametrized
-    def loss(inputs, targets):
-        return -np.mean(Sequential(Dense(4), relu, Dense(4), logsoftmax)(inputs) * targets)
-
+@pytest.mark.parametrize('loss', (loss_with_parameters, loss_without_parameters))
+def test(loss, jit, opt):
     def next_batch():
         return np.zeros((3, 10)), np.zeros((3, 4))
 
@@ -23,7 +33,8 @@ def test(jit, opt):
 
     assert 0 == opt.get_step(state)
     assert 0 == state.step
-    assert (4, 4) == opt.get_parameters(state).sequential.dense1.kernel.shape
+    assert (loss is not loss_with_parameters or
+            (4, 4) == opt.get_parameters(state).sequential.dense1.kernel.shape)
 
     for _ in range(2):
         state = opt.update(loss.apply, state, *next_batch(), jit=jit)
@@ -35,7 +46,8 @@ def test(jit, opt):
     def check():
         assert 4 == opt.get_step(state)
         assert 4 == state.step
-        assert (4, 4) == opt.get_parameters(state).sequential.dense1.kernel.shape
+        assert (loss is not loss_with_parameters or
+                (4, 4) == opt.get_parameters(state).sequential.dense1.kernel.shape)
 
         out = loss.apply(opt.get_parameters(state), *next_batch())
         assert () == out.shape

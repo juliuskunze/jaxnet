@@ -4,7 +4,10 @@ from jax.random import PRNGKey
 
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, save, \
     load, parameter, Parameter, randn
-from tests.util import random_inputs, assert_parameters_equal, assert_dense_parameters_equal
+from tests.util import random_inputs, assert_parameters_equal, assert_dense_parameters_equal, \
+    enable_checks
+
+enable_checks()
 
 
 def test_Parameter(Parameter=Parameter):
@@ -155,7 +158,7 @@ def test_partial_jit():
 
 
 @pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/14')
-def test_compiled_parametrized():
+def test_parametrized_jit():
     @parametrized
     @jit
     def net(inputs):
@@ -325,7 +328,6 @@ def test_no_params():
     assert np.array_equal(out, out_)
 
 
-@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/15')
 def test_scan_unparametrized_cell():
     def cell(carry, x):
         return np.array([2]) * carry * x, np.array([2]) * carry * x
@@ -637,12 +639,19 @@ def test_parameter_sharing_between_multiple_parents():
     assert np.array_equal(np.ones(()), b)
 
 
-def test_tuple_input():
+@pytest.mark.parametrize('type', [list, tuple])
+def test_collection_input(type):
     @parametrized
-    def net(input_tuple):
-        return input_tuple[0] * input_tuple[1] * parameter((), zeros)
+    def net(inputs):
+        assert isinstance(inputs, type)
+        return inputs[0] * inputs[1] * parameter((), zeros)
 
-    inputs = (np.zeros(2), np.zeros(2))
+    inputs = type((np.zeros(2), np.zeros(2)))
+    params = net.init_parameters(PRNGKey(0), inputs)
+    out = net.apply(params, inputs)
+    assert np.array_equal(np.zeros(2), out)
+
+    net = Sequential(net)
     params = net.init_parameters(PRNGKey(0), inputs)
     out = net.apply(params, inputs)
     assert np.array_equal(np.zeros(2), out)

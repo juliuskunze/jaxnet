@@ -5,6 +5,7 @@ from jax import numpy as np, random
 from jax.random import PRNGKey
 
 from examples.mnist_vae import gaussian_sample, bernoulli_logpdf, gaussian_kl
+from examples.pixelcnn import PixelCNNPP
 from examples.wavenet import calculate_receptive_field, discretized_mix_logistic_loss, Wavenet
 from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, GRUCell, Rnn, \
     softmax, softplus, Parameter, glorot, randn, parameter, Reparametrized, L2Regularized, \
@@ -12,6 +13,9 @@ from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, 
 from jaxnet.core import ShapedParametrized
 from tests.test_core import test_Parameter
 from tests.test_modules import test_Dense_shape, Scaled
+from tests.util import enable_checks
+
+enable_checks()
 
 
 def test_readme():
@@ -77,9 +81,7 @@ def test_parameter_Dense_equivalent():
 
 
 def test_Dense_equivalent():
-    class Dense:
-        Params = namedtuple('dense', ['kernel', 'bias'])
-
+    class DenseEquivalent:
         def __init__(self, out_dim, kernel_init=glorot(), bias_init=randn()):
             self.bias_init = bias_init
             self.kernel_init = kernel_init
@@ -93,11 +95,11 @@ def test_Dense_equivalent():
             rng_kernel, rng_bias = random.split(rng, 2)
             kernel = self.kernel_init(rng_kernel, (example_inputs.shape[-1], self.out_dim))
             bias = self.bias_init(rng_bias, (self.out_dim,))
-            return Dense.Params(kernel=kernel, bias=bias)
+            return namedtuple('dense', ['kernel', 'bias'])(kernel=kernel, bias=bias)
 
         def shaped(self, example_inputs): return ShapedParametrized(self, example_inputs)
 
-    test_Dense_shape(Dense)
+    test_Dense_shape(DenseEquivalent)
 
 
 def test_Parameter_dense():
@@ -237,6 +239,17 @@ def test_wavenet():
     trained_params = opt.get_parameters(state)
     assert () == train_loss.shape
 
+
+def test_unbatched_pixelcnn():
+    unbatched_loss = PixelCNNPP(nr_filters=1, nr_resnet=1, dropout_p=.5)
+    images = np.zeros((2, 32, 32, 3), np.uint8)
+    rng = PRNGKey(0)
+    opt = optimizers.Adam()
+    state = opt.init(unbatched_loss.init_parameters(rng, rng, images[0]))
+    # take ~20s, disabled for faster tests:
+    # loss_apply = loss_apply_fun(unbatched_loss)
+    # state, loss = opt.update_and_get_loss(loss_apply, state, rng, images)
+    # assert loss.shape == ()
 
 def test_reparametrized_submodule():
     net = Sequential(Conv(2, (3, 3)), relu, Conv(2, (3, 3)), relu, flatten,

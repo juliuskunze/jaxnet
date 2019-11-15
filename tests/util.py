@@ -1,5 +1,10 @@
+import jax
 from jax import numpy as np, random
 from jax.random import PRNGKey
+
+
+def enable_checks():
+    jax.core.skip_checks = False
 
 
 def random_inputs(input_shape, rng=PRNGKey(0)):
