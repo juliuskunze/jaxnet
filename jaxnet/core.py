@@ -334,15 +334,16 @@ def _custom_cell_scan_impl(cell, *args, **kwargs):
     return scan_p.bind(*args, **kwargs)
 
 
-def get_parametrized_from_cell_jaxpr(jaxpr):
-    is_cell_parametrized = len(jaxpr.jaxpr.eqns) == 1 and \
-                           isinstance(jaxpr.jaxpr.eqns[0].primitive, parametrized)
-
-    if not is_cell_parametrized:
-        return None
+def _parametrized_from_cell_jaxpr(jaxpr) -> parametrized:
+    assert _is_cell_jaxpr_parametrized(jaxpr)
 
     eqn, = jaxpr.jaxpr.eqns
     return eqn.primitive
+
+
+def _is_cell_jaxpr_parametrized(jaxpr):
+    return len(jaxpr.jaxpr.eqns) == 1 and \
+           isinstance(jaxpr.jaxpr.eqns[0].primitive, parametrized)
 
 
 class ParametrizedTracer(Tracer):
@@ -420,6 +421,14 @@ class ParametrizedTrace(Trace):
     _rules = {lax.scan_p: lambda self: self._process_scan}
 
     def _process_scan(self, args, kwargs):
+        if not _is_cell_jaxpr_parametrized(kwargs['jaxpr']):
+            return _scan_impl(*args, **kwargs)
+
+        cell_primitive = _parametrized_from_cell_jaxpr(kwargs['jaxpr'])
+        cell = self._get_parametrized_cell_fun(cell_primitive, args, kwargs)
+        return _custom_cell_scan_impl(cell, *args, **kwargs)
+
+    def _get_parametrized_cell_fun(self, cell_primitive: parametrized, args, kwargs):
         assert False
 
     def pure(self, val):
@@ -485,22 +494,16 @@ class InitTrace(ParametrizedTrace):
         # TODO https://github.com/JuliusKunze/jaxnet/issues/14
         return primitive.bind(f, *inputs, **kwargs)
 
-    def _process_scan(self, args, kwargs):
-        jaxpr = kwargs['jaxpr']
+    def _get_parametrized_cell_fun(self, cell_primitive: parametrized, args, kwargs):
         split_sizes = [kwargs['num_consts'], kwargs['num_carry']]
         consts, init, xs = split_list(args, split_sizes)
-        _, _, x_avals = split_list(jaxpr.in_avals, split_sizes)
+        _, _, x_avals = split_list(kwargs['jaxpr'].in_avals, split_sizes)
         x = map(partial(_index_array, 0), x_avals, xs)
 
-        primitive = get_parametrized_from_cell_jaxpr(jaxpr)
-        if primitive is None:
-            return _scan_impl(*args, **kwargs)
-
-        self._process_parametrized(primitive, *(consts + init + x))
-        cell_parameters_dict = self.state.get_parameters_dict_for(primitive)
-        cell_parameters = primitive._parameters_namedtuple(cell_parameters_dict)
-        cell = partial(primitive.apply, cell_parameters)
-        return _custom_cell_scan_impl(cell, *args, **kwargs)
+        self._process_parametrized(cell_primitive, *(consts + init + x))
+        cell_parameters_dict = self.state.get_parameters_dict_for(cell_primitive)
+        cell_parameters = cell_primitive._parameters_namedtuple(cell_parameters_dict)
+        return partial(cell_primitive.apply, cell_parameters)
 
 
 @transformation_with_aux
@@ -565,13 +568,8 @@ class ApplyTrace(ParametrizedTrace):
         """Processes an xla_call (jitted function etc) during 'apply' of a parametrized function."""
         return primitive.bind(_apply_transform(f, self.master), *inputs, **kwargs)
 
-    def _process_scan(self, args, kwargs):
-        primitive = get_parametrized_from_cell_jaxpr(kwargs['jaxpr'])
-        if primitive is None:
-            return _scan_impl(*args, **kwargs)
-
-        cell = partial(self._process_parametrized, primitive)
-        return _custom_cell_scan_impl(cell, *args, **kwargs)
+    def _get_parametrized_cell_fun(self, cell_primitive: parametrized, args, kwargs):
+        return partial(self._process_parametrized, cell_primitive)
 
 
 def save(parameters, path: Path):

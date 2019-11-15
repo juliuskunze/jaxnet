@@ -220,8 +220,8 @@ def uncentre(image):
     return np.asarray(np.clip(127.5 * (image + 1), 0, 255), dtype='uint8')
 
 
-def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, **resnet_kwargs):
-    Resnet = partial(GatedResnet, **resnet_kwargs)
+def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
+    Resnet = partial(GatedResnet, dropout_p=dropout_p)
     ResnetDown = partial(Resnet, Conv=DownShiftedConv)
     ResnetDownRight = partial(Resnet, Conv=DownRightShiftedConv)
 
@@ -330,9 +330,8 @@ def loss_apply_fun(unbatched_loss, parameters, rng, batch):
     return np.mean(losses)
 
 
-def main(batch_size=32, epochs=10, step_size=.001, decay_rate=.999995,
-         nr_filters=1, nr_resnet=0, dropout_p=.5):
-    unbatched_loss = PixelCNNPP(nr_filters=nr_filters, nr_resnet=nr_resnet, dropout_p=dropout_p)
+def main(batch_size=32, epochs=10, step_size=.001, decay_rate=.999995):
+    unbatched_loss = PixelCNNPP()
     loss_apply = loss_apply_fun(unbatched_loss)
     get_train_batches, test_batches = dataset(batch_size)
     rng, rng_init_1, rng_init_2 = random.split(PRNGKey(0), 3)

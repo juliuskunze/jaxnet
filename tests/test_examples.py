@@ -240,8 +240,8 @@ def test_wavenet():
     assert () == train_loss.shape
 
 
-def test_unbatched_pixelcnn():
-    unbatched_loss = PixelCNNPP(nr_filters=1, nr_resnet=1, dropout_p=.5)
+def test_pixelcnn():
+    unbatched_loss = PixelCNNPP(nr_filters=1, nr_resnet=1)
     images = np.zeros((2, 32, 32, 3), np.uint8)
     rng = PRNGKey(0)
     opt = optimizers.Adam()
