@@ -218,6 +218,7 @@ def Rnn(cell, carry_init):
 
 def Dropout(rate, mode='train'):
     """Constructor for a dropout function with given rate."""
+    rate = np.array(rate)
 
     def dropout(inputs, *args, **kwargs):
         if mode != 'train':
