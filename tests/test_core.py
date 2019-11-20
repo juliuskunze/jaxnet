@@ -146,28 +146,52 @@ def test_inline_submodule():
     assert np.allclose(out, out_)
 
 
-def test_partial_jit():
-    @parametrized
-    def net(inputs):
-        return jit(lambda x: 2 * x)(Dense(3)(inputs))
+j = jit(lambda x: 2 * x)
+j2 = jit(Dense(3))
+j3 = jit(lambda x: 2 * Dense(3)(x))
+j4 = jit(lambda x: 2 * Dense(3)(x))
 
+
+@pytest.mark.parametrize('jitted_fun', [
+    lambda x: 2 * Dense(3)(x),
+    lambda x: j(Dense(3)(x)),
+    lambda x: 2 * j2(x),
+    lambda x: j3(x),
+    j4
+])
+def test_parametrized_jit(jitted_fun):
+    net = parametrized(jitted_fun)
     inputs = random_inputs((2,))
     params = net.init_parameters(PRNGKey(0), inputs)
+
+    assert 'fun' == type(params).__name__
+    assert (3,) == params.dense.bias.shape
+
+    params_ = net.init_parameters(PRNGKey(0), inputs)
+    assert_parameters_equal(params, params_)
+
     out = net.apply(params, inputs)
     assert out.shape == (3,)
+    assert np.allclose([0.32754454, -0.41575947, 1.25023949], out)
 
+    # run twice to cover cached jit call
+    out_ = net.apply(params, inputs)
+    assert np.allclose(out, out_)
 
-@pytest.mark.skip('TODO https://github.com/JuliusKunze/jaxnet/issues/14')
-def test_parametrized_jit():
-    @parametrized
-    @jit
-    def net(inputs):
-        return Dense(3)(inputs)
+    out = net.apply(params, inputs, jit=True)
+    assert np.allclose(out, out_)
 
-    inputs = random_inputs((2,))
-    params = net.init_parameters(PRNGKey(0), inputs)
-    out = net.apply(params, inputs)
-    assert out.shape == (3,)
+    out_ = net.apply(params, inputs, jit=True)
+    assert np.allclose(out, out_)
+
+    out_ = net.apply_from({net: params}, inputs, jit=True)
+    assert np.allclose(out, out_)
+
+    # TODO https://github.com/JuliusKunze/jaxnet/issues/18
+    # Cache miss due to changed pytree (tuple != namedtuple) should be ok, but breaks tracing:
+    # unnamed_params = ((params.dense.kernel, params.dense.bias),)
+    # out_ = net.apply(unnamed_params, inputs, jit=True)
+    # assert np.allclose(out, out_)
 
 
 def test_inline_sequential_submodule():

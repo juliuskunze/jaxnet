@@ -1,11 +1,11 @@
 from collections import namedtuple, Counter, defaultdict
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
 import dill
-import jax
 from jax import lax, random, unzip2, safe_zip, safe_map, partial, raise_to_shaped, tree_flatten, \
-    tree_unflatten, flatten_fun_nokwargs
+    tree_unflatten, flatten_fun_nokwargs, jit
 from jax.abstract_arrays import ShapedArray
 from jax.core import new_master, cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, \
     TypedJaxpr, MasterTrace, full_lower, find_top_trace, valid_jaxtype, skip_checks, \
@@ -57,13 +57,14 @@ class parametrized(Primitive):
     multiple_results = True
 
     def __init__(self, fun, name=None):
-        self._name = name if name else fun.__name__
+        self.__name__ = name if name else _get_name_for(fun)
 
-        super().__init__(f'{self._name}_{id(self)}')
+        super().__init__(f'{self.__name__}_{id(self)}')
 
         self._wrapped_fun = wrap_init(fun) if fun else None
         self._wrapped_example_outputs_fun = wrap_init(self._example_outputs)
         self._in_tree_stack = []
+        self._jitted_apply = jit(self._apply)
 
     def init_parameters(self, rng, *example_inputs, reuse=None):
         return self._init_parameters(rng, *example_inputs, reuse=reuse, reuse_only=False)
@@ -71,28 +72,28 @@ class parametrized(Primitive):
     def parameters_from(self, reuse, *example_inputs):
         return self._init_parameters(PRNGKey(0), *example_inputs, reuse=reuse, reuse_only=True)
 
-    def apply(self, parameters, *inputs, jit=False):
-        def _apply(parameters, *inputs):
-            flat_inputs, in_tree = tree_flatten(inputs)
-            flat_fun, out_tree = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
-            apply_trace = parametrized._top_trace(filter_type=ApplyTrace)
-            with new_master(ApplyTrace) as master:
-                global_parameters_by_primitive = apply_trace.state.global_parameters_by_primitive \
-                    if apply_trace else {}
-                master.state = ApplyTraceState(parameters, global_parameters_by_primitive)
-                flat_outputs = _apply_transform(flat_fun, master).call_wrapped(*flat_inputs)
-                del master
-            return tree_unflatten(out_tree(), flat_outputs)
+    def _apply(self, parameters, *inputs):
+        flat_inputs, in_tree = tree_flatten(inputs)
+        flat_fun, out_tree = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
+        apply_trace = _top_trace(filter_type=ApplyTrace)
+        with new_master(ApplyTrace) as master:
+            global_parameters_by_primitive = apply_trace.state.global_parameters_by_primitive \
+                if apply_trace else {}
+            master.state = ApplyTraceState(parameters, global_parameters_by_primitive)
+            flat_outputs = _apply_transform(flat_fun, master).call_wrapped(*flat_inputs)
+            del master
+        return tree_unflatten(out_tree(), flat_outputs)
 
-        return (jax.jit(_apply) if jit else _apply)(parameters, *inputs)
+    def apply(self, parameters, *inputs, jit=False):
+        return (self._jitted_apply if jit else self._apply)(parameters, *inputs)
 
     def apply_from(self, reuse, *example_inputs, jit=False):
         parameters = self.parameters_from(reuse, *example_inputs)
-        return (jax.jit(self.apply) if jit else self.apply)(parameters, *example_inputs)
+        return self.apply(parameters, *example_inputs, jit=jit)
 
     def __call__(self, *inputs):
         flat_inputs, in_tree = tree_flatten(inputs)
-        trace = parametrized._top_trace()
+        trace = _top_trace()
         is_out_tree_cached = isinstance(trace, ParametrizedTrace)
 
         # TODO can break recursive parametrized primitives:
@@ -131,7 +132,7 @@ class parametrized(Primitive):
         assert skip_checks or all(isinstance(arg, Tracer)
                                   or valid_jaxtype(arg) for arg in args), args
 
-        trace = parametrized._top_trace()
+        trace = _top_trace()
 
         assert (skip_checks or find_top_trace(args) is None or
                 find_top_trace(args).master is trace.master), args
@@ -206,13 +207,18 @@ class parametrized(Primitive):
     def __str__(self):
         return self.name
 
+    @staticmethod
+    @lru_cache()
+    def _Parameters(name, *names):
+        return namedtuple(name, names)
+
     def _parameters_namedtuple(self, parameters_dict):
         if not isinstance(parameters_dict, dict):
             return parameters_dict
 
         index_by_prefix = defaultdict(lambda: 0)
 
-        prefix_param_pairs = [(module._name, module._parameters_namedtuple(parameters))
+        prefix_param_pairs = [(module.__name__, module._parameters_namedtuple(parameters))
                               for module, parameters in parameters_dict.items()]
 
         prefix_counter = Counter([prefix for prefix, _ in prefix_param_pairs])
@@ -225,7 +231,7 @@ class parametrized(Primitive):
             return name
 
         params = dict((next_name(prefix), params) for prefix, params in prefix_param_pairs)
-        Parameters = namedtuple(self._name, params.keys())
+        Parameters = parametrized._Parameters(self.__name__, *params.keys())
         return Parameters(**params)
 
     @staticmethod
@@ -236,20 +242,6 @@ class parametrized(Primitive):
         return {submodule: parametrized._parameters_dict(params, submodule_example_parameters_dict)
                 for (submodule, submodule_example_parameters_dict), params
                 in zip(example_parameters_dict.items(), parameters)}
-
-    @staticmethod
-    def _top_trace(filter_type=Trace):
-        """Needed when parametrized function has no arguments provided,
-        so it cannot retrieve the trace from its input tracers."""
-
-        traces = [trace for trace in trace_state.trace_stack.upward if
-                  issubclass(trace.trace_type, filter_type)]
-
-        if len(traces) == 0:
-            return None
-
-        master = traces[-1]
-        return master.trace_type(master, cur_sublevel())
 
     def __eq__(self, obj):
         return isinstance(obj, parametrized) and self.name == obj.name
@@ -303,6 +295,20 @@ def _instantiated_trace_to_jaxpr(fun, avals):
     jaxpr, out_pvals, consts = trace_to_jaxpr(fun, pvals, instantiate=True)
     out_avals, _ = unzip2(out_pvals)
     return jaxpr, out_avals, consts
+
+
+def _top_trace(filter_type=Trace):
+    """Needed when parametrized function has no arguments provided,
+    so it cannot retrieve the trace from its input tracers."""
+
+    traces = [trace for trace in trace_state.trace_stack.upward if
+              issubclass(trace.trace_type, filter_type)]
+
+    if len(traces) == 0:
+        return None
+
+    master = traces[-1]
+    return master.trace_type(master, cur_sublevel())
 
 
 @cache()
@@ -394,12 +400,18 @@ class ParametrizedTrace(Trace):
         out = self._process_primitive(primitive, self.values(tracers), kwargs)
         return self.tracers(out) if primitive.multiple_results else self.tracer(out)
 
-    def process_call(self, primitive: Primitive, f, tracers, kwargs):
-        """Processes an xla_call (jitted function etc) during tracing."""
-        return self.tracers(self._process_call(primitive, f, self.values(tracers), kwargs))
+    def process_call(self, call_primitive: Primitive, f, tracers, kwargs):
+        """Processes a call to a jitted function during tracing."""
+        return self.tracers(self._process_jitted(call_primitive, f, self.values(tracers), kwargs))
+
+    def post_process_call(self, call_primitive, out_tracers, params):
+        def todo(vals):
+            trace = type(self)(self.master, cur_sublevel())
+            return map(partial(ParametrizedTracer, trace), vals)
+
+        return [t.val for t in out_tracers], todo
 
     def _process_primitive(self, primitive: Primitive, flat_inputs, kwargs):
-        """Process a primitive during tracing."""
         if primitive in InitTrace._rules:
             return InitTrace._rules[primitive](self)(flat_inputs, kwargs)
 
@@ -415,7 +427,7 @@ class ParametrizedTrace(Trace):
     def _process_parametrized(self, primitive: parametrized, *inputs):
         assert False
 
-    def _process_call(self, primitive, f, inputs, kwargs):
+    def _process_jitted(self, primitive, f, inputs, kwargs):
         assert False
 
     _rules = {lax.scan_p: lambda self: self._process_scan}
@@ -489,10 +501,8 @@ class InitTrace(ParametrizedTrace):
         self.state.set_parameters_dict_for(primitive, parameters_dict)
         return outputs
 
-    def _process_call(self, primitive, f, inputs, kwargs):
-        """Processes an xla_call (jitted function etc) during tracing for `init_parameters`."""
-        # TODO https://github.com/JuliusKunze/jaxnet/issues/14
-        return primitive.bind(f, *inputs, **kwargs)
+    def _process_jitted(self, primitive, f, inputs, kwargs):
+        return f.call_wrapped(*inputs)
 
     def _get_parametrized_cell_fun(self, cell_primitive: parametrized, args, kwargs):
         split_sizes = [kwargs['num_consts'], kwargs['num_carry']]
@@ -510,7 +520,7 @@ class InitTrace(ParametrizedTrace):
 def _init_transform(rng, *inputs):
     """Transforms a flattened `parametrized` function
     into its corresponding `init_parameters` function."""
-    init_trace = parametrized._top_trace(filter_type=InitTrace)
+    init_trace = _top_trace(filter_type=InitTrace)
     with new_master(InitTrace) as master:
         global_parameters_dict = init_trace.state.global_parameters_dict if init_trace else {}
         master.state = InitTraceState(rng, global_parameters_dict)
@@ -564,12 +574,23 @@ class ApplyTrace(ParametrizedTrace):
     def _process_parametrized(self, primitive: parametrized, *inputs):
         return primitive.apply(self.state.next_parameters_for(primitive), *inputs)
 
-    def _process_call(self, primitive, f, inputs, kwargs):
-        """Processes an xla_call (jitted function etc) during 'apply' of a parametrized function."""
-        return primitive.bind(_apply_transform(f, self.master), *inputs, **kwargs)
+    def _process_jitted(self, primitive, f, inputs, kwargs):
+        fun = _apply_transform(f, self.master)
+        return primitive.bind(fun, *inputs, **kwargs)
 
     def _get_parametrized_cell_fun(self, cell_primitive: parametrized, args, kwargs):
         return partial(self._process_parametrized, cell_primitive)
+
+
+def _get_name_for(fun):
+    while hasattr(fun, '__wrapped__'):
+        fun = fun.__wrapped__
+
+    name = fun.__name__
+    if name == '<lambda>':
+        return 'fun'
+
+    return name
 
 
 def save(parameters, path: Path):
