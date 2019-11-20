@@ -1,6 +1,6 @@
 # Run this example in your browser: https://colab.research.google.com/drive/1DMRbUPAxTlk0Awf3D_HR3Oz3P3MBahaJ
 
-from jax import np, lax, vmap, random, curry
+from jax import np, lax, vmap, random, curry, jit
 from jax.random import PRNGKey
 from jax.util import partial
 
@@ -332,7 +332,7 @@ def loss_apply_fun(unbatched_loss, parameters, rng, batch):
 
 def main(batch_size=32, epochs=10, step_size=.001, decay_rate=.999995):
     unbatched_loss = PixelCNNPP(nr_filters=8)
-    loss_apply = loss_apply_fun(unbatched_loss)
+    loss_apply = jit(loss_apply_fun(unbatched_loss))
     get_train_batches, test_batches = dataset(batch_size)
     rng, rng_init_1, rng_init_2 = random.split(PRNGKey(0), 3)
     opt = optimizers.Adam(optimizers.exponential_decay(step_size, 1, decay_rate))
@@ -343,7 +343,8 @@ def main(batch_size=32, epochs=10, step_size=.001, decay_rate=.999995):
             rng, rng_update = random.split(rng)
             i = opt.get_step(state)
 
-            state, train_loss = opt.update_and_get_loss(loss_apply, state, rng_update, batch)
+            state, train_loss = opt.update_and_get_loss(loss_apply, state, rng_update, batch,
+                                                        jit=True)
 
             if i % 100 == 0 or i < 10:
                 rng, rng_test = random.split(rng)
