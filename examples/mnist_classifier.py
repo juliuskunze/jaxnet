@@ -15,6 +15,10 @@ def _one_hot(x, k, dtype=np.float32):
 
 
 def mnist():
+    # https://github.com/google/jax/blob/master/docs/gpu_memory_allocation.rst
+    import tensorflow as tf
+    tf.config.experimental.set_visible_devices([], "GPU")
+
     import tensorflow_datasets as tfds
     dataset = tfds.load("mnist:1.0.0")
     images = lambda d: np.reshape(np.float32(d['image']) / 256, (-1, 784))

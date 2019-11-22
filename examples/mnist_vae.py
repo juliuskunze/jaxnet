@@ -9,6 +9,10 @@ from jaxnet import Sequential, Dense, relu, softplus, parametrized, optimizers
 
 
 def mnist_images():
+    # https://github.com/google/jax/blob/master/docs/gpu_memory_allocation.rst
+    import tensorflow as tf
+    tf.config.experimental.set_visible_devices([], "GPU")
+
     import tensorflow_datasets as tfds
     prep = lambda d: np.reshape(np.float32(next(tfds.as_numpy(d))['image']) / 256, (-1, 784))
     dataset = tfds.load("mnist:1.0.0")
