@@ -297,8 +297,8 @@ def dataset(batch_size):
     return get_train_batches, test_batches
 
 
-def main(batch_size=2, epochs=10, step_size=.001, decay_rate=.999995):
-    loss = PixelCNNPP(nr_filters=1)
+def main(batch_size=32, nr_filters=8, epochs=10, step_size=.001, decay_rate=.999995):
+    loss = PixelCNNPP(nr_filters=nr_filters)
     get_train_batches, test_batches = dataset(batch_size)
     rng, rng_init_1, rng_init_2 = random.split(PRNGKey(0), 3)
     opt = optimizers.Adam(optimizers.exponential_decay(step_size, 1, decay_rate))
@@ -309,11 +309,13 @@ def main(batch_size=2, epochs=10, step_size=.001, decay_rate=.999995):
             rng, rng_update = random.split(rng)
             i = opt.get_step(state)
 
-            state, train_loss = opt.update_and_get_loss(loss.apply, state, rng_update, batch)
+            state, train_loss = opt.update_and_get_loss(loss.apply, state, rng_update, batch,
+                                                        jit=True)
 
             if i % 100 == 0 or i < 10:
                 rng, rng_test = random.split(rng)
-                test_loss = loss.apply(opt.get_parameters(state), rng_test, next(test_batches))
+                test_loss = loss.apply(opt.get_parameters(state), rng_test, next(test_batches),
+                                       jit=True)
                 print(f"Epoch {epoch}, iteration {i}, "
                       f"train loss {train_loss:.3f}, "
                       f"test loss {test_loss:.3f} ")
