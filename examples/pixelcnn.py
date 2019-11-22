@@ -1,37 +1,15 @@
 # Run this example in your browser: https://colab.research.google.com/drive/1DMRbUPAxTlk0Awf3D_HR3Oz3P3MBahaJ
 
-from jax import np, lax, vmap, random, curry, jit
+from jax import np, lax, random
 from jax.random import PRNGKey
 from jax.util import partial
 
-from jaxnet import parameter, parametrized, randn, elu, sigmoid, softplus, Dropout, logsumexp, \
-    optimizers, Parameter
+from jaxnet import parametrized, randn, elu, sigmoid, softplus, Dropout, logsumexp, \
+    optimizers, Parameter, Batched
 
 
 def _l2_normalize(arr, axis):
     return arr / np.sqrt(np.sum(arr ** 2, axis=axis, keepdims=True))
-
-
-def Dense(out_chan, init_scale=1.):
-    def apply(inputs, V, g, b):
-        V = g * _l2_normalize(V, 1)
-        return np.dot(V, inputs) - b
-
-    @parametrized
-    def dense(inputs):
-        V = parameter((out_chan, inputs.shape[1]), randn(stddev=.05), 'V')
-
-        # TODO https://github.com/JuliusKunze/jaxnet/issues/17
-        # TODO apply = vmap(apply, (0, None, None, None))
-        # TODO remove np.zeros
-        example_out = np.zeros(apply(inputs, V, g=np.ones(out_chan), b=np.zeros(out_chan)).shape)
-
-        g = Parameter(lambda rng: init_scale / np.sqrt(
-            np.var(example_out, 0) + 1e-10), 'g')()
-        b = Parameter(lambda rng: np.mean(example_out, 0) * g, 'b')()
-        return apply(inputs, V, g, b)
-
-    return dense
 
 
 def _unbatch(conv, lhs, rhs, strides, padding):
@@ -56,13 +34,12 @@ def ConvOrConvTranspose(out_chan, filter_shape=(3, 3), strides=None, padding='SA
 
         # TODO https://github.com/JuliusKunze/jaxnet/issues/17
         # TODO apply = vmap(apply, (0, None, None, None))
-        # TODO remove np.zeros
-        example_out = np.zeros(apply(inputs, V=V, g=np.ones(out_chan), b=np.zeros(out_chan)).shape)
+        example_out = apply(inputs, V=V, g=np.ones(out_chan), b=np.zeros(out_chan))
 
-        g = Parameter(lambda rng: init_scale / np.sqrt(np.var(example_out, (0, 1, 2)) + 1e-10),
-                      'g')()
-        # TODO remove np.zeros
-        b = Parameter(lambda rng: np.mean(example_out, (0, 1, 2)) * np.zeros(g.shape), 'b')()
+        # TODO remove need for `.aval.val` when capturing variables in initializer function:
+        g = Parameter(lambda rng: init_scale /
+                                  np.sqrt(np.var(example_out.aval.val, (0, 1, 2)) + 1e-10), 'g')()
+        b = Parameter(lambda rng: np.mean(example_out.aval.val, (0, 1, 2)) * g.aval.val, 'b')()
 
         return apply(inputs, V, b, g)
 
@@ -300,7 +277,15 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
         return -(conditional_params_to_logprob(image, conditional_params)
                  * np.log2(np.e) / image.size)
 
-    return unbatched_loss
+    @parametrized
+    def loss(rng, batch):
+        batch_size = batch.shape[0]
+        rngs = random.split(rng, batch_size)
+        losses = Batched(unbatched_loss)(rngs, batch)
+        assert losses.shape == (batch_size,)
+        return np.mean(losses)
+
+    return loss
 
 
 def dataset(batch_size):
@@ -319,36 +304,23 @@ def dataset(batch_size):
     return get_train_batches, test_batches
 
 
-@curry
-def loss_apply_fun(unbatched_loss, parameters, rng, batch):
-    batch_size = batch.shape[0]
-    # TODO https://github.com/JuliusKunze/jaxnet/issues/16
-    loss = vmap(partial(unbatched_loss.apply, parameters), (0, 0))
-    rngs = random.split(rng, batch_size)
-    losses = loss(rngs, batch)
-    assert losses.shape == (batch_size,)
-    return np.mean(losses)
-
-
-def main(batch_size=32, epochs=10, step_size=.001, decay_rate=.999995):
-    unbatched_loss = PixelCNNPP(nr_filters=8)
-    loss_apply = jit(loss_apply_fun(unbatched_loss))
+def main(batch_size=2, epochs=10, step_size=.001, decay_rate=.999995):
+    loss = PixelCNNPP(nr_filters=1)
     get_train_batches, test_batches = dataset(batch_size)
     rng, rng_init_1, rng_init_2 = random.split(PRNGKey(0), 3)
     opt = optimizers.Adam(optimizers.exponential_decay(step_size, 1, decay_rate))
-    state = opt.init(unbatched_loss.init_parameters(rng_init_1, rng_init_2, next(test_batches)[0]))
+    state = opt.init(loss.init_parameters(rng_init_1, rng_init_2, next(test_batches)))
 
     for epoch in range(epochs):
         for batch in get_train_batches():
             rng, rng_update = random.split(rng)
             i = opt.get_step(state)
 
-            state, train_loss = opt.update_and_get_loss(loss_apply, state, rng_update, batch,
-                                                        jit=True)
+            state, train_loss = opt.update_and_get_loss(loss.apply, state, rng_update, batch)
 
             if i % 100 == 0 or i < 10:
                 rng, rng_test = random.split(rng)
-                test_loss = loss_apply(opt.get_parameters(state), rng_test, next(test_batches))
+                test_loss = loss.apply(opt.get_parameters(state), rng_test, next(test_batches))
                 print(f"Epoch {epoch}, iteration {i}, "
                       f"train loss {train_loss:.3f}, "
                       f"test loss {test_loss:.3f} ")

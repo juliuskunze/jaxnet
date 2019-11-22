@@ -1,14 +1,15 @@
 import pytest
-from jax import numpy as np, jit
+from jax import numpy as np, jit, vmap
 from jax.random import PRNGKey
 from pytest import raises
 
 from jaxnet import Dense, Sequential, relu, Conv, Conv1D, ConvTranspose, Conv1DTranspose, flatten, \
     MaxPool, AvgPool, zeros, GRUCell, Rnn, SumPool, Dropout, BatchNorm, parametrized, parameter, \
-    Regularized, ones, Reparametrized, L2Regularized
+    Regularized, ones, Reparametrized, L2Regularized, Batched
 from tests.util import random_inputs, assert_parameters_equal, enable_checks
 
 enable_checks()
+
 
 def test_Dense_shape(Dense=Dense):
     net = Dense(2, kernel_init=zeros, bias_init=zeros)
@@ -288,3 +289,29 @@ def test_Reparametrized():
     reg_loss_out = scaled_net.apply(params, inputs)
 
     assert 4 == reg_loss_out
+
+
+def test_Batched():
+    out_dim = 1
+
+    @parametrized
+    def unbatched_dense(input):
+        kernel = parameter((out_dim, input.shape[-1]), ones)
+        bias = parameter((out_dim,), ones)
+        return np.dot(kernel, input) + bias
+
+    batch_size = 4
+
+    unbatched_params = unbatched_dense.init_parameters(PRNGKey(0), np.zeros(2))
+    out = unbatched_dense.apply(unbatched_params, np.ones(2))
+    assert np.array([3.]) == out
+
+    dense_apply = vmap(unbatched_dense.apply, (None, 0))
+    out_batched_ = dense_apply(unbatched_params, np.ones((batch_size, 2)))
+    assert np.array_equal(np.stack([out] * batch_size), out_batched_)
+
+    dense = Batched(unbatched_dense)
+    params = dense.init_parameters(PRNGKey(0), np.ones((batch_size, 2)))
+    assert_parameters_equal((unbatched_params,), params)
+    out_batched = dense.apply(params, np.ones((batch_size, 2)))
+    assert np.array_equal(out_batched_, out_batched)

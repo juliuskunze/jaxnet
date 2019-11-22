@@ -4,12 +4,12 @@ from pathlib import Path
 from typing import Iterable
 
 import dill
+import jax
 from jax import lax, random, unzip2, safe_zip, safe_map, partial, raise_to_shaped, tree_flatten, \
     tree_unflatten, flatten_fun_nokwargs, jit
 from jax.abstract_arrays import ShapedArray
 from jax.core import new_master, cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, \
-    TypedJaxpr, MasterTrace, full_lower, find_top_trace, valid_jaxtype, skip_checks, \
-    trace_state
+    TypedJaxpr, MasterTrace, full_lower, valid_jaxtype, trace_state, find_top_trace
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal, closure_convert_jaxpr
 from jax.lax.lax_control_flow import _index_array, scan_p, _abstractify, _scan_impl
 from jax.linear_util import wrap_init, transformation, transformation_with_aux
@@ -129,12 +129,12 @@ class parametrized(Primitive):
 
     def bind(self, *args, **kwargs):
         """Like Primitive.bind, but finds the top trace even when no arguments are provided."""
-        assert skip_checks or all(isinstance(arg, Tracer)
-                                  or valid_jaxtype(arg) for arg in args), args
+        assert jax.core.skip_checks or all(isinstance(arg, Tracer)
+                                           or valid_jaxtype(arg) for arg in args), args
 
         trace = _top_trace()
 
-        assert (skip_checks or find_top_trace(args) is None or
+        assert (jax.core.skip_checks or find_top_trace(args) is None or
                 find_top_trace(args).master is trace.master), args
 
         tracers = map(trace.full_raise, args)
@@ -397,12 +397,13 @@ class ParametrizedTrace(Trace):
         return self.master.state
 
     def process_primitive(self, primitive: Primitive, tracers, kwargs):
-        out = self._process_primitive(primitive, self.values(tracers), kwargs)
-        return self.tracers(out) if primitive.multiple_results else self.tracer(out)
+        out = self._process_primitive(primitive, self.lower_all(tracers), kwargs)
+        return map(self.full_raise, out) if primitive.multiple_results else self.full_raise(out)
 
     def process_call(self, call_primitive: Primitive, f, tracers, kwargs):
         """Processes a call to a jitted function during tracing."""
-        return self.tracers(self._process_jitted(call_primitive, f, self.values(tracers), kwargs))
+        return map(self.full_raise,
+                   self._process_jitted(call_primitive, f, self.lower_all(tracers), kwargs))
 
     def post_process_call(self, call_primitive, out_tracers, params):
         def todo(vals):
@@ -444,23 +445,16 @@ class ParametrizedTrace(Trace):
         assert False
 
     def pure(self, val):
-        return self.tracer(val)
-
-    def lift(self, val):
-        return self.tracer(val)
-
-    def sublift(self, val):
-        return self.tracer(val.val)
-
-    def tracer(self, val):
-        assert skip_checks or not isinstance(val, Tracer) or val.trace.level < self.level
         return ParametrizedTracer(self, val)
 
-    def tracers(self, values):
-        return map(self.tracer, values)
+    def lift(self, val):
+        return self.pure(val)
 
-    def values(self, tracers: Iterable[ParametrizedTracer]):
-        return tuple(t.val for t in tracers)
+    def sublift(self, val):
+        return self.pure(val.val)
+
+    def lower_all(self, tracers: Iterable):
+        return tuple(map(lambda x: self.full_raise(x).val, tracers))
 
 
 class InitTraceState(ParametrizedTraceState):
@@ -525,21 +519,19 @@ def _init_transform(rng, *inputs):
         global_parameters_dict = init_trace.state.global_parameters_dict if init_trace else {}
         master.state = InitTraceState(rng, global_parameters_dict)
         trace = InitTrace(master, cur_sublevel())
-
-        outs = yield map(trace.tracer, inputs), {}
-        out_tracers = map(trace.full_raise, outs)
-        out_values = trace.values(out_tracers)
+        outs = yield map(trace.full_raise, inputs), {}
+        outs = trace.lower_all(outs)
         parameters_dict = master.state.parameters_dict
-        del master, out_tracers
-    yield out_values, parameters_dict
+        del master
+    yield outs, parameters_dict
 
 
 @transformation
 def _apply_transform(master: MasterTrace, *inputs):
     """Transforms a flattened `parametrized` function into its corresponding `apply` function."""
     trace = ApplyTrace(master, cur_sublevel())
-    outs = yield trace.tracers(inputs), {}
-    yield [trace.full_raise(o).val for o in outs]
+    outs = yield map(trace.full_raise, inputs), {}
+    yield trace.lower_all(outs)
 
 
 class ApplyTraceState(ParametrizedTraceState):

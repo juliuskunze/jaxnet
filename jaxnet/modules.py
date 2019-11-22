@@ -1,7 +1,7 @@
 import functools
 import itertools
 
-from jax import random, lax, numpy as np, scipy, tree_map, tree_leaves
+from jax import random, lax, numpy as np, scipy, tree_map, tree_leaves, vmap, partial
 
 from jaxnet.core import parametrized, Parameter
 from jaxnet.initializers import glorot, randn, zeros, ones
@@ -285,3 +285,14 @@ def Reparametrized(model, reparametrization_factory, init_transform=lambda x: x)
         return model.apply(transformed_params, *inputs)
 
     return reparametrized
+
+
+def Batched(unbatched_model: parametrized, batch_dim=0):
+    @parametrized
+    def batched(*batched_args):
+        args = tree_map(lambda x: x[0], batched_args)
+        params = Parameter(lambda rng: unbatched_model.init_parameters(rng, *args), 'model')()
+        batched_apply = vmap(partial(unbatched_model._apply, params), batch_dim)
+        return batched_apply(*batched_args)
+
+    return batched

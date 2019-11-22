@@ -57,18 +57,18 @@ def test_reuse_api():
 
 
 def test_parameter_simplified_equivalent():
-    class Parameter:
+    class ParameterEquivalent:
         def __init__(self, init_parameter): self.init_parameter = init_parameter
 
         def apply(self, params, *inputs): return params
 
         def init_parameters(self, rng, *example_inputs): return self.init_parameter(rng)
 
-    test_Parameter(Parameter)
+    test_Parameter(ParameterEquivalent)
 
 
 def test_parameter_Dense_equivalent():
-    def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
+    def DenseEquivalent(out_dim, kernel_init=glorot(), bias_init=randn()):
         @parametrized
         def dense(inputs):
             kernel = Parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))()
@@ -77,7 +77,7 @@ def test_parameter_Dense_equivalent():
 
         return dense
 
-    test_Dense_shape(Dense)
+    test_Dense_shape(DenseEquivalent)
 
 
 def test_Dense_equivalent():
@@ -241,14 +241,13 @@ def test_wavenet():
 
 
 def test_pixelcnn():
-    unbatched_loss = PixelCNNPP(nr_filters=1, nr_resnet=1)
-    images = np.zeros((2, 32, 32, 3), np.uint8)
+    loss = PixelCNNPP(nr_filters=1, nr_resnet=1)
+    images = np.zeros((2, 16, 16, 3), np.uint8)
     rng = PRNGKey(0)
     opt = optimizers.Adam()
-    state = opt.init(unbatched_loss.init_parameters(rng, rng, images[0]))
+    state = opt.init(loss.init_parameters(rng, rng, images))
     # take ~20s, disabled for faster tests:
-    # loss_apply = loss_apply_fun(unbatched_loss)
-    # state, loss = opt.update_and_get_loss(loss_apply, state, rng, images)
+    # state, loss = opt.update_and_get_loss(loss.apply, state, rng, images)
     # assert loss.shape == ()
 
 def test_reparametrized_submodule():
