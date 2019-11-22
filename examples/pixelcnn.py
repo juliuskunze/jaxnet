@@ -1,19 +1,15 @@
 # Run this example in your browser: https://colab.research.google.com/drive/1DMRbUPAxTlk0Awf3D_HR3Oz3P3MBahaJ
 
-from jax import np, lax, random
+from jax import np, lax, random, vmap
 from jax.random import PRNGKey
 from jax.util import partial
 
 from jaxnet import parametrized, randn, elu, sigmoid, softplus, Dropout, logsumexp, \
-    optimizers, Parameter, Batched
+    optimizers, Parameter
 
 
 def _l2_normalize(arr, axis):
     return arr / np.sqrt(np.sum(arr ** 2, axis=axis, keepdims=True))
-
-
-def _unbatch(conv, lhs, rhs, strides, padding):
-    return conv(lhs[np.newaxis], rhs, strides, padding)[0]
 
 
 _conv = partial(lax.conv_general_dilated, dimension_numbers=('NHWC', 'HWIO', 'NHWC'))
@@ -24,16 +20,14 @@ def ConvOrConvTranspose(out_chan, filter_shape=(3, 3), strides=None, padding='SA
     strides = strides or (1,) * len(filter_shape)
 
     def apply(inputs, V, g, b):
-        V = g * _l2_normalize(V, (1, 2, 3))
-        return _unbatch(lax.conv_transpose if transpose else _conv, inputs, V, strides, padding) - b
+        V = g * _l2_normalize(V, (0, 1, 2))
+        return (lax.conv_transpose if transpose else _conv)(inputs, V, strides, padding) - b
 
     @parametrized
     def conv_or_conv_transpose(inputs):
         V = Parameter(lambda rng: randn(.05)(rng, tuple(filter_shape) +
                                              (inputs.shape[-1], out_chan)), 'V')()
 
-        # TODO https://github.com/JuliusKunze/jaxnet/issues/17
-        # TODO apply = vmap(apply, (0, None, None, None))
         example_out = apply(inputs, V=V, g=np.ones(out_chan), b=np.zeros(out_chan))
 
         # TODO remove need for `.aval.val` when capturing variables in initializer function:
@@ -76,14 +70,16 @@ def GatedResnet(Conv=None, nonlinearity=concat_elu, dropout_p=0.):
     return gated_resnet
 
 
-def down_shift(inputs):
-    _, w, c = inputs.shape
-    return np.concatenate((np.zeros((1, w, c)), inputs[:-1]), 0)
+@vmap
+def down_shift(input):
+    _, w, c = input.shape
+    return np.concatenate((np.zeros((1, w, c)), input[:-1]), 0)
 
 
-def right_shift(inputs):
-    h, _, c = inputs.shape
-    return np.concatenate((np.zeros((h, 1, c)), inputs[:, :-1]), 1)
+@vmap
+def right_shift(input):
+    h, _, c = input.shape
+    return np.concatenate((np.zeros((h, 1, c)), input[:, :-1]), 1)
 
 
 def DownShiftedConv(out_chan, filter_shape=(2, 3), strides=None, **kwargs):
@@ -91,7 +87,7 @@ def DownShiftedConv(out_chan, filter_shape=(2, 3), strides=None, **kwargs):
 
     @parametrized
     def down_shifted_conv(inputs):
-        padded = np.pad(inputs, ((f_h - 1, 0), ((f_w - 1) // 2, f_w // 2), (0, 0)))
+        padded = np.pad(inputs, ((0, 0), (f_h - 1, 0), ((f_w - 1) // 2, f_w // 2), (0, 0)))
         return Conv(out_chan, filter_shape, strides, 'VALID', **kwargs)(padded)
 
     return down_shifted_conv
@@ -102,10 +98,10 @@ def DownShiftedConvTranspose(out_chan, filter_shape=(2, 3), strides=None, **kwar
 
     @parametrized
     def down_shifted_conv_transpose(inputs):
-        out_h, out_w = np.multiply(np.array(inputs.shape[:2]),
+        out_h, out_w = np.multiply(np.array(inputs.shape[-3:-1]),
                                    np.array(strides or (1, 1)))
         inputs = ConvTranspose(out_chan, filter_shape, strides, 'VALID', **kwargs)(inputs)
-        return inputs[:out_h, (f_w - 1) // 2:out_w + (f_w - 1) // 2]
+        return inputs[:, :out_h, (f_w - 1) // 2:out_w + (f_w - 1) // 2]
 
     return down_shifted_conv_transpose
 
@@ -115,7 +111,7 @@ def DownRightShiftedConv(out_chan, filter_shape=(2, 2), strides=None, **kwargs):
 
     @parametrized
     def down_right_shifted_conv(inputs):
-        padded = np.pad(inputs, ((f_h - 1, 0), (f_w - 1, 0), (0, 0)))
+        padded = np.pad(inputs, ((0, 0), (f_h - 1, 0), (f_w - 1, 0), (0, 0)))
         return Conv(out_chan, filter_shape, strides, 'VALID', **kwargs)(padded)
 
     return down_right_shifted_conv
@@ -124,20 +120,21 @@ def DownRightShiftedConv(out_chan, filter_shape=(2, 2), strides=None, **kwargs):
 def DownRightShiftedConvTranspose(out_chan, filter_shape=(2, 2), strides=None, **kwargs):
     @parametrized
     def down_right_shifted_conv_transpose(inputs):
-        out_h, out_w = np.multiply(np.array(inputs.shape[:2]),
+        out_h, out_w = np.multiply(np.array(inputs.shape[-3:-1]),
                                    np.array(strides or (1, 1)))
         inputs = ConvTranspose(out_chan, filter_shape, strides, 'VALID', **kwargs)(inputs)
-        return inputs[:out_h, :out_w]
+        return inputs[:, :out_h, :out_w]
 
     return down_right_shifted_conv_transpose
 
 
-def pcnn_out_to_conditional_params(img, theta, nr_mix=10):
+@vmap
+def pcnn_out_to_conditional_params(image, theta):
     """
-    Maps img and model output theta to conditional parameters for a mixture
+    Maps image and model output theta to conditional parameters for a mixture
     of nr_mix logistics. If the input shapes are
 
-    img.shape == (h, w, c)
+    image.shape == (h, w, c)
     theta.shape == (h, w, 10 * nr_mix)
 
     the output shapes will be
@@ -145,30 +142,32 @@ def pcnn_out_to_conditional_params(img, theta, nr_mix=10):
     means.shape == inv_scales.shape == (nr_mix, h, w, c)
     logit_probs.shape == (nr_mix, h, w)
     """
+    nr_mix = 10
     logit_probs, theta = np.split(theta, [nr_mix], axis=-1)
     logit_probs = np.moveaxis(logit_probs, -1, 0)
-    theta = np.moveaxis(np.reshape(theta, img.shape + (-1,)), -1, 0)
+    theta = np.moveaxis(np.reshape(theta, image.shape + (-1,)), -1, 0)
     unconditioned_means, log_scales, coeffs = np.split(theta, 3)
     coeffs = np.tanh(coeffs)
 
     # now condition the means for the last 2 channels
     mean_red = unconditioned_means[..., 0]
-    mean_green = unconditioned_means[..., 1] + coeffs[..., 0] * img[..., 0]
-    mean_blue = (unconditioned_means[..., 2] + coeffs[..., 1] * img[..., 0]
-                 + coeffs[..., 2] * img[..., 1])
+    mean_green = unconditioned_means[..., 1] + coeffs[..., 0] * image[..., 0]
+    mean_blue = (unconditioned_means[..., 2] + coeffs[..., 1] * image[..., 0]
+                 + coeffs[..., 2] * image[..., 1])
     means = np.stack((mean_red, mean_green, mean_blue), axis=-1)
     inv_scales = softplus(log_scales)
     return means, inv_scales, logit_probs
 
 
-def conditional_params_to_logprob(x, conditional_params):
+def conditional_params_to_logprob(images, conditional_params):
     means, inv_scales, logit_probs = conditional_params
-    cdf = lambda offset: sigmoid((x - means + offset) * inv_scales)
-    upper_cdf = np.where(x == 1, 1, cdf(1 / 255))
-    lower_cdf = np.where(x == -1, 0, cdf(-1 / 255))
+    images = np.expand_dims(images, 1)
+    cdf = lambda offset: sigmoid((images - means + offset) * inv_scales)
+    upper_cdf = np.where(images == 1, 1, cdf(1 / 255))
+    lower_cdf = np.where(images == -1, 0, cdf(-1 / 255))
     all_logprobs = np.sum(np.log(np.maximum(upper_cdf - lower_cdf, 1e-12)), -1)
-    log_mix_coeffs = logit_probs - logsumexp(logit_probs, 0, keepdims=True)
-    return np.sum(logsumexp(log_mix_coeffs + all_logprobs, axis=0))
+    log_mix_coeffs = logit_probs - logsumexp(logit_probs, -3, keepdims=True)
+    return np.sum(logsumexp(log_mix_coeffs + all_logprobs, axis=-3), axis=(-2, -1))
 
 
 def _gumbel_max(rng, logit_probs):
@@ -238,14 +237,14 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
         return resnet_down_block
 
     @parametrized
-    def pixel_cnn(rng, image):
+    def pixel_cnn(rng, images):
         # ////////// up pass ////////
-        h, w, _ = image.shape
-        image = np.concatenate((image, np.ones((h, w, 1))), -1)
+        b, h, w, _ = images.shape
+        images = np.concatenate((images, np.ones((b, h, w, 1))), -1)
 
-        us = [down_shift(ConvDown(filter_shape=[2, 3])(image))]
-        uls = [down_shift(ConvDown(filter_shape=[1, 3])(image)) +
-               right_shift(ConvDownRight(filter_shape=[2, 1])(image))]
+        us = [down_shift(ConvDown(filter_shape=[2, 3])(images))]
+        uls = [down_shift(ConvDown(filter_shape=[1, 3])(images)) +
+               right_shift(ConvDownRight(filter_shape=[2, 1])(images))]
         us, uls = ResnetUpBlock()(us, uls, rng)
         us.append(HalveDown()(us[-1]))
         uls.append(HalveDownRight()(uls[-1]))
@@ -270,19 +269,13 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
         return NIN(10 * nr_logistic_mix)(elu(ul))
 
     @parametrized
-    def unbatched_loss(rng, image):
-        image = centre(image)
-        pcnn_out = pixel_cnn(rng, image)
-        conditional_params = pcnn_out_to_conditional_params(image, pcnn_out)
-        return -(conditional_params_to_logprob(image, conditional_params)
-                 * np.log2(np.e) / image.size)
-
-    @parametrized
-    def loss(rng, batch):
-        batch_size = batch.shape[0]
-        rngs = random.split(rng, batch_size)
-        losses = Batched(unbatched_loss)(rngs, batch)
-        assert losses.shape == (batch_size,)
+    def loss(rng, images):
+        images = centre(images)
+        pcnn_out = pixel_cnn(rng, images)
+        conditional_params = pcnn_out_to_conditional_params(images, pcnn_out)
+        losses = -(conditional_params_to_logprob(images, conditional_params) *
+                   np.log2(np.e) / images[0].size)
+        assert losses.shape == (images.shape[0],)
         return np.mean(losses)
 
     return loss
