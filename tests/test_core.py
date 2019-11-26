@@ -196,6 +196,14 @@ def test_parametrized_jit(jitted_fun):
     # assert np.allclose(out, out_)
 
 
+def test_parametrized_jit_parameter_sharing():
+    d = Dense(3)
+    net = Sequential(d, jit(d))
+    params = net.init_parameters(PRNGKey(0), np.zeros((2, 3)))
+    assert len(params) == 1
+    net.apply(params, np.zeros((2, 3)))
+
+
 def test_inline_sequential_submodule():
     @parametrized
     def inner(inputs):
