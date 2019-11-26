@@ -13,9 +13,7 @@ If you already know stax, read [this](STAX.md).
 ### Modularity
 
 ```python
-from jaxnet import *
-
-net = Sequential(Dense(1024), relu, Dense(1024), relu, Dense(4), logsoftmax)
+net = Sequential(Dense(1024), relu, Dense(1024), relu, Dense(4), log_softmax)
 ```
 creates a neural net model from predefined modules.
 

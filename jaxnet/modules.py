@@ -1,57 +1,18 @@
 import functools
 import itertools
 
-from jax import random, lax, numpy as np, scipy, tree_map, tree_leaves, vmap, partial
+from jax import random, lax, numpy as np, tree_map, tree_leaves, vmap, partial
+from jax.nn import sigmoid
+from jax.nn.initializers import glorot_normal, normal, zeros, ones
 
 from jaxnet.core import parametrized, Parameter
-from jaxnet.initializers import glorot, randn, zeros, ones
-
-
-def relu(x):
-    return np.maximum(x, 0.)
-
-
-def softplus(x):
-    return np.logaddexp(x, 0.)
-
-
-sigmoid = scipy.special.expit
-logsumexp = scipy.special.logsumexp
-
-
-def elu(x):
-    return np.where(x > 0, x, np.exp(x) - 1)
-
-
-def leaky_relu(x):
-    return np.where(x >= 0, x, 0.01 * x)
-
-
-def logsoftmax(x, axis=-1):
-    """Apply log softmax to an array of logits, log-normalizing along an axis."""
-    return x - logsumexp(x, axis, keepdims=True)
-
-
-def softmax(x, axis=-1):
-    """Apply softmax to an array of logits, exponentiating and normalizing along an axis."""
-    unnormalized = np.exp(x - x.max(axis, keepdims=True))
-    return unnormalized / unnormalized.sum(axis, keepdims=True)
-
-
-def flatten(x):
-    return np.reshape(x, (x.shape[0], -1))
-
-
-def fastvar(x, axis, keepdims):
-    """A fast but less numerically-stable variance calculation than np.var."""
-    return np.mean(x ** 2, axis, keepdims=keepdims) - np.mean(x, axis, keepdims=keepdims) ** 2
 
 
 def parameter(shape, init, name=None):
     return Parameter(lambda rng: init(rng, shape), name=name)()
 
 
-def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
+def Dense(out_dim, kernel_init=glorot_normal(), bias_init=normal()):
     """Layer constructor function for a dense (fully-connected) layer."""
 
     @parametrized
@@ -86,13 +47,17 @@ def Sequential(*layers):
     return sequential
 
 
+def flatten(x):
+    return np.reshape(x, (x.shape[0], -1))
+
+
 def GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None, padding='VALID',
-                kernel_init=None, bias_init=randn(1e-6), dilation=None):
+                kernel_init=None, bias_init=normal(1e-6), dilation=None):
     """Layer construction function for a general convolution layer."""
     lhs_spec, rhs_spec, out_spec = dimension_numbers
     one = (1,) * len(filter_shape)
     strides = strides or one
-    kernel_init = kernel_init or glorot(rhs_spec.index('O'), rhs_spec.index('I'))
+    kernel_init = kernel_init or glorot_normal(rhs_spec.index('O'), rhs_spec.index('I'))
     dilation = dilation or one
 
     @parametrized
@@ -118,13 +83,13 @@ Conv1D = functools.partial(GeneralConv, ('NTC', 'TIO', 'NTC'))
 
 def GeneralConvTranspose(dimension_numbers, out_chan, filter_shape,
                          strides=None, padding='VALID', kernel_init=None,
-                         bias_init=randn(1e-6)):
+                         bias_init=normal(1e-6)):
     """Layer construction function for a general transposed-convolution layer."""
 
     lhs_spec, rhs_spec, out_spec = dimension_numbers
     one = (1,) * len(filter_shape)
     strides = strides or one
-    kernel_init = kernel_init or glorot(rhs_spec.index('O'), rhs_spec.index('I'))
+    kernel_init = kernel_init or glorot_normal(rhs_spec.index('O'), rhs_spec.index('I'))
 
     @parametrized
     def conv_transpose(inputs):
@@ -240,6 +205,11 @@ def Dropout(rate, mode='train'):
         return np.where(keep, inputs / rate, 0)
 
     return dropout
+
+
+def fastvar(x, axis, keepdims):
+    """A fast but less numerically-stable variance calculation than np.var."""
+    return np.mean(x ** 2, axis, keepdims=keepdims) - np.mean(x, axis, keepdims=keepdims) ** 2
 
 
 def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,

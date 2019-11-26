@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from jax.nn import relu, log_softmax
 from jax.random import PRNGKey
 
 from jaxnet import *
@@ -12,7 +13,7 @@ enable_checks()
 
 @parametrized
 def loss_with_parameters(inputs, targets):
-    return -np.mean(Sequential(Dense(4), relu, Dense(4), logsoftmax)(inputs) * targets)
+    return -np.mean(Sequential(Dense(4), relu, Dense(4), log_softmax)(inputs) * targets)
 
 
 @parametrized

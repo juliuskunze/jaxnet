@@ -4,9 +4,10 @@ import time
 
 import jax.numpy as np
 import numpy.random as npr
+from jax.nn import relu, log_softmax
 from jax.random import PRNGKey
 
-from jaxnet import Sequential, parametrized, Dense, relu, logsoftmax, optimizers
+from jaxnet import Sequential, parametrized, Dense, optimizers
 
 
 def _one_hot(x, k, dtype=np.float32):
@@ -31,7 +32,7 @@ def mnist():
 predict = Sequential(
     Dense(1024), relu,
     Dense(1024), relu,
-    Dense(10), logsoftmax)
+    Dense(10), log_softmax)
 
 
 @parametrized

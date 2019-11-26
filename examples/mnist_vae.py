@@ -3,9 +3,10 @@
 import time
 
 from jax import jit, lax, random, numpy as np
+from jax.nn import relu, softplus
 from jax.random import PRNGKey
 
-from jaxnet import Sequential, Dense, relu, softplus, parametrized, optimizers
+from jaxnet import Sequential, Dense, parametrized, optimizers
 
 
 def mnist_images():

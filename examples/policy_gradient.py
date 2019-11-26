@@ -3,9 +3,10 @@
 import gym
 import numpy as onp
 from jax import numpy as np, jit
+from jax.nn import relu, log_softmax
 from jax.random import PRNGKey
 
-from jaxnet import Sequential, Dense, relu, logsoftmax, parametrized, random
+from jaxnet import Sequential, Dense, parametrized, random
 from jaxnet.optimizers import Adam
 
 
@@ -20,7 +21,7 @@ def main(batch_size=256, env_name="CartPole-v1"):
 
     @parametrized
     def loss(observations, actions, rewards_to_go):
-        logprobs = logsoftmax(policy(observations))
+        logprobs = log_softmax(policy(observations))
         action_logprobs = logprobs[np.arange(logprobs.shape[0]), actions]
         return -np.mean(action_logprobs * rewards_to_go, axis=0)
 

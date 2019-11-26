@@ -1,10 +1,11 @@
 # Run this example in your browser: https://colab.research.google.com/drive/111cKRfwYX4YFuPH3FF4V46XLfsPG1icZ#scrollTo=i7tMOevVHCXz
 
 from jax import lax, numpy as np, random
+from jax.nn import sigmoid, softplus, log_softmax, relu
 from jax.random import PRNGKey
+from jax.scipy.special import logsumexp
 
-from jaxnet import Sequential, parametrized, relu, sigmoid, Conv1D, softplus, \
-    logsoftmax, logsumexp, L2Regularized, optimizers
+from jaxnet import Sequential, parametrized, Conv1D, L2Regularized, optimizers
 
 
 def discretized_mix_logistic_loss(theta, y, num_class=256, log_scale_min=-7.):
@@ -49,7 +50,7 @@ def discretized_mix_logistic_loss(theta, y, num_class=256, log_scale_min=-7.):
                           np.log(np.maximum(cdf_delta, 1e-12)),
                           log_pdf_mid - np.log((num_class - 1) / 2))))
 
-    log_probs = log_probs + logsoftmax(logit_probs)
+    log_probs = log_probs + log_softmax(logit_probs)
     return -np.sum(logsumexp(log_probs, axis=-1), axis=-1)
 
 

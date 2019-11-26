@@ -1,11 +1,13 @@
 import pytest
 from jax import numpy as np, jit, vmap
+from jax.nn import relu
+from jax.nn.initializers import zeros, ones
 from jax.random import PRNGKey
 from pytest import raises
 
-from jaxnet import Dense, Sequential, relu, Conv, Conv1D, ConvTranspose, Conv1DTranspose, flatten, \
-    MaxPool, AvgPool, zeros, GRUCell, Rnn, SumPool, Dropout, BatchNorm, parametrized, parameter, \
-    Regularized, ones, Reparametrized, L2Regularized, Batched
+from jaxnet import Dense, Sequential, Conv, Conv1D, ConvTranspose, Conv1DTranspose, flatten, \
+    MaxPool, AvgPool, GRUCell, Rnn, SumPool, Dropout, BatchNorm, parametrized, parameter, \
+    Regularized, Reparametrized, L2Regularized, Batched
 from tests.util import random_inputs, assert_parameters_equal, enable_checks
 
 enable_checks()

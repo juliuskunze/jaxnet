@@ -1,8 +1,9 @@
 # Run this example in your browser: https://colab.research.google.com/drive/1YuI6GUtMgnMiWtqoaPznwAiSCe9hMR1E
 
 from jax import numpy as np, random
+from jax.nn import softmax
 
-from jaxnet import Sequential, Rnn, Dense, softmax, GRUCell, parametrized, optimizers
+from jaxnet import Sequential, Rnn, Dense, GRUCell, parametrized, optimizers
 
 
 def read_dataset():

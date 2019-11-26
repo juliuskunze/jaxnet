@@ -2,9 +2,10 @@
 
 import numpy.random as npr
 from jax import random, numpy as np
+from jax.nn import relu, log_softmax
 
-from jaxnet import Conv, BatchNorm, GeneralConv, MaxPool, Dense, AvgPool, flatten, logsoftmax, \
-    Sequential, relu, parametrized, optimizers
+from jaxnet import Conv, BatchNorm, GeneralConv, MaxPool, Dense, AvgPool, flatten, \
+    Sequential, parametrized, optimizers
 
 
 def ConvBlock(kernel_size, filters, strides=(2, 2)):
@@ -59,7 +60,7 @@ def ResNet50(num_classes):
         ConvBlock(3, [512, 512, 2048]),
         IdentityBlock(3, [512, 512]),
         IdentityBlock(3, [512, 512]),
-        AvgPool((7, 7)), flatten, Dense(num_classes), logsoftmax)
+        AvgPool((7, 7)), flatten, Dense(num_classes), log_softmax)
 
 
 def main():

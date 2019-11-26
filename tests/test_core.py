@@ -1,9 +1,11 @@
 import pytest
 from jax import numpy as np, jit, lax
+from jax.nn import relu
+from jax.nn.initializers import zeros, normal
 from jax.random import PRNGKey
 
-from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, save, \
-    load, parameter, Parameter, randn
+from jaxnet import parametrized, Dense, Sequential, Conv, flatten, save, load, \
+    parameter, Parameter
 from tests.util import random_inputs, assert_parameters_equal, assert_dense_parameters_equal, \
     enable_checks
 
@@ -172,7 +174,7 @@ def test_parametrized_jit(jitted_fun):
 
     out = net.apply(params, inputs)
     assert out.shape == (3,)
-    assert np.allclose([0.32754454, -0.41575947, 1.25023949], out)
+    assert np.allclose([0.25538206, -0.3121101, 0.9543335], out)
 
     # run twice to cover cached jit call
     out_ = net.apply(params, inputs)
@@ -726,8 +728,8 @@ def test_tuple_output_nested():
 def test_submodule_init_parameters_is_random():
     @parametrized
     def dense(inputs):
-        a = parameter((), randn(), 'a')
-        b = parameter((), randn(), 'b')
+        a = parameter((), normal(), 'a')
+        b = parameter((), normal(), 'b')
 
         return a + b
 

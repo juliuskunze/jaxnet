@@ -2,14 +2,15 @@ import time
 from collections import namedtuple
 
 from jax import numpy as np, random
+from jax.nn import relu, log_softmax, softplus, softmax
+from jax.nn.initializers import normal, glorot_normal, zeros
 from jax.random import PRNGKey
 
 from examples.mnist_vae import gaussian_sample, bernoulli_logpdf, gaussian_kl
 from examples.pixelcnn import PixelCNNPP
 from examples.wavenet import calculate_receptive_field, discretized_mix_logistic_loss, Wavenet
-from jaxnet import parametrized, Dense, Sequential, relu, Conv, flatten, zeros, GRUCell, Rnn, \
-    softmax, softplus, Parameter, glorot, randn, parameter, Reparametrized, L2Regularized, \
-    optimizers, logsoftmax
+from jaxnet import parametrized, Dense, Sequential, Conv, flatten, GRUCell, Rnn, \
+    Parameter, parameter, Reparametrized, L2Regularized, optimizers
 from jaxnet.core import ShapedParametrized
 from tests.test_core import test_Parameter
 from tests.test_modules import test_Dense_shape, Scaled
@@ -19,7 +20,7 @@ enable_checks()
 
 
 def test_readme():
-    net = Sequential(Dense(1024), relu, Dense(1024), relu, Dense(4), logsoftmax)
+    net = Sequential(Dense(1024), relu, Dense(1024), relu, Dense(4), log_softmax)
 
     @parametrized
     def loss(inputs, targets):
@@ -68,7 +69,7 @@ def test_parameter_simplified_equivalent():
 
 
 def test_parameter_Dense_equivalent():
-    def DenseEquivalent(out_dim, kernel_init=glorot(), bias_init=randn()):
+    def DenseEquivalent(out_dim, kernel_init=glorot_normal(), bias_init=normal()):
         @parametrized
         def dense(inputs):
             kernel = Parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))()
@@ -82,7 +83,7 @@ def test_parameter_Dense_equivalent():
 
 def test_Dense_equivalent():
     class DenseEquivalent:
-        def __init__(self, out_dim, kernel_init=glorot(), bias_init=randn()):
+        def __init__(self, out_dim, kernel_init=glorot_normal(), bias_init=normal()):
             self.bias_init = bias_init
             self.kernel_init = kernel_init
             self.out_dim = out_dim
@@ -103,7 +104,7 @@ def test_Dense_equivalent():
 
 
 def test_Parameter_dense():
-    def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
+    def Dense(out_dim, kernel_init=glorot_normal(), bias_init=normal()):
         @parametrized
         def dense(inputs):
             kernel = parameter((inputs.shape[-1], out_dim), kernel_init)

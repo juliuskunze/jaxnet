@@ -1,11 +1,15 @@
 # Run this example in your browser: https://colab.research.google.com/drive/1DMRbUPAxTlk0Awf3D_HR3Oz3P3MBahaJ
 
 from jax import np, lax, random, vmap
+from jax.experimental.optimizers import exponential_decay
+from jax.nn import elu, sigmoid, softplus
+from jax.nn.initializers import normal
 from jax.random import PRNGKey
+from jax.scipy.special import logsumexp
 from jax.util import partial
 
-from jaxnet import parametrized, randn, elu, sigmoid, softplus, Dropout, logsumexp, \
-    optimizers, Parameter
+from jaxnet import parametrized, Parameter, Dropout
+from jaxnet.optimizers import Adam
 
 
 def _l2_normalize(arr, axis):
@@ -25,8 +29,8 @@ def ConvOrConvTranspose(out_chan, filter_shape=(3, 3), strides=None, padding='SA
 
     @parametrized
     def conv_or_conv_transpose(inputs):
-        V = Parameter(lambda rng: randn(.05)(rng, tuple(filter_shape) +
-                                             (inputs.shape[-1], out_chan)), 'V')()
+        V = Parameter(lambda rng: normal(.05)(rng, tuple(filter_shape) +
+                                              (inputs.shape[-1], out_chan)), 'V')()
 
         example_out = apply(inputs, V=V, g=np.ones(out_chan), b=np.zeros(out_chan))
 
@@ -301,7 +305,7 @@ def main(batch_size=32, nr_filters=8, epochs=10, step_size=.001, decay_rate=.999
     loss = PixelCNNPP(nr_filters=nr_filters)
     get_train_batches, test_batches = dataset(batch_size)
     rng, rng_init_1, rng_init_2 = random.split(PRNGKey(0), 3)
-    opt = optimizers.Adam(optimizers.exponential_decay(step_size, 1, decay_rate))
+    opt = Adam(exponential_decay(step_size, 1, decay_rate))
     state = opt.init(loss.init_parameters(rng_init_1, rng_init_2, next(test_batches)))
 
     for epoch in range(epochs):
