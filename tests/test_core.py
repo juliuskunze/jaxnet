@@ -419,6 +419,26 @@ def test_scan_parametrized_cell():
     assert (3, 2) == outs.shape
 
 
+def test_scan_parametrized_nonflat_cell():
+    @parametrized
+    def cell(carry, x):
+        scale = parameter((2,), zeros)
+        return {'a': scale * np.array([2]) * carry['a'] * x}, scale * np.array([2]) * carry['a'] * x
+
+    @parametrized
+    def rnn(inputs):
+        _, outs = lax.scan(cell, {'a': np.zeros((2,))}, inputs)
+        return outs
+
+    inputs = np.zeros((3,))
+
+    rnn_params = rnn.init_parameters(PRNGKey(0), inputs)
+    assert (2,) == rnn_params.cell.parameter.shape
+    outs = rnn.apply(rnn_params, inputs)
+
+    assert (3, 2) == outs.shape
+
+
 def test_input_dependent_modules():
     @parametrized
     def net(inputs):

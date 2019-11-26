@@ -102,8 +102,8 @@ class parametrized(Primitive):
         return outputs
 
     def abstract_eval(self, *avals, **kwargs):
-        _, out_tree_container = split_dict(kwargs, ['in_tree', 'out_tree_container'])
-
+        in_tree, out_tree_container = split_dict(kwargs, ['in_tree', 'out_tree_container'])
+        avals = tree_unflatten(in_tree, avals)
         flat_rng_and_inputs, in_tree_with_rng = tree_flatten((ShapedArray((2,), 'uint32'),) + avals)
         flat_outs_fun, out_tree_thunk = flatten_fun_nokwargs(self._wrapped_example_outputs_fun,
                                                              in_tree_with_rng)
@@ -306,7 +306,7 @@ def _flat_initial_style_jaxpr(fun, in_avals):
                       out_avals=map(raise_to_shaped, out_avals)), consts
 
 
-def _custom_cell_scan_impl(cell, *args, **kwargs):
+def _custom_cell_scan_impl(flat_cell, *args, **kwargs):
     """lax_control_flow._scan_impl, but allowing for a custom cell function."""
 
     forward, length, num_consts, num_carry, jaxpr, linear = split_dict(
@@ -316,7 +316,7 @@ def _custom_cell_scan_impl(cell, *args, **kwargs):
     _, _, x_avals = split_list(jaxpr.in_avals, [num_consts, num_carry])
     cell_args = consts + init + map(partial(_index_array, 0), x_avals, xs)
 
-    jaxpr, new_consts = _flat_initial_style_jaxpr(wrap_init(cell), _abstractified(cell_args))
+    jaxpr, new_consts = _flat_initial_style_jaxpr(wrap_init(flat_cell), _abstractified(cell_args))
 
     args = list(new_consts) + init + xs
     kwargs['jaxpr'] = jaxpr
@@ -330,7 +330,7 @@ def _parametrized_from_cell_jaxpr(jaxpr) -> parametrized:
     assert _is_cell_jaxpr_parametrized(jaxpr)
 
     eqn, = jaxpr.jaxpr.eqns
-    return eqn.primitive
+    return eqn.primitive, eqn.params
 
 
 def _is_cell_jaxpr_parametrized(jaxpr):
@@ -380,16 +380,19 @@ class ParametrizedTrace(Trace):
             return InitTrace._rules[primitive](self)(flat_inputs, kwargs)
 
         if isinstance(primitive, parametrized):
-            in_tree, out_tree_container = split_dict(kwargs, ['in_tree', 'out_tree_container'])
-            inputs = tree_unflatten(in_tree, flat_inputs)
-            outputs = self._process_parametrized(primitive, *inputs)
-            flat_outputs, out_tree = tree_flatten(outputs)
-            out_tree_container.append(out_tree)
-            return flat_outputs
+            return self.process_parametrized(primitive, *flat_inputs, **kwargs)
 
         return primitive.bind(*flat_inputs, **kwargs)
 
-    def _process_parametrized(self, primitive: parametrized, *inputs):
+    def process_parametrized(self, primitive, *flat_inputs, **kwargs):
+        in_tree, out_tree_container = split_dict(kwargs, ['in_tree', 'out_tree_container'])
+        inputs = tree_unflatten(in_tree, flat_inputs)
+        outputs = self._process_parametrized_nonflat(primitive, *inputs)
+        flat_outputs, out_tree = tree_flatten(outputs)
+        out_tree_container.append(out_tree)
+        return flat_outputs
+
+    def _process_parametrized_nonflat(self, primitive: parametrized, *inputs):
         assert False
 
     def _process_jitted(self, primitive, f, inputs, kwargs):
@@ -401,12 +404,9 @@ class ParametrizedTrace(Trace):
         if not _is_cell_jaxpr_parametrized(kwargs['jaxpr']):
             return _scan_impl(*args, **kwargs)
 
-        cell_primitive = _parametrized_from_cell_jaxpr(kwargs['jaxpr'])
-        cell = self._get_parametrized_cell_fun(cell_primitive, args, kwargs)
-        return _custom_cell_scan_impl(cell, *args, **kwargs)
-
-    def _get_parametrized_cell_fun(self, cell_primitive: parametrized, args, kwargs):
-        assert False
+        cell_primitive, cell_kwargs = _parametrized_from_cell_jaxpr(kwargs['jaxpr'])
+        flat_cell = partial(self.process_parametrized, cell_primitive, **cell_kwargs)
+        return _custom_cell_scan_impl(flat_cell, *args, **kwargs)
 
     def pure(self, val):
         return ParametrizedTracer(self, val)
@@ -449,7 +449,7 @@ class InitTrace(ParametrizedTrace):
     def state(self) -> InitTraceState:
         return self.master.state
 
-    def _process_parametrized(self, primitive: parametrized, *inputs):
+    def _process_parametrized_nonflat(self, primitive: parametrized, *inputs):
         parameters_dict = self.state.get_parameters_dict_for(primitive)
         if parameters_dict is not None:
             return primitive.apply(primitive._parameters_namedtuple(parameters_dict), *inputs)
@@ -461,17 +461,6 @@ class InitTrace(ParametrizedTrace):
 
     def _process_jitted(self, primitive, f, inputs, kwargs):
         return f.call_wrapped(*inputs)
-
-    def _get_parametrized_cell_fun(self, cell_primitive: parametrized, args, kwargs):
-        split_sizes = [kwargs['num_consts'], kwargs['num_carry']]
-        consts, init, xs = split_list(args, split_sizes)
-        _, _, x_avals = split_list(kwargs['jaxpr'].in_avals, split_sizes)
-        x = map(partial(_index_array, 0), x_avals, xs)
-
-        self._process_parametrized(cell_primitive, *(consts + init + x))
-        cell_parameters_dict = self.state.get_parameters_dict_for(cell_primitive)
-        cell_parameters = cell_primitive._parameters_namedtuple(cell_parameters_dict)
-        return partial(cell_primitive.apply, cell_parameters)
 
 
 @transformation_with_aux
@@ -527,15 +516,12 @@ class ApplyTrace(ParametrizedTrace):
     def state(self) -> ApplyTraceState:
         return self.master.state
 
-    def _process_parametrized(self, primitive: parametrized, *inputs):
+    def _process_parametrized_nonflat(self, primitive: parametrized, *inputs):
         return primitive.apply(self.state.next_parameters_for(primitive), *inputs)
 
     def _process_jitted(self, primitive, f, inputs, kwargs):
         fun = _apply_transform(f, self.master)
         return primitive.bind(fun, *inputs, **kwargs)
-
-    def _get_parametrized_cell_fun(self, cell_primitive: parametrized, args, kwargs):
-        return partial(self._process_parametrized, cell_primitive)
 
 
 def _get_name_for(fun):
