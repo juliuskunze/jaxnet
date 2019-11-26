@@ -63,7 +63,6 @@ class parametrized(Primitive):
 
         self._wrapped_fun = wrap_init(fun) if fun else None
         self._wrapped_example_outputs_fun = wrap_init(self._example_outputs)
-        self._in_tree_stack = []
         self._jitted_apply = jit(self._apply)
 
     def init_parameters(self, rng, *example_inputs, reuse=None):
@@ -96,18 +95,13 @@ class parametrized(Primitive):
         trace = _top_trace()
         is_out_tree_cached = isinstance(trace, ParametrizedTrace)
 
-        # TODO can break recursive parametrized primitives:
-        self._in_tree_stack.append(in_tree)
-        try:
-            flat_outs = self.bind(*flat_inputs)
-            out_tree = trace.state.get_cached_out_tree() if \
-                is_out_tree_cached else self._out_tree(*inputs)
-        finally:
-            self._in_tree_stack.pop()
+        flat_outs = self.bind(*flat_inputs, in_tree=in_tree)
+        out_tree = trace.state.get_cached_out_tree() if \
+            is_out_tree_cached else self._out_tree(*inputs)
 
         return tree_unflatten(out_tree, flat_outs)
 
-    def _abstract_example_outputs_with_tree(self, avals):
+    def _abstract_example_outputs_with_tree(self, avals, kwargs):
         flat_rng_and_inputs, in_tree_with_rng = tree_flatten((ShapedArray((2,), 'uint32'),) + avals)
         flat_outs_fun, out_tree_thunk = flatten_fun_nokwargs(self._wrapped_example_outputs_fun,
                                                              in_tree_with_rng)
@@ -119,12 +113,12 @@ class parametrized(Primitive):
         _, outputs = self._init_and_apply_parameters_dict(rng, *inputs)
         return outputs
 
-    def _out_tree(self, *inputs):
-        _, out_tree = self._abstract_example_outputs_with_tree(_abstractified(inputs))
+    def _out_tree(self, *inputs, **kwargs):
+        _, out_tree = self._abstract_example_outputs_with_tree(_abstractified(inputs), kwargs)
         return out_tree
 
-    def abstract_eval(self, *avals):
-        flat_outs, _ = self._abstract_example_outputs_with_tree(avals)
+    def abstract_eval(self, *avals, **kwargs):
+        flat_outs, _ = self._abstract_example_outputs_with_tree(avals, kwargs)
         return flat_outs
 
     def bind(self, *args, **kwargs):
@@ -417,7 +411,8 @@ class ParametrizedTrace(Trace):
             return InitTrace._rules[primitive](self)(flat_inputs, kwargs)
 
         if isinstance(primitive, parametrized):
-            inputs = tree_unflatten(primitive._in_tree_stack[-1], flat_inputs)
+            in_tree, = split_dict(kwargs, ['in_tree'])
+            inputs = tree_unflatten(in_tree, flat_inputs)
             outputs = self._process_parametrized(primitive, *inputs)
             flat_outputs, out_tree = tree_flatten(outputs)
             self.state.set_cached_out_tree(out_tree)
