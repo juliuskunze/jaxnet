@@ -92,33 +92,25 @@ class parametrized(Primitive):
 
     def __call__(self, *inputs):
         flat_inputs, in_tree = tree_flatten(inputs)
-        trace = _top_trace()
-        is_out_tree_cached = isinstance(trace, ParametrizedTrace)
-
-        flat_outs = self.bind(*flat_inputs, in_tree=in_tree)
-        out_tree = trace.state.get_cached_out_tree() if \
-            is_out_tree_cached else self._out_tree(*inputs)
-
+        out_tree_container = []
+        flat_outs = self.bind(*flat_inputs, in_tree=in_tree, out_tree_container=out_tree_container)
+        out_tree, = out_tree_container
         return tree_unflatten(out_tree, flat_outs)
-
-    def _abstract_example_outputs_with_tree(self, avals, kwargs):
-        flat_rng_and_inputs, in_tree_with_rng = tree_flatten((ShapedArray((2,), 'uint32'),) + avals)
-        flat_outs_fun, out_tree_thunk = flatten_fun_nokwargs(self._wrapped_example_outputs_fun,
-                                                             in_tree_with_rng)
-        # populates out_tree_thunk, so that it returns the output tree:
-        _, flat_outs, _ = _instantiated_trace_to_jaxpr(flat_outs_fun, flat_rng_and_inputs)
-        return flat_outs, out_tree_thunk()
 
     def _example_outputs(self, rng, *inputs):
         _, outputs = self._init_and_apply_parameters_dict(rng, *inputs)
         return outputs
 
-    def _out_tree(self, *inputs, **kwargs):
-        _, out_tree = self._abstract_example_outputs_with_tree(_abstractified(inputs), kwargs)
-        return out_tree
-
     def abstract_eval(self, *avals, **kwargs):
-        flat_outs, _ = self._abstract_example_outputs_with_tree(avals, kwargs)
+        _, out_tree_container = split_dict(kwargs, ['in_tree', 'out_tree_container'])
+
+        flat_rng_and_inputs, in_tree_with_rng = tree_flatten((ShapedArray((2,), 'uint32'),) + avals)
+        flat_outs_fun, out_tree_thunk = flatten_fun_nokwargs(self._wrapped_example_outputs_fun,
+                                                             in_tree_with_rng)
+        # populates out_tree_thunk, so that it returns the output tree:
+        _, flat_outs, _ = _instantiated_trace_to_jaxpr(flat_outs_fun, flat_rng_and_inputs)
+        # return out_tree via container:
+        out_tree_container.append(out_tree_thunk())
         return flat_outs
 
     def bind(self, *args, **kwargs):
@@ -363,32 +355,9 @@ class ParametrizedTracer(Tracer):
         return self
 
 
-class ParametrizedTraceState:
-    """Shared base for InitTraceState and ApplyTraceState,
-    which represent the state during tracing of `parameterized` function
-    to get the corresponding `init_parameters` or `apply` function."""
-
-    def __init__(self):
-        self._cached_out_tree = None
-
-    def set_cached_out_tree(self, out_tree):
-        assert self._cached_out_tree is None
-        self._cached_out_tree = out_tree
-
-    def get_cached_out_tree(self):
-        assert self._cached_out_tree is not None
-        out_tree = self._cached_out_tree
-        self._cached_out_tree = None
-        return out_tree
-
-
 class ParametrizedTrace(Trace):
     """Shared base for InitTrace and ApplyTrace, used to transform a `parameterized` function
     into its corresponding `init_parameters` or `apply` function."""
-
-    @property
-    def state(self) -> ParametrizedTraceState:
-        return self.master.state
 
     def process_primitive(self, primitive: Primitive, tracers, kwargs):
         out = self._process_primitive(primitive, self.lower_all(tracers), kwargs)
@@ -411,11 +380,11 @@ class ParametrizedTrace(Trace):
             return InitTrace._rules[primitive](self)(flat_inputs, kwargs)
 
         if isinstance(primitive, parametrized):
-            in_tree, = split_dict(kwargs, ['in_tree'])
+            in_tree, out_tree_container = split_dict(kwargs, ['in_tree', 'out_tree_container'])
             inputs = tree_unflatten(in_tree, flat_inputs)
             outputs = self._process_parametrized(primitive, *inputs)
             flat_outputs, out_tree = tree_flatten(outputs)
-            self.state.set_cached_out_tree(out_tree)
+            out_tree_container.append(out_tree)
             return flat_outputs
 
         return primitive.bind(*flat_inputs, **kwargs)
@@ -452,7 +421,7 @@ class ParametrizedTrace(Trace):
         return tuple(map(lambda x: self.full_raise(x).val, tracers))
 
 
-class InitTraceState(ParametrizedTraceState):
+class InitTraceState:
     def __init__(self, rng, global_parameters_dict):
         super().__init__()
 
@@ -529,7 +498,7 @@ def _apply_transform(master: MasterTrace, *inputs):
     yield trace.lower_all(outs)
 
 
-class ApplyTraceState(ParametrizedTraceState):
+class ApplyTraceState:
     """Allows supplying submodules with their respective parameters while calling a module's `apply`
     function by iterating through the given parameters."""
 
