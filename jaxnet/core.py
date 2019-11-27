@@ -326,18 +326,6 @@ def _custom_cell_scan_impl(flat_cell, *args, **kwargs):
     return scan_p.bind(*args, **kwargs)
 
 
-def _parametrized_from_cell_jaxpr(jaxpr) -> parametrized:
-    assert _is_cell_jaxpr_parametrized(jaxpr)
-
-    eqn, = jaxpr.jaxpr.eqns
-    return eqn.primitive, eqn.params
-
-
-def _is_cell_jaxpr_parametrized(jaxpr):
-    return len(jaxpr.jaxpr.eqns) == 1 and \
-           isinstance(jaxpr.jaxpr.eqns[0].primitive, parametrized)
-
-
 class ParametrizedTracer(Tracer):
     """Tracer (= wrapper around value to compose a compute graph) used during tracing of a
     `parameterized` function to get the corresponding `init_parameters` or `apply` function."""
@@ -401,11 +389,16 @@ class ParametrizedTrace(Trace):
     _rules = {lax.scan_p: lambda self: self._process_scan}
 
     def _process_scan(self, args, kwargs):
-        if not _is_cell_jaxpr_parametrized(kwargs['jaxpr']):
+        jaxpr = kwargs['jaxpr']
+
+        is_cell_parametrized = (len(jaxpr.jaxpr.eqns) == 1 and
+                                isinstance(jaxpr.jaxpr.eqns[0].primitive, parametrized))
+
+        if not is_cell_parametrized:
             return _scan_impl(*args, **kwargs)
 
-        cell_primitive, cell_kwargs = _parametrized_from_cell_jaxpr(kwargs['jaxpr'])
-        flat_cell = partial(self.process_parametrized, cell_primitive, **cell_kwargs)
+        eqn, = jaxpr.jaxpr.eqns
+        flat_cell = partial(self.process_parametrized, eqn.primitive, **eqn.params)
         return _custom_cell_scan_impl(flat_cell, *args, **kwargs)
 
     def pure(self, val):

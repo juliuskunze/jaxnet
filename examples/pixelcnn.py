@@ -8,7 +8,7 @@ from jax.random import PRNGKey
 from jax.scipy.special import logsumexp
 from jax.util import partial
 
-from jaxnet import parametrized, Parameter, Dropout
+from jaxnet import parametrized, Parameter, Dropout, parameter
 from jaxnet.optimizers import Adam
 
 
@@ -29,8 +29,7 @@ def ConvOrConvTranspose(out_chan, filter_shape=(3, 3), strides=None, padding='SA
 
     @parametrized
     def conv_or_conv_transpose(inputs):
-        V = Parameter(lambda rng: normal(.05)(rng, tuple(filter_shape) +
-                                              (inputs.shape[-1], out_chan)), 'V')()
+        V = parameter(filter_shape + (inputs.shape[-1], out_chan), normal(.05), 'V')
 
         example_out = apply(inputs, V=V, g=np.ones(out_chan), b=np.zeros(out_chan))
 
@@ -49,7 +48,7 @@ ConvTranspose = partial(ConvOrConvTranspose, transpose=True)
 
 
 def NIN(out_chan):
-    return Conv(out_chan, [1, 1])
+    return Conv(out_chan, (1, 1))
 
 
 def concat_elu(x, axis=-1):
@@ -208,11 +207,11 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
     ConvDown = partial(DownShiftedConv, out_chan=nr_filters)
     ConvDownRight = partial(DownRightShiftedConv, out_chan=nr_filters)
 
-    HalveDown = partial(ConvDown, strides=[2, 2])
-    HalveDownRight = partial(ConvDownRight, strides=[2, 2])
+    HalveDown = partial(ConvDown, strides=(2, 2))
+    HalveDownRight = partial(ConvDownRight, strides=(2, 2))
 
-    DoubleDown = partial(DownShiftedConvTranspose, out_chan=nr_filters, strides=[2, 2])
-    DoubleDownRight = partial(DownRightShiftedConvTranspose, out_chan=nr_filters, strides=[2, 2])
+    DoubleDown = partial(DownShiftedConvTranspose, out_chan=nr_filters, strides=(2, 2))
+    DoubleDownRight = partial(DownRightShiftedConvTranspose, out_chan=nr_filters, strides=(2, 2))
 
     def ResnetUpBlock():
         @parametrized
@@ -241,36 +240,34 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
         return resnet_down_block
 
     @parametrized
-    def pixel_cnn(rng, images):
-        # ////////// up pass ////////
-        b, h, w, _ = images.shape
-        images = np.concatenate((images, np.ones((b, h, w, 1))), -1)
-
-        us = [down_shift(ConvDown(filter_shape=[2, 3])(images))]
-        uls = [down_shift(ConvDown(filter_shape=[1, 3])(images)) +
-               right_shift(ConvDownRight(filter_shape=[2, 1])(images))]
+    def up_pass(rng, images):
+        images = np.concatenate((images, np.ones(images.shape[:-1] + (1,))), -1)
+        us = [down_shift(ConvDown(filter_shape=(2, 3))(images))]
+        uls = [down_shift(ConvDown(filter_shape=(1, 3))(images)) +
+               right_shift(ConvDownRight(filter_shape=(2, 1))(images))]
         us, uls = ResnetUpBlock()(us, uls, rng)
         us.append(HalveDown()(us[-1]))
         uls.append(HalveDownRight()(uls[-1]))
         us, uls = ResnetUpBlock()(us, uls, rng)
         us.append(HalveDown()(us[-1]))
         uls.append(HalveDownRight()(uls[-1]))
-        us, uls = ResnetUpBlock()(us, uls, rng)
+        return ResnetUpBlock()(us, uls, rng)
 
-        # /////// down pass ////////
-        u = us.pop()
-        ul = uls.pop()
-        u, ul, us, uls = ResnetDownBlock(nr_resnet)(u, ul, us, uls, rng)
-        u = DoubleDown()(u)
-        ul = DoubleDownRight()(ul)
-        u, ul, us, uls = ResnetDownBlock(nr_resnet + 1)(u, ul, us, uls, rng)
-        u = DoubleDown()(u)
-        ul = DoubleDownRight()(ul)
-        u, ul, us, uls = ResnetDownBlock(nr_resnet + 1)(u, ul, us, uls, rng)
-
+    @parametrized
+    def down_pass(rng, uls, us):
+        u, ul, us, uls = ResnetDownBlock(nr_resnet)(us.pop(), uls.pop(), us, uls, rng)
+        u, ul, us, uls = ResnetDownBlock(nr_resnet + 1)(
+            DoubleDown()(u), DoubleDownRight()(ul), us, uls, rng)
+        u, ul, us, uls = ResnetDownBlock(nr_resnet + 1)(
+            DoubleDown()(u), DoubleDownRight()(ul), us, uls, rng)
         assert len(us) == 0
         assert len(uls) == 0
         return NIN(10 * nr_logistic_mix)(elu(ul))
+
+    @parametrized
+    def pixel_cnn(rng, images):
+        uls, us = up_pass(rng, images)
+        return down_pass(rng, uls, us)
 
     @parametrized
     def loss(rng, images):
