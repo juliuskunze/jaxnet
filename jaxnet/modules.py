@@ -5,7 +5,7 @@ from jax import random, lax, numpy as np, tree_map, tree_leaves, vmap, partial
 from jax.nn import sigmoid
 from jax.nn.initializers import glorot_normal, normal, zeros, ones
 
-from jaxnet.core import parametrized, Parameter
+from jaxnet.core import parametrized, Parameter, random_key
 
 
 def parameter(shape, init, name=None):
@@ -185,23 +185,12 @@ def Dropout(rate, mode='train'):
     """Constructor for a dropout function with given rate."""
     rate = np.array(rate)
 
-    def dropout(inputs, *args, **kwargs):
+    @parametrized
+    def dropout(inputs):
         if mode != 'train':
             return inputs
 
-        def get_rng():
-            if len(args) == 1:
-                return args[0]
-
-            try:
-                return kwargs['rng']
-            except KeyError:
-                raise ValueError(
-                    "dropout requires to be called with a PRNG key. "
-                    "That is, instead of `dropout(inputs)`, call it like `dropout(inputs, key)` "
-                    "where `key` is a jax.random.PRNGKey value.")
-
-        keep = random.bernoulli(get_rng(), rate, inputs.shape)
+        keep = random.bernoulli(random_key(), rate, inputs.shape)
         return np.where(keep, inputs / rate, 0)
 
     return dropout
@@ -262,7 +251,7 @@ def Batched(unbatched_model: parametrized, batch_dim=0):
     def batched(*batched_args):
         args = tree_map(lambda x: x[0], batched_args)
         params = Parameter(lambda rng: unbatched_model.init_parameters(rng, *args), 'model')()
-        batched_apply = vmap(partial(unbatched_model._apply, params), batch_dim)
+        batched_apply = vmap(partial(unbatched_model.apply, params), batch_dim)
         return batched_apply(*batched_args)
 
     return batched

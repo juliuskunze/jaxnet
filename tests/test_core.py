@@ -1,11 +1,12 @@
 import pytest
-from jax import numpy as np, jit, lax
+from jax import numpy as np, jit, lax, random
 from jax.nn import relu
 from jax.nn.initializers import zeros, normal
 from jax.random import PRNGKey
 
 from jaxnet import parametrized, Dense, Sequential, Conv, flatten, save, load, \
     parameter, Parameter
+from jaxnet.core import random_key
 from tests.util import random_inputs, assert_parameters_equal, assert_dense_parameters_equal, \
     enable_checks
 
@@ -174,7 +175,7 @@ def test_parametrized_jit(jitted_fun):
 
     out = net.apply(params, inputs)
     assert out.shape == (3,)
-    assert np.allclose([0.25538206, -0.3121101, 0.9543335], out)
+    assert np.allclose([0.84194356, -1.5927866, -1.7411114], out)
 
     # run twice to cover cached jit call
     out_ = net.apply(params, inputs)
@@ -755,14 +756,24 @@ def test_tuple_output_nested():
 
 def test_submodule_init_parameters_is_random():
     @parametrized
-    def dense(inputs):
+    def dense():
         a = parameter((), normal(), 'a')
         b = parameter((), normal(), 'b')
 
         return a + b
 
-    params = dense.init_parameters(PRNGKey(0), np.zeros(()))
+    params = dense.init_parameters(PRNGKey(0))
     assert not np.array_equal(params.a, params.b)
+
+
+def test_rng_injection():
+    @parametrized
+    def rand():
+        return random.uniform(random_key())
+
+    p = rand.init_parameters(PRNGKey(0))
+    out = rand.apply(p, rng=PRNGKey(0))
+    assert () == out.shape
 
 
 def test_save_and_load_params():

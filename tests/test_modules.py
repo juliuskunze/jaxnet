@@ -105,23 +105,27 @@ def test_pool_shape(Pool):
 
 @pytest.mark.parametrize('mode', ('train', 'test'))
 def test_Dropout_shape(mode, input_shape=(1, 2, 3)):
-    dropout = Dropout(.9, mode=mode)
-    inputs = np.zeros(input_shape)
-    out = dropout(inputs, PRNGKey(0))
-    assert np.array_equal(np.zeros(input_shape), out)
+    dropout = Dropout(.5, mode=mode)
+    inputs = np.ones(input_shape)
+    p = dropout.init_parameters(PRNGKey(0), inputs)
+    out = dropout.apply(p, inputs, rng=PRNGKey(0))
+    assert input_shape == out.shape
 
-    out_ = dropout(inputs, rng=PRNGKey(0))
+    out_ = dropout.apply(p, inputs, rng=PRNGKey(0))
     assert np.array_equal(out, out_)
 
-    if mode != 'train':
-        dropout(inputs)
-    else:
-        with raises(ValueError) as e_info:
-            dropout(inputs)
+    if mode == 'train':
+        out_ = dropout.apply(p, inputs, rng=PRNGKey(1))
+        assert not np.array_equal(out, out_)
 
-        assert ("dropout requires to be called with a PRNG key. "
-                "That is, instead of `dropout(inputs)`, call it like `dropout(inputs, key)` "
-                "where `key` is a jax.random.PRNGKey value.") == str(e_info.value)
+        with raises(ValueError) as e_info:
+            dropout.apply(p, inputs)
+
+        assert ("This parametrized function is randomized and therefore requires "
+                "a random key when applied, i. e. `apply(*inputs, rng=PRNGKey(0))`."
+                == str(e_info.value))
+    else:
+        dropout.apply(p, inputs)
 
 
 def test_GRUCell_shape():

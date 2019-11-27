@@ -57,14 +57,14 @@ def concat_elu(x, axis=-1):
 
 def GatedResnet(Conv=None, nonlinearity=concat_elu, dropout_p=0.):
     @parametrized
-    def gated_resnet(rng, inputs, aux=None):
+    def gated_resnet(inputs, aux=None):
         chan = inputs.shape[-1]
         c1 = Conv(chan)(nonlinearity(inputs))
         if aux is not None:
             c1 = c1 + NIN(chan)(nonlinearity(aux))
         c1 = nonlinearity(c1)
         if dropout_p > 0:
-            c1 = Dropout(rate=dropout_p)(c1, rng)
+            c1 = Dropout(rate=dropout_p)(c1)
         c2 = Conv(2 * chan, init_scale=0.1)(c1)
         a, b = np.split(c2, 2, axis=-1)
         c3 = a * sigmoid(b)
@@ -215,11 +215,10 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
 
     def ResnetUpBlock():
         @parametrized
-        def resnet_up_block(us, uls, rng):
+        def resnet_up_block(us, uls):
             for _ in range(nr_resnet):
-                rng, rng_d, rng_dr = random.split(rng, 3)
-                us.append(ResnetDown()(rng_d, us[-1]))
-                uls.append(ResnetDownRight()(rng_dr, uls[-1], us[-1]))
+                us.append(ResnetDown()(us[-1]))
+                uls.append(ResnetDownRight()(uls[-1], us[-1]))
 
             return us, uls
 
@@ -227,52 +226,51 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
 
     def ResnetDownBlock(nr_resnet):
         @parametrized
-        def resnet_down_block(u, ul, us, uls, rng):
+        def resnet_down_block(u, ul, us, uls):
             us = us.copy()
             uls = uls.copy()
             for _ in range(nr_resnet):
-                rng, rng_d, rng_dr = random.split(rng, 3)
-                u = ResnetDown()(rng_d, u, us.pop())
-                ul = ResnetDownRight()(rng_dr, ul, np.concatenate((u, uls.pop()), -1))
+                u = ResnetDown()(u, us.pop())
+                ul = ResnetDownRight()(ul, np.concatenate((u, uls.pop()), -1))
 
             return u, ul, us, uls
 
         return resnet_down_block
 
     @parametrized
-    def up_pass(rng, images):
+    def up_pass(images):
         images = np.concatenate((images, np.ones(images.shape[:-1] + (1,))), -1)
         us = [down_shift(ConvDown(filter_shape=(2, 3))(images))]
         uls = [down_shift(ConvDown(filter_shape=(1, 3))(images)) +
                right_shift(ConvDownRight(filter_shape=(2, 1))(images))]
-        us, uls = ResnetUpBlock()(us, uls, rng)
+        us, uls = ResnetUpBlock()(us, uls)
         us.append(HalveDown()(us[-1]))
         uls.append(HalveDownRight()(uls[-1]))
-        us, uls = ResnetUpBlock()(us, uls, rng)
+        us, uls = ResnetUpBlock()(us, uls)
         us.append(HalveDown()(us[-1]))
         uls.append(HalveDownRight()(uls[-1]))
-        return ResnetUpBlock()(us, uls, rng)
+        return ResnetUpBlock()(us, uls)
 
     @parametrized
-    def down_pass(rng, uls, us):
-        u, ul, us, uls = ResnetDownBlock(nr_resnet)(us.pop(), uls.pop(), us, uls, rng)
+    def down_pass(uls, us):
+        u, ul, us, uls = ResnetDownBlock(nr_resnet)(us.pop(), uls.pop(), us, uls)
         u, ul, us, uls = ResnetDownBlock(nr_resnet + 1)(
-            DoubleDown()(u), DoubleDownRight()(ul), us, uls, rng)
+            DoubleDown()(u), DoubleDownRight()(ul), us, uls)
         u, ul, us, uls = ResnetDownBlock(nr_resnet + 1)(
-            DoubleDown()(u), DoubleDownRight()(ul), us, uls, rng)
+            DoubleDown()(u), DoubleDownRight()(ul), us, uls)
         assert len(us) == 0
         assert len(uls) == 0
         return NIN(10 * nr_logistic_mix)(elu(ul))
 
     @parametrized
-    def pixel_cnn(rng, images):
-        uls, us = up_pass(rng, images)
-        return down_pass(rng, uls, us)
+    def pixel_cnn(images):
+        uls, us = up_pass(images)
+        return down_pass(uls, us)
 
     @parametrized
-    def loss(rng, images):
+    def loss(images):
         images = centre(images)
-        pcnn_out = pixel_cnn(rng, images)
+        pcnn_out = pixel_cnn(images)
         conditional_params = pcnn_out_to_conditional_params(images, pcnn_out)
         losses = -(conditional_params_to_logprob(images, conditional_params) *
                    np.log2(np.e) / images[0].size)
@@ -301,21 +299,21 @@ def dataset(batch_size):
 def main(batch_size=32, nr_filters=8, epochs=10, step_size=.001, decay_rate=.999995):
     loss = PixelCNNPP(nr_filters=nr_filters)
     get_train_batches, test_batches = dataset(batch_size)
-    rng, rng_init_1, rng_init_2 = random.split(PRNGKey(0), 3)
+    rng, rng_init = random.split(PRNGKey(0))
     opt = Adam(exponential_decay(step_size, 1, decay_rate))
-    state = opt.init(loss.init_parameters(rng_init_1, rng_init_2, next(test_batches)))
+    state = opt.init(loss.init_parameters(rng_init, next(test_batches)))
 
     for epoch in range(epochs):
         for batch in get_train_batches():
             rng, rng_update = random.split(rng)
             i = opt.get_step(state)
 
-            state, train_loss = opt.update_and_get_loss(loss.apply, state, rng_update, batch,
+            state, train_loss = opt.update_and_get_loss(loss.apply, state, batch, rng=rng_update,
                                                         jit=True)
 
             if i % 100 == 0 or i < 10:
                 rng, rng_test = random.split(rng)
-                test_loss = loss.apply(opt.get_parameters(state), rng_test, next(test_batches),
+                test_loss = loss.apply(opt.get_parameters(state), next(test_batches), rng=rng_test,
                                        jit=True)
                 print(f"Epoch {epoch}, iteration {i}, "
                       f"train loss {train_loss:.3f}, "

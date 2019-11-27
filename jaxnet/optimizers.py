@@ -45,26 +45,26 @@ class Optimizer(ABC):
         step, _ = state
         return step
 
-    def update(self, loss_fun, state, *inputs, jit=False):
-        return self._update(loss_fun, state, *inputs, jit=jit)
+    def update(self, loss_fun, state, *inputs, jit=False, **kwargs):
+        return self._update(loss_fun, state, *inputs, jit=jit, **kwargs)
 
-    def update_and_get_loss(self, loss_fun, state, *inputs, jit=False):
-        return self._update(loss_fun, state, *inputs, jit=jit, return_loss=True)
+    def update_and_get_loss(self, loss_fun, state, *inputs, jit=False, **kwargs):
+        return self._update(loss_fun, state, *inputs, **kwargs, jit=jit, return_loss=True)
 
-    def _update(self, loss_fun, state, *inputs, jit=False, return_loss=False):
+    def _update(self, loss_fun, state, *inputs, jit=False, return_loss=False, **kwargs):
         inner = self._update_fun(loss_fun, return_loss=return_loss)
-        return (jax.jit(inner) if jit else inner)(state, *inputs)
+        return (jax.jit(inner) if jit else inner)(state, *inputs, **kwargs)
 
     # To avoid recompilation on every call:
     @lru_cache()
     def _update_fun(self, loss_fun, return_loss=False):
-        def update(state, *inputs):
+        def update(state, *inputs, **kwargs):
             params = self.get_parameters(state)
             if return_loss:
-                loss, gradient = value_and_grad(loss_fun)(params, *inputs)
+                loss, gradient = value_and_grad(loss_fun)(params, *inputs, **kwargs)
                 return self.update_from_gradients(gradient, state), loss
             else:
-                gradient = grad(loss_fun)(params, *inputs)
+                gradient = grad(loss_fun)(params, *inputs, **kwargs)
                 return self.update_from_gradients(gradient, state)
 
         return update

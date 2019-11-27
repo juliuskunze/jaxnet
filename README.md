@@ -62,7 +62,7 @@ def next_batch(): return np.zeros((3, 784)), np.zeros((3, 4))
 
 params = loss.init_parameters(PRNGKey(0), *next_batch())
 
-print(params.sequential.dense2.bias)  # [0.02399818, 0.01162617, -0.01457787, 0.00699937]
+print(params.sequential.dense2.bias)  # [-0.01101029, -0.00749435, -0.00952365,  0.00493979]
 ```
 
 Instead of mutating weights inline, optimizers return updated versions of weights.

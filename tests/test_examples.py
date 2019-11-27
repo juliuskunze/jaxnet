@@ -30,9 +30,9 @@ def test_readme():
 
     params = loss.init_parameters(PRNGKey(0), *next_batch())
 
-    print(params.sequential.dense2.bias)  # [0.00376661 0.01038619 0.00920947 0.00792002]
+    print(params.sequential.dense2.bias)  # [-0.01101029, -0.00749435, -0.00952365,  0.00493979]
 
-    assert np.allclose([0.02399818, 0.01162617, -0.01457787, 0.00699937],
+    assert np.allclose([-0.01101029, -0.00749435, -0.00952365, 0.00493979],
                        params.sequential.dense2.bias)
 
     out = loss.apply(params, *next_batch())
@@ -246,10 +246,11 @@ def test_pixelcnn():
     images = np.zeros((2, 16, 16, 3), np.uint8)
     rng = PRNGKey(0)
     opt = optimizers.Adam()
-    state = opt.init(loss.init_parameters(rng, rng, images))
+    state = opt.init(loss.init_parameters(rng, images))
     # take ~20s, disabled for faster tests:
-    # state, loss = opt.update_and_get_loss(loss.apply, state, rng, images)
+    # state, loss = opt.update_and_get_loss(loss.apply, state, images, rng=rng)
     # assert loss.shape == ()
+
 
 def test_reparametrized_submodule():
     net = Sequential(Conv(2, (3, 3)), relu, Conv(2, (3, 3)), relu, flatten,

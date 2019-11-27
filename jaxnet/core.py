@@ -6,7 +6,7 @@ from typing import Iterable
 import dill
 import jax
 from jax import lax, random, unzip2, safe_zip, safe_map, partial, raise_to_shaped, tree_flatten, \
-    tree_unflatten, flatten_fun_nokwargs, jit
+    tree_unflatten, flatten_fun_nokwargs, jit, curry
 from jax.abstract_arrays import ShapedArray
 from jax.core import new_master, cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, \
     TypedJaxpr, MasterTrace, full_lower, valid_jaxtype, trace_state, find_top_trace
@@ -18,6 +18,49 @@ from jax.util import split_list, split_dict, cache
 
 zip = safe_zip
 map = safe_map
+
+no_key = ()
+
+
+@curry
+def bind(self, *args, **kwargs):
+    """Like Primitive.bind, but finds the top trace even when no arguments are provided."""
+    assert jax.core.skip_checks or all(isinstance(arg, Tracer)
+                                       or valid_jaxtype(arg) for arg in args), args
+
+    trace = _top_trace()
+
+    assert (jax.core.skip_checks or find_top_trace(args) is None or
+            find_top_trace(args).master is trace.master), args
+
+    tracers = map(trace.full_raise, args)
+    out_tracer = trace.process_primitive(self, tracers, kwargs)
+    return map(full_lower, out_tracer) if self.multiple_results else full_lower(out_tracer)
+
+
+def _random_key_abstract_eval(*args, **params):
+    assert len(args) == 0
+    assert len(params) == 0
+
+    return ShapedArray((2,), 'uint32')
+
+
+def _random_key_impl(*args, **params):
+    assert len(args) == 0
+    assert len(params) == 0
+
+    raise ValueError("This parametrized function is randomized and therefore requires "
+                     "a random key when applied, i. e. `apply(*inputs, rng=PRNGKey(0))`.")
+
+
+random_key_p = Primitive("random_key")
+random_key_p.def_custom_bind(bind(random_key_p))
+random_key_p.def_impl(_random_key_impl)
+random_key_p.def_abstract_eval(_random_key_abstract_eval)
+
+
+def random_key():
+    return random_key_p.bind()
 
 
 class parametrized(Primitive):
@@ -61,6 +104,8 @@ class parametrized(Primitive):
 
         super().__init__(f'{self.__name__}_{id(self)}')
 
+        self.def_custom_bind(bind(self))
+
         self._wrapped_fun = wrap_init(fun) if fun else None
         self._wrapped_example_outputs_fun = wrap_init(self._example_outputs)
         self._jitted_apply = jit(self._apply)
@@ -71,20 +116,21 @@ class parametrized(Primitive):
     def parameters_from(self, reuse, *example_inputs):
         return self._init_parameters(PRNGKey(0), *example_inputs, reuse=reuse, reuse_only=True)
 
-    def _apply(self, parameters, *inputs):
+    def _apply(self, parameters, *inputs, rng):
         flat_inputs, in_tree = tree_flatten(inputs)
         flat_fun, out_tree = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
         apply_trace = _top_trace(filter_type=ApplyTrace)
         with new_master(ApplyTrace) as master:
             global_parameters_by_primitive = apply_trace.state.global_parameters_by_primitive \
                 if apply_trace else {}
-            master.state = ApplyTraceState(parameters, global_parameters_by_primitive)
+            random_state = apply_trace.state.random_state if apply_trace else RandomState(rng)
+            master.state = ApplyTraceState(random_state, parameters, global_parameters_by_primitive)
             flat_outputs = _apply_transform(flat_fun, master).call_wrapped(*flat_inputs)
             del master
         return tree_unflatten(out_tree(), flat_outputs)
 
-    def apply(self, parameters, *inputs, jit=False):
-        return (self._jitted_apply if jit else self._apply)(parameters, *inputs)
+    def apply(self, parameters, *inputs, rng=no_key, jit=False):
+        return (self._jitted_apply if jit else self._apply)(parameters, *inputs, rng=rng)
 
     def apply_from(self, reuse, *example_inputs, jit=False):
         parameters = self.parameters_from(reuse, *example_inputs)
@@ -97,35 +143,19 @@ class parametrized(Primitive):
         out_tree, = out_tree_container
         return tree_unflatten(out_tree, flat_outs)
 
-    def _example_outputs(self, rng, *inputs):
-        _, outputs = self._init_and_apply_parameters_dict(rng, *inputs)
+    def _example_outputs(self, *inputs):
+        _, outputs = self._init_and_apply_parameters_dict(PRNGKey(0), *inputs)
         return outputs
 
     def abstract_eval(self, *avals, **kwargs):
         in_tree, out_tree_container = split_dict(kwargs, ['in_tree', 'out_tree_container'])
-        avals = tree_unflatten(in_tree, avals)
-        flat_rng_and_inputs, in_tree_with_rng = tree_flatten((ShapedArray((2,), 'uint32'),) + avals)
         flat_outs_fun, out_tree_thunk = flatten_fun_nokwargs(self._wrapped_example_outputs_fun,
-                                                             in_tree_with_rng)
+                                                             in_tree)
         # populates out_tree_thunk, so that it returns the output tree:
-        _, flat_outs, _ = _instantiated_trace_to_jaxpr(flat_outs_fun, flat_rng_and_inputs)
+        _, flat_outs, _ = _instantiated_trace_to_jaxpr(flat_outs_fun, avals)
         # return out_tree via container:
         out_tree_container.append(out_tree_thunk())
         return flat_outs
-
-    def bind(self, *args, **kwargs):
-        """Like Primitive.bind, but finds the top trace even when no arguments are provided."""
-        assert jax.core.skip_checks or all(isinstance(arg, Tracer)
-                                           or valid_jaxtype(arg) for arg in args), args
-
-        trace = _top_trace()
-
-        assert (jax.core.skip_checks or find_top_trace(args) is None or
-                find_top_trace(args).master is trace.master), args
-
-        tracers = map(trace.full_raise, args)
-        out_tracers = trace.process_primitive(self, tracers, kwargs)
-        return map(full_lower, out_tracers)
 
     def _init_parameters(self, rng, *example_inputs, reuse, reuse_only):
         d, _ = self._init_and_apply_parameters_dict(rng, *example_inputs)
@@ -343,9 +373,32 @@ class ParametrizedTracer(Tracer):
         return self
 
 
+class RandomState:
+    def __init__(self, rng):
+        self._rng = rng
+
+    def next_rng(self):
+        if self._rng is no_key:
+            # Raise error:
+            _random_key_impl()
+
+        self._rng, rng = random.split(self._rng)
+        return rng
+
+
+# TODO Make random key injection transformation independent of apply/init:
+class ParametrizedTraceState:
+    def __init__(self, random_state: RandomState):
+        self.random_state = random_state
+
+
 class ParametrizedTrace(Trace):
     """Shared base for InitTrace and ApplyTrace, used to transform a `parameterized` function
     into its corresponding `init_parameters` or `apply` function."""
+
+    @property
+    def state(self) -> ParametrizedTraceState:
+        return self.master.state
 
     def process_primitive(self, primitive: Primitive, tracers, kwargs):
         out = self._process_primitive(primitive, self.lower_all(tracers), kwargs)
@@ -386,7 +439,8 @@ class ParametrizedTrace(Trace):
     def _process_jitted(self, primitive, f, inputs, kwargs):
         assert False
 
-    _rules = {lax.scan_p: lambda self: self._process_scan}
+    _rules = {lax.scan_p: lambda self: self._process_scan,
+              random_key_p: lambda self: self._process_random_key}
 
     def _process_scan(self, args, kwargs):
         jaxpr = kwargs['jaxpr']
@@ -401,6 +455,12 @@ class ParametrizedTrace(Trace):
         flat_cell = partial(self.process_parametrized, eqn.primitive, **eqn.params)
         return _custom_cell_scan_impl(flat_cell, *args, **kwargs)
 
+    def _process_random_key(self, args, kwargs):
+        assert len(args) == 0
+        assert len(kwargs) == 0
+
+        return self.state.random_state.next_rng()
+
     def pure(self, val):
         return ParametrizedTracer(self, val)
 
@@ -414,17 +474,12 @@ class ParametrizedTrace(Trace):
         return tuple(map(lambda x: self.full_raise(x).val, tracers))
 
 
-class InitTraceState:
-    def __init__(self, rng, global_parameters_dict):
-        super().__init__()
+class InitTraceState(ParametrizedTraceState):
+    def __init__(self, random_state, global_parameters_dict):
+        super().__init__(random_state)
 
-        self._rng = rng
         self.parameters_dict = {}
         self.global_parameters_dict = global_parameters_dict
-
-    def next_rng(self):
-        self._rng, rng = random.split(self._rng)
-        return rng
 
     def get_parameters_dict_for(self, primitive):
         return self.global_parameters_dict.get(primitive)
@@ -447,8 +502,9 @@ class InitTrace(ParametrizedTrace):
         if parameters_dict is not None:
             return primitive.apply(primitive._parameters_namedtuple(parameters_dict), *inputs)
 
-        parameters_dict, outputs = primitive._init_and_apply_parameters_dict(
-            self.state.next_rng(), *inputs)
+        # TODO cleanup
+        rng = self.state.random_state.next_rng() if isinstance(primitive, Parameter) else None
+        parameters_dict, outputs = primitive._init_and_apply_parameters_dict(rng, *inputs)
         self.state.set_parameters_dict_for(primitive, parameters_dict)
         return outputs
 
@@ -463,7 +519,8 @@ def _init_transform(rng, *inputs):
     init_trace = _top_trace(filter_type=InitTrace)
     with new_master(InitTrace) as master:
         global_parameters_dict = init_trace.state.global_parameters_dict if init_trace else {}
-        master.state = InitTraceState(rng, global_parameters_dict)
+        random_state = init_trace.state.random_state if init_trace else RandomState(rng)
+        master.state = InitTraceState(random_state, global_parameters_dict)
         trace = InitTrace(master, cur_sublevel())
         outs = yield map(trace.full_raise, inputs), {}
         outs = trace.lower_all(outs)
@@ -480,12 +537,12 @@ def _apply_transform(master: MasterTrace, *inputs):
     yield trace.lower_all(outs)
 
 
-class ApplyTraceState:
+class ApplyTraceState(ParametrizedTraceState):
     """Allows supplying submodules with their respective parameters while calling a module's `apply`
     function by iterating through the given parameters."""
 
-    def __init__(self, parameters, global_parameters_by_primitive):
-        super().__init__()
+    def __init__(self, random_state, parameters, global_parameters_by_primitive):
+        super().__init__(random_state)
 
         self.parameters = parameters
         self._index = 0
