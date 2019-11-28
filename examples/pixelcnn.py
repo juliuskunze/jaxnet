@@ -251,7 +251,7 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
         return ResnetUpBlock()(us, uls)
 
     @parametrized
-    def down_pass(uls, us):
+    def down_pass(us, uls):
         u, ul, us, uls = ResnetDownBlock(nr_resnet)(us.pop(), uls.pop(), us, uls)
         u, ul, us, uls = ResnetDownBlock(nr_resnet + 1)(
             DoubleDown()(u), DoubleDownRight()(ul), us, uls)
@@ -263,8 +263,8 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
 
     @parametrized
     def pixel_cnn(images):
-        uls, us = up_pass(images)
-        return down_pass(uls, us)
+        us, uls = up_pass(images)
+        return down_pass(us, uls)
 
     @parametrized
     def loss(images):
