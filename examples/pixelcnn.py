@@ -173,16 +173,16 @@ def conditional_params_to_logprob(images, conditional_params):
     return np.sum(logsumexp(log_mix_coeffs + all_logprobs, axis=-3), axis=(-2, -1))
 
 
-def sample_categorical(key, logits, axis=0):
+def sample_categorical(key, logits, axis=-1):
     return np.argmax(random.gumbel(key, logits.shape, logits.dtype) + logits, axis=axis)
 
 
 def conditional_params_to_sample(key, conditional_params):
-    means, inv_scales, logit_probs = conditional_params
+    means, inv_scales, logits = conditional_params
     _, h, w, c = means.shape
     rng_mix, rng_logistic = random.split(key)
     mix_idx = np.broadcast_to(sample_categorical(
-        rng_mix, logit_probs)[..., np.newaxis], (h, w, c))[np.newaxis]
+        rng_mix, logits, 0)[..., np.newaxis], (h, w, c))[np.newaxis]
     means = np.take_along_axis(means, mix_idx, 0)[0]
     inv_scales = np.take_along_axis(inv_scales, mix_idx, 0)[0]
     return (means + random.logistic(rng_logistic, means.shape, means.dtype)

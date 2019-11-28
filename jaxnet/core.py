@@ -60,6 +60,8 @@ random_key_p.def_abstract_eval(_random_key_abstract_eval)
 
 
 def random_key():
+    """When called inside a parametrized function, this will return a unique random key derived from
+    the `key` argument of `apply` or `init_parameters`."""
     return random_key_p.bind()
 
 

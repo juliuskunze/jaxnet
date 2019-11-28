@@ -11,7 +11,7 @@ from jaxnet.optimizers import Adam
 
 
 def sample_categorical(key, logits, axis=-1):
-    return np.argmax(logits - np.log(-np.log(random.uniform(key, logits.shape))), axis=axis)
+    return np.argmax(random.gumbel(key, logits.shape, logits.dtype) + logits, axis=axis)
 
 
 def main(batch_size=256, env_name="CartPole-v1"):

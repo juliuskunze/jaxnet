@@ -6,7 +6,7 @@ from jax import jit, lax, random, numpy as np
 from jax.nn import relu, softplus
 from jax.random import PRNGKey
 
-from jaxnet import Sequential, Dense, parametrized, optimizers
+from jaxnet import Sequential, Dense, parametrized, optimizers, random_key
 
 
 def mnist_images():
@@ -55,35 +55,33 @@ decode = Sequential(Dense(512), relu, Dense(512), relu, Dense(28 * 28))
 
 
 @parametrized
-def loss(key, images):
+def loss(images):
     """Monte Carlo estimate of the negative evidence lower bound."""
     mu_z, sigmasq_z = encode(images)
-    logits_x = decode(gaussian_sample(key, mu_z, sigmasq_z))
+    logits_x = decode(gaussian_sample(random_key(), mu_z, sigmasq_z))
     return -(bernoulli_logpdf(logits_x, images) - gaussian_kl(mu_z, sigmasq_z)) / images.shape[0]
 
 
 @parametrized
-def image_sample_grid(key, nrow=10, ncol=10):
+def image_sample_grid(nrow=10, ncol=10):
     """Sample images from the generative model."""
-    code_rng, img_rng = random.split(key)
-    logits = decode(random.normal(code_rng, (nrow * ncol, 10)))
-    sampled_images = random.bernoulli(img_rng, np.logaddexp(0., logits))
+    logits = decode(random.normal(random_key(), (nrow * ncol, 10)))
+    sampled_images = random.bernoulli(random_key(), np.logaddexp(0., logits))
     return image_grid(nrow, ncol, sampled_images, (28, 28))
 
 
 @parametrized
-def evaluate(test_rng, images):
-    elbo_rng, data_rng, image_rng = random.split(test_rng, 3)
-    binarized_test = random.bernoulli(data_rng, images)
-    test_elbo = loss(elbo_rng, binarized_test)
-    return test_elbo, image_sample_grid(image_rng)
+def evaluate(images):
+    binarized_test = random.bernoulli(random_key(), images)
+    test_elbo = loss(random_key(), binarized_test)
+    return test_elbo, image_sample_grid()
 
 
 def main():
     step_size = 0.001
     num_epochs = 100
     batch_size = 32
-    test_rng = PRNGKey(1)  # get reconstructions for a *fixed* latent variable sample over time
+    test_key = PRNGKey(1)  # get reconstructions for a *fixed* latent variable sample over time
 
     train_images, test_images = mnist_images()
     num_complete_batches, leftover = divmod(train_images.shape[0], batch_size)
@@ -99,15 +97,15 @@ def main():
     @jit
     def run_epoch(key, state):
         def body_fun(i, state):
-            loss_rng, data_rng = random.split(random.fold_in(key, i))
-            batch = binarize_batch(data_rng, i, train_images)
-            return opt.update(loss.apply, state, loss_rng, batch)
+            loss_key, data_key = random.split(random.fold_in(key, i))
+            batch = binarize_batch(data_key, i, train_images)
+            return opt.update(loss.apply, state, batch, key=loss_key)
 
         return lax.fori_loop(0, num_batches, body_fun, state)
 
-    example_rng = PRNGKey(0)
-    example_batch = binarize_batch(example_rng, 0, images=train_images)
-    shaped_elbo = loss.shaped(example_batch, example_rng)
+    example_key = PRNGKey(0)
+    example_batch = binarize_batch(example_key, 0, images=train_images)
+    shaped_elbo = loss.shaped(example_batch)
     init_parameters = shaped_elbo.init_parameters(key=PRNGKey(2))
     state = opt.init(init_parameters)
 
@@ -115,7 +113,7 @@ def main():
         tic = time.time()
         state = run_epoch(PRNGKey(epoch), state)
         params = opt.get_parameters(state)
-        test_elbo, samples = evaluate.apply_from({shaped_elbo: params}, test_rng, test_images,
+        test_elbo, samples = evaluate.apply_from({shaped_elbo: params}, test_images, key=test_key,
                                                  jit=True)
         print(f'Epoch {epoch: 3d} {test_elbo:.3f} ({time.time() - tic:.3f} sec)')
         from matplotlib import pyplot as plt
