@@ -10,8 +10,8 @@ from jaxnet import Sequential, Dense, parametrized, random
 from jaxnet.optimizers import Adam
 
 
-def sample_categorical(rng, logits, axis=-1):
-    return np.argmax(logits - np.log(-np.log(random.uniform(rng, logits.shape))), axis=axis)
+def sample_categorical(key, logits, axis=-1):
+    return np.argmax(logits - np.log(-np.log(random.uniform(key, logits.shape))), axis=axis)
 
 
 def main(batch_size=256, env_name="CartPole-v1"):
@@ -31,13 +31,13 @@ def main(batch_size=256, env_name="CartPole-v1"):
                               np.array([0]), np.array([0]))
 
     @jit
-    def sample_action(state, rng, observation):
+    def sample_action(state, key, observation):
         loss_params = opt.get_parameters(state)
         logits = policy.apply_from({shaped_loss: loss_params}, observation)
-        return sample_categorical(rng, logits)
+        return sample_categorical(key, logits)
 
     rng_init, rng = random.split(PRNGKey(0))
-    state = opt.init(shaped_loss.init_parameters(rng=rng_init))
+    state = opt.init(shaped_loss.init_parameters(key=rng_init))
     returns, observations, actions, rewards_to_go = [], [], [], []
 
     for i in range(250):

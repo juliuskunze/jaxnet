@@ -19,7 +19,7 @@ from jax.util import split_list, split_dict, cache
 zip = safe_zip
 map = safe_map
 
-no_rng = ()
+no_key = ()
 
 
 @curry
@@ -50,7 +50,7 @@ def _random_key_impl(*args, **params):
     assert len(params) == 0
 
     raise ValueError("This parametrized function is randomized and therefore requires "
-                     "a random key when applied, i. e. `apply(*inputs, rng=PRNGKey(0))`.")
+                     "a random key when applied, i. e. `apply(*inputs, key=PRNGKey(0))`.")
 
 
 random_key_p = Primitive("random_key")
@@ -80,10 +80,10 @@ class parametrized(Primitive):
     `dense.init_parameters` and `dense.apply` are then equivalent to
 
     ```
-        def init_parameters(rng, example_inputs):
-            rng_kernel, rng_bias = random.split(rng, 2)
-            kernel = glorot()(rng_kernel, (example_inputs.shape[-1], (10, )))
-            bias = randn()(rng_bias, (10, ))
+        def init_parameters(example_inputs, key):
+            kernel_key, bias_key = random.split(key, 2)
+            kernel = glorot()(kernel_key, (example_inputs.shape[-1], (10, )))
+            bias = randn()(bias_key, (10, ))
             return kernel, bias
 
         def apply(self, parameters, inputs):
@@ -110,31 +110,31 @@ class parametrized(Primitive):
         self._wrapped_example_outputs_fun = wrap_init(self._example_outputs)
         self._jitted_apply = jit(self._apply)
 
-    def init_parameters(self, *example_inputs, rng, reuse=None):
-        return self._init_parameters(*example_inputs, rng=rng, reuse=reuse, reuse_only=False)
+    def init_parameters(self, *example_inputs, key, reuse=None):
+        return self._init_parameters(*example_inputs, key=key, reuse=reuse, reuse_only=False)
 
     def parameters_from(self, reuse, *example_inputs):
-        return self._init_parameters(*example_inputs, rng=PRNGKey(0), reuse=reuse, reuse_only=True)
+        return self._init_parameters(*example_inputs, key=PRNGKey(0), reuse=reuse, reuse_only=True)
 
-    def _apply(self, parameters, *inputs, rng):
+    def _apply(self, parameters, *inputs, key):
         flat_inputs, in_tree = tree_flatten(inputs)
         flat_fun, out_tree = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
         apply_trace = _top_trace(filter_type=ApplyTrace)
         with new_master(ApplyTrace) as master:
             global_parameters_by_primitive = apply_trace.state.global_parameters_by_primitive \
                 if apply_trace else {}
-            random_state = apply_trace.state.random_state if apply_trace else RandomState(rng)
+            random_state = apply_trace.state.random_state if apply_trace else RandomState(key)
             master.state = ApplyTraceState(random_state, parameters, global_parameters_by_primitive)
             flat_outputs = _apply_transform(flat_fun, master).call_wrapped(*flat_inputs)
             del master
         return tree_unflatten(out_tree(), flat_outputs)
 
-    def apply(self, parameters, *inputs, rng=no_rng, jit=False):
-        return (self._jitted_apply if jit else self._apply)(parameters, *inputs, rng=rng)
+    def apply(self, parameters, *inputs, key=no_key, jit=False):
+        return (self._jitted_apply if jit else self._apply)(parameters, *inputs, key=key)
 
-    def apply_from(self, reuse, *example_inputs, rng=no_rng, jit=False):
+    def apply_from(self, reuse, *example_inputs, key=no_key, jit=False):
         parameters = self.parameters_from(reuse, *example_inputs)
-        return self.apply(parameters, *example_inputs, rng=rng, jit=jit)
+        return self.apply(parameters, *example_inputs, key=key, jit=jit)
 
     def __call__(self, *inputs):
         flat_inputs, in_tree = tree_flatten(inputs)
@@ -157,8 +157,8 @@ class parametrized(Primitive):
         out_tree_container.append(out_tree_thunk())
         return flat_outs
 
-    def _init_parameters(self, *example_inputs, rng, reuse, reuse_only):
-        d, _ = self._init_and_apply_parameters_dict(*example_inputs, key=rng)
+    def _init_parameters(self, *example_inputs, key, reuse, reuse_only):
+        d, _ = self._init_and_apply_parameters_dict(*example_inputs, key=key)
 
         if reuse:
             flat_reuse_dicts = parametrized._flat_reuse_dicts(reuse, *example_inputs)
@@ -278,7 +278,7 @@ class Parameter(parametrized):
         self._init_parameter = init_parameter
         super().__init__(fun=None, name=name if name else 'parameter')
 
-    def apply(self, parameters, *inputs, jit=False):
+    def apply(self, parameters, *inputs, key=no_key, jit=False):
         assert len(inputs) == 0
         return parameters
 
@@ -295,11 +295,11 @@ class ShapedParametrized:
         self.parametrized = parametrized
         self.example_inputs = example_inputs
 
-    def apply_from(self, reuse, rng=no_rng, jit=False):
-        return self.parametrized.apply_from(reuse, *self.example_inputs, rng=rng, jit=jit)
+    def apply_from(self, reuse, key=no_key, jit=False):
+        return self.parametrized.apply_from(reuse, *self.example_inputs, key=key, jit=jit)
 
-    def init_parameters(self, rng):
-        return self.parametrized.init_parameters(*self.example_inputs, rng=rng)
+    def init_parameters(self, key):
+        return self.parametrized.init_parameters(*self.example_inputs, key=key)
 
 
 def _abstractified(vals):
@@ -374,16 +374,16 @@ class ParametrizedTracer(Tracer):
 
 
 class RandomState:
-    def __init__(self, rng):
-        self._rng = rng
+    def __init__(self, key):
+        self._key = key
 
-    def next_rng(self):
-        if self._rng is no_rng:
+    def next_key(self):
+        if self._key is no_key:
             # Raise error:
             _random_key_impl()
 
-        self._rng, rng = random.split(self._rng)
-        return rng
+        self._key, key = random.split(self._key)
+        return key
 
 
 # TODO Make random key injection transformation independent of apply/init:
@@ -459,7 +459,7 @@ class ParametrizedTrace(Trace):
         assert len(args) == 0
         assert len(kwargs) == 0
 
-        return self.state.random_state.next_rng()
+        return self.state.random_state.next_key()
 
     def pure(self, val):
         return ParametrizedTracer(self, val)
@@ -503,8 +503,8 @@ class InitTrace(ParametrizedTrace):
             return primitive.apply(primitive._parameters_namedtuple(parameters_dict), *inputs)
 
         # TODO cleanup
-        rng = self.state.random_state.next_rng() if isinstance(primitive, Parameter) else None
-        parameters_dict, outputs = primitive._init_and_apply_parameters_dict(*inputs, key=rng)
+        key = self.state.random_state.next_key() if isinstance(primitive, Parameter) else None
+        parameters_dict, outputs = primitive._init_and_apply_parameters_dict(*inputs, key=key)
         self.state.set_parameters_dict_for(primitive, parameters_dict)
         return outputs
 
@@ -513,13 +513,13 @@ class InitTrace(ParametrizedTrace):
 
 
 @transformation_with_aux
-def _init_transform(rng, *inputs):
+def _init_transform(key, *inputs):
     """Transforms a flattened `parametrized` function
     into its corresponding `init_parameters` function."""
     init_trace = _top_trace(filter_type=InitTrace)
     with new_master(InitTrace) as master:
         global_parameters_dict = init_trace.state.global_parameters_dict if init_trace else {}
-        random_state = init_trace.state.random_state if init_trace else RandomState(rng)
+        random_state = init_trace.state.random_state if init_trace else RandomState(key)
         master.state = InitTraceState(random_state, global_parameters_dict)
         trace = InitTrace(master, cur_sublevel())
         outs = yield map(trace.full_raise, inputs), {}

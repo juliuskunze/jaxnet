@@ -60,7 +60,7 @@ from jax.random import PRNGKey
 
 def next_batch(): return np.zeros((3, 784)), np.zeros((3, 4))
 
-params = loss.init_parameters(*next_batch(), rng=PRNGKey(0))
+params = loss.init_parameters(*next_batch(), key=PRNGKey(0))
 
 print(params.sequential.dense2.bias)  # [-0.01101029, -0.00749435, -0.00952365,  0.00493979]
 ```

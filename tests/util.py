@@ -7,11 +7,11 @@ def enable_checks():
     jax.core.skip_checks = False
 
 
-def random_inputs(input_shape, rng=PRNGKey(0)):
+def random_inputs(input_shape, key=PRNGKey(0)):
     if type(input_shape) is tuple:
-        return random.uniform(rng, input_shape, np.float32)
+        return random.uniform(key, input_shape, np.float32)
     elif type(input_shape) is list:
-        return [random_inputs(rng, shape) for shape in input_shape]
+        return [random_inputs(key, shape) for shape in input_shape]
     else:
         raise TypeError(type(input_shape))
 

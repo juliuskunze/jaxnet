@@ -34,9 +34,9 @@ def ConvOrConvTranspose(out_chan, filter_shape=(3, 3), strides=None, padding='SA
         example_out = apply(inputs, V=V, g=np.ones(out_chan), b=np.zeros(out_chan))
 
         # TODO remove need for `.aval.val` when capturing variables in initializer function:
-        g = Parameter(lambda rng: init_scale /
+        g = Parameter(lambda key: init_scale /
                                   np.sqrt(np.var(example_out.aval.val, (0, 1, 2)) + 1e-10), 'g')()
-        b = Parameter(lambda rng: np.mean(example_out.aval.val, (0, 1, 2)) * g.aval.val, 'b')()
+        b = Parameter(lambda key: np.mean(example_out.aval.val, (0, 1, 2)) * g.aval.val, 'b')()
 
         return apply(inputs, V, b, g)
 
@@ -173,16 +173,15 @@ def conditional_params_to_logprob(images, conditional_params):
     return np.sum(logsumexp(log_mix_coeffs + all_logprobs, axis=-3), axis=(-2, -1))
 
 
-def _gumbel_max(rng, logit_probs):
-    return np.argmax(random.gumbel(rng, logit_probs.shape, logit_probs.dtype)
-                     + logit_probs, axis=0)
+def sample_categorical(key, logits, axis=0):
+    return np.argmax(random.gumbel(key, logits.shape, logits.dtype) + logits, axis=axis)
 
 
-def conditional_params_to_sample(rng, conditional_params):
+def conditional_params_to_sample(key, conditional_params):
     means, inv_scales, logit_probs = conditional_params
     _, h, w, c = means.shape
-    rng_mix, rng_logistic = random.split(rng)
-    mix_idx = np.broadcast_to(_gumbel_max(
+    rng_mix, rng_logistic = random.split(key)
+    mix_idx = np.broadcast_to(sample_categorical(
         rng_mix, logit_probs)[..., np.newaxis], (h, w, c))[np.newaxis]
     means = np.take_along_axis(means, mix_idx, 0)[0]
     inv_scales = np.take_along_axis(inv_scales, mix_idx, 0)[0]
@@ -299,21 +298,21 @@ def dataset(batch_size):
 def main(batch_size=32, nr_filters=8, epochs=10, step_size=.001, decay_rate=.999995):
     loss = PixelCNNPP(nr_filters=nr_filters)
     get_train_batches, test_batches = dataset(batch_size)
-    rng, rng_init = random.split(PRNGKey(0))
+    key, init_key = random.split(PRNGKey(0))
     opt = Adam(exponential_decay(step_size, 1, decay_rate))
-    state = opt.init(loss.init_parameters(next(test_batches)), rng=rng_init)
+    state = opt.init(loss.init_parameters(next(test_batches)), key=init_key)
 
     for epoch in range(epochs):
         for batch in get_train_batches():
-            rng, rng_update = random.split(rng)
+            key, update_key = random.split(key)
             i = opt.get_step(state)
 
-            state, train_loss = opt.update_and_get_loss(loss.apply, state, batch, rng=rng_update,
+            state, train_loss = opt.update_and_get_loss(loss.apply, state, batch, key=update_key,
                                                         jit=True)
 
             if i % 100 == 0 or i < 10:
-                rng, rng_test = random.split(rng)
-                test_loss = loss.apply(opt.get_parameters(state), next(test_batches), rng=rng_test,
+                key, test_key = random.split(key)
+                test_loss = loss.apply(opt.get_parameters(state), next(test_batches), key=test_key,
                                        jit=True)
                 print(f"Epoch {epoch}, iteration {i}, "
                       f"train loss {train_loss:.3f}, "

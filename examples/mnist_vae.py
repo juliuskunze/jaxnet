@@ -26,9 +26,9 @@ def gaussian_kl(mu, sigmasq):
     return -0.5 * np.sum(1. + np.log(sigmasq) - mu ** 2. - sigmasq)
 
 
-def gaussian_sample(rng, mu, sigmasq):
+def gaussian_sample(key, mu, sigmasq):
     """Sample a diagonal Gaussian."""
-    return mu + np.sqrt(sigmasq) * random.normal(rng, mu.shape)
+    return mu + np.sqrt(sigmasq) * random.normal(key, mu.shape)
 
 
 def bernoulli_logpdf(logits, x):
@@ -55,17 +55,17 @@ decode = Sequential(Dense(512), relu, Dense(512), relu, Dense(28 * 28))
 
 
 @parametrized
-def loss(rng, images):
+def loss(key, images):
     """Monte Carlo estimate of the negative evidence lower bound."""
     mu_z, sigmasq_z = encode(images)
-    logits_x = decode(gaussian_sample(rng, mu_z, sigmasq_z))
+    logits_x = decode(gaussian_sample(key, mu_z, sigmasq_z))
     return -(bernoulli_logpdf(logits_x, images) - gaussian_kl(mu_z, sigmasq_z)) / images.shape[0]
 
 
 @parametrized
-def image_sample_grid(rng, nrow=10, ncol=10):
+def image_sample_grid(key, nrow=10, ncol=10):
     """Sample images from the generative model."""
-    code_rng, img_rng = random.split(rng)
+    code_rng, img_rng = random.split(key)
     logits = decode(random.normal(code_rng, (nrow * ncol, 10)))
     sampled_images = random.bernoulli(img_rng, np.logaddexp(0., logits))
     return image_grid(nrow, ncol, sampled_images, (28, 28))
@@ -91,15 +91,15 @@ def main():
     opt = optimizers.Momentum(step_size, mass=0.9)
 
     @jit
-    def binarize_batch(rng, i, images):
+    def binarize_batch(key, i, images):
         i = i % num_batches
         batch = lax.dynamic_slice_in_dim(images, i * batch_size, batch_size)
-        return random.bernoulli(rng, batch)
+        return random.bernoulli(key, batch)
 
     @jit
-    def run_epoch(rng, state):
+    def run_epoch(key, state):
         def body_fun(i, state):
-            loss_rng, data_rng = random.split(random.fold_in(rng, i))
+            loss_rng, data_rng = random.split(random.fold_in(key, i))
             batch = binarize_batch(data_rng, i, train_images)
             return opt.update(loss.apply, state, loss_rng, batch)
 
@@ -108,7 +108,7 @@ def main():
     example_rng = PRNGKey(0)
     example_batch = binarize_batch(example_rng, 0, images=train_images)
     shaped_elbo = loss.shaped(example_batch, example_rng)
-    init_parameters = shaped_elbo.init_parameters(rng=PRNGKey(2))
+    init_parameters = shaped_elbo.init_parameters(key=PRNGKey(2))
     state = opt.init(init_parameters)
 
     for epoch in range(num_epochs):

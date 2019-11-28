@@ -44,13 +44,13 @@ shared_net = Sequential(layer, layer)
 It is created from an initialization function:
 
 ```python
-scalar = Parameter(lambda rng: np.zeros(()))
+scalar = Parameter(lambda key: np.zeros(()))
 ```
 
 The module has a single parameter that is initialized via the given function:
 
 ```python
-param = scalar.init_parameters(rng=PRNGKey(0))
+param = scalar.init_parameters(key=PRNGKey(0))
 assert np.zeros(()) == param
 ```
 
@@ -68,7 +68,7 @@ class Parameter:
 
     def apply(self, parameters, *inputs): return parameters
 
-    def init_parameters(self, rng, *example_inputs): return self.init_parameter(rng)
+    def init_parameters(self, *example_inputs, key): return self.init_parameter(key)
 ```
 
 All other modules are composed from this primitive via `@parametrized` functions:
@@ -77,8 +77,8 @@ All other modules are composed from this primitive via `@parametrized` functions
 def Dense(out_dim, kernel_init=glorot(), bias_init=randn()):
     @parametrized
     def dense(inputs):
-        kernel = Parameter(lambda rng: kernel_init(rng, (inputs.shape[-1], out_dim)))()
-        bias = Parameter(lambda rng: bias_init(rng, (out_dim,)))()
+        kernel = Parameter(lambda key: kernel_init(key, (inputs.shape[-1], out_dim)))()
+        bias = Parameter(lambda key: bias_init(key, (out_dim,)))()
         return np.dot(inputs, kernel) + bias
 
     return dense
@@ -112,10 +112,10 @@ class Dense:
         kernel, bias = parameters
         return np.dot(inputs, kernel) + bias
 
-    def init_parameters(self, rng, example_inputs):
-        rng_kernel, rng_bias = random.split(rng, 2)
-        kernel = self.kernel_init(rng_kernel, (example_inputs.shape[-1], self.out_dim))
-        bias = self.bias_init(rng_bias, (self.out_dim,))
+    def init_parameters(self, example_inputs, key):
+        kernel_key, bias_key = random.split(key, 2)
+        kernel = self.kernel_init(kernel_key, (example_inputs.shape[-1], self.out_dim))
+        bias = self.bias_init(bias_key, (self.out_dim,))
         return Dense.Params(kernel=kernel, bias=bias)
 ```
 
@@ -141,7 +141,7 @@ net = Sequential(Conv(4, (2, 2)), flatten, relu, Dense(3), relu, Dense(2),
                    Sequential(Dense(2), relu))
 inputs = np.zeros((1, 5, 5, 2))
 
-params = net.init_parameters(inputs, rng=PRNGKey(0))
+params = net.init_parameters(inputs, key=PRNGKey(0))
 assert (4, ) == params.conv.bias.shape
 assert (3, ) == params.dense0.bias.shape
 assert (3, 2) == params.dense1.kernel.shape
@@ -192,7 +192,7 @@ Implementing `Reparametrized` is straight-forward:
 def Reparametrized(model, reparametrization_factory):
     @parametrized
     def reparametrized(*inputs):
-        params = Parameter(lambda rng: model.init_parameters(*inputs, rng=rng))()
+        params = Parameter(lambda key: model.init_parameters(*inputs, key=key))()
         transformed_params = tree_map(lambda param: reparametrization_factory()(param), params)
         return model.apply(transformed_params, *inputs)
 
@@ -215,7 +215,7 @@ def loss(inputs, targets):
 def accuracy(inputs, targets):
     return np.mean(np.argmax(targets, axis=1) == np.argmax(predict(inputs), axis=1))
 
-params = loss.init_parameters(np.zeros((3, 784)), np.zeros((3, 4)), rng=PRNGKey(0))
+params = loss.init_parameters(np.zeros((3, 784)), np.zeros((3, 4)), key=PRNGKey(0))
 
 # train params...
 
@@ -241,12 +241,12 @@ If you want to reuse parts of your network while initializing the rest, use `ini
 ```python
 inputs = np.zeros((1, 2))
 net = Dense(5)
-net_params = net.init_parameters(inputs, rng=PRNGKey(0))
+net_params = net.init_parameters(inputs, key=PRNGKey(0))
 
 # train net params...
 
 transfer_net = Sequential(net, relu, Dense(2))
-transfer_net_params = transfer_net.init_parameters(inputs, rng=PRNGKey(1), reuse={net: net_params})
+transfer_net_params = transfer_net.init_parameters(inputs, key=PRNGKey(1), reuse={net: net_params})
 
 assert net_params == transfer_net_params.dense0
 

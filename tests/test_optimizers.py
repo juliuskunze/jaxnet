@@ -28,7 +28,7 @@ def test(loss, jit, opt):
     def next_batch():
         return np.zeros((3, 10)), np.zeros((3, 4))
 
-    params = loss.init_parameters(*next_batch(), rng=PRNGKey(0))
+    params = loss.init_parameters(*next_batch(), key=PRNGKey(0))
 
     state = opt.init(params)
 
