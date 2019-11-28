@@ -132,7 +132,7 @@ def DownRightShiftedConvTranspose(out_chan, filter_shape=(2, 2), strides=None, *
 
 
 @vmap
-def pcnn_out_to_conditional_params(image, theta):
+def conditional_params_from_outputs(image, theta):
     """
     Maps image and model output theta to conditional parameters for a mixture
     of nr_mix logistics. If the input shapes are
@@ -162,7 +162,7 @@ def pcnn_out_to_conditional_params(image, theta):
     return means, inv_scales, logit_probs
 
 
-def conditional_params_to_logprob(images, conditional_params):
+def logprob_from_conditional_params(images, conditional_params):
     means, inv_scales, logit_probs = conditional_params
     images = np.expand_dims(images, 1)
     cdf = lambda offset: sigmoid((images - means + offset) * inv_scales)
@@ -177,7 +177,7 @@ def sample_categorical(key, logits, axis=-1):
     return np.argmax(random.gumbel(key, logits.shape, logits.dtype) + logits, axis=axis)
 
 
-def conditional_params_to_sample(key, conditional_params):
+def sample_from_conditional_params(key, conditional_params):
     means, inv_scales, logits = conditional_params
     _, h, w, c = means.shape
     rng_mix, rng_logistic = random.split(key)
@@ -189,12 +189,12 @@ def conditional_params_to_sample(key, conditional_params):
             / inv_scales)
 
 
-def centre(image):
+def center(image):
     assert image.dtype == np.uint8
     return image / 127.5 - 1
 
 
-def uncentre(image):
+def uncenter(image):
     return np.asarray(np.clip(127.5 * (image + 1), 0, 255), dtype='uint8')
 
 
@@ -268,10 +268,10 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
 
     @parametrized
     def loss(images):
-        images = centre(images)
-        pcnn_out = pixel_cnn(images)
-        conditional_params = pcnn_out_to_conditional_params(images, pcnn_out)
-        losses = -(conditional_params_to_logprob(images, conditional_params) *
+        images = center(images)
+        outputs = pixel_cnn(images)
+        conditional_params = conditional_params_from_outputs(images, outputs)
+        losses = -(logprob_from_conditional_params(images, conditional_params) *
                    np.log2(np.e) / images[0].size)
         assert losses.shape == (images.shape[0],)
         return np.mean(losses)
