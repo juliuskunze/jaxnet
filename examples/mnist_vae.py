@@ -73,8 +73,7 @@ def image_sample_grid(nrow=10, ncol=10):
 @parametrized
 def evaluate(images):
     binarized_test = random.bernoulli(random_key(), images)
-    test_elbo = loss(random_key(), binarized_test)
-    return test_elbo, image_sample_grid()
+    return loss(binarized_test), image_sample_grid()
 
 
 def main():
