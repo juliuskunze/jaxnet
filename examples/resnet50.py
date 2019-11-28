@@ -1,8 +1,9 @@
 # Run this example in your browser: https://colab.research.google.com/drive/1q6yoK_Zscv-57ZzPM4qNy3LgjeFzJ5xN#scrollTo=p0J1g94IpxK-
 
 import numpy.random as npr
-from jax import random, numpy as np
+from jax import numpy as np
 from jax.nn import relu, log_softmax
+from jax.random import PRNGKey
 
 from jaxnet import Conv, BatchNorm, GeneralConv, MaxPool, Dense, AvgPool, flatten, \
     Sequential, parametrized, optimizers
@@ -64,7 +65,7 @@ def ResNet50(num_classes):
 
 
 def main():
-    rng_key = random.PRNGKey(0)
+    key = PRNGKey(0)
 
     batch_size = 8
     num_classes = 1001
@@ -97,7 +98,7 @@ def main():
     batches = synth_batches()
 
     print("\nInitializing parameters.")
-    state = opt(loss.init_parameters(*next(batches)), key=rng_key)
+    state = opt.init(loss.init_parameters(*next(batches), key=key))
     for i in range(num_steps):
         print(f'Training on batch {i}.')
         state = opt.update(loss.apply, state, *next(batches))
