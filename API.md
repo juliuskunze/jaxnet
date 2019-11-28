@@ -50,7 +50,7 @@ scalar = Parameter(lambda rng: np.zeros(()))
 The module has a single parameter that is initialized via the given function:
 
 ```python
-param = scalar.init_parameters(PRNGKey(0))
+param = scalar.init_parameters(rng=PRNGKey(0))
 assert np.zeros(()) == param
 ```
 
@@ -141,7 +141,7 @@ net = Sequential(Conv(4, (2, 2)), flatten, relu, Dense(3), relu, Dense(2),
                    Sequential(Dense(2), relu))
 inputs = np.zeros((1, 5, 5, 2))
 
-params = net.init_parameters(PRNGKey(0), inputs)
+params = net.init_parameters(inputs, rng=PRNGKey(0))
 assert (4, ) == params.conv.bias.shape
 assert (3, ) == params.dense0.bias.shape
 assert (3, 2) == params.dense1.kernel.shape
@@ -192,7 +192,7 @@ Implementing `Reparametrized` is straight-forward:
 def Reparametrized(model, reparametrization_factory):
     @parametrized
     def reparametrized(*inputs):
-        params = Parameter(lambda rng: model.init_parameters(rng, *inputs))()
+        params = Parameter(lambda rng: model.init_parameters(*inputs, rng=rng))()
         transformed_params = tree_map(lambda param: reparametrization_factory()(param), params)
         return model.apply(transformed_params, *inputs)
 
@@ -215,7 +215,7 @@ def loss(inputs, targets):
 def accuracy(inputs, targets):
     return np.mean(np.argmax(targets, axis=1) == np.argmax(predict(inputs), axis=1))
 
-params = loss.init_parameters(PRNGKey(0), np.zeros((3, 784)), np.zeros((3, 4)))
+params = loss.init_parameters(np.zeros((3, 784)), np.zeros((3, 4)), rng=PRNGKey(0))
 
 # train params...
 
@@ -241,12 +241,12 @@ If you want to reuse parts of your network while initializing the rest, use `ini
 ```python
 inputs = np.zeros((1, 2))
 net = Dense(5)
-net_params = net.init_parameters(PRNGKey(0), inputs)
+net_params = net.init_parameters(inputs, rng=PRNGKey(0))
 
 # train net params...
 
 transfer_net = Sequential(net, relu, Dense(2))
-transfer_net_params = transfer_net.init_parameters(PRNGKey(1), inputs, reuse={net: net_params})
+transfer_net_params = transfer_net.init_parameters(inputs, rng=PRNGKey(1), reuse={net: net_params})
 
 assert net_params == transfer_net_params.dense0
 

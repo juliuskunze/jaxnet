@@ -37,7 +37,7 @@ def main(batch_size=256, env_name="CartPole-v1"):
         return sample_categorical(rng, logits)
 
     rng_init, rng = random.split(PRNGKey(0))
-    state = opt.init(shaped_loss.init_parameters(rng_init))
+    state = opt.init(shaped_loss.init_parameters(rng=rng_init))
     returns, observations, actions, rewards_to_go = [], [], [], []
 
     for i in range(250):

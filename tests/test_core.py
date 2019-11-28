@@ -15,7 +15,7 @@ enable_checks()
 
 def test_Parameter(Parameter=Parameter):
     scalar = Parameter(lambda _: np.zeros(()))
-    params = scalar.init_parameters(PRNGKey(0))
+    params = scalar.init_parameters(rng=PRNGKey(0))
 
     assert np.zeros(()) == params
     out = scalar.apply(params)
@@ -27,7 +27,7 @@ def test_Parameter_submodule():
     def wrapper():
         return Parameter(lambda _: np.zeros(()))()
 
-    params = wrapper.init_parameters(PRNGKey(0))
+    params = wrapper.init_parameters(rng=PRNGKey(0))
 
     assert np.zeros(()) == params.parameter
     out = wrapper.apply(params)
@@ -36,7 +36,7 @@ def test_Parameter_submodule():
 
 def test_Parameter_with_multiple_arrays(Parameter=Parameter):
     two_scalars = Parameter(lambda _: (np.zeros(()), np.zeros(())))
-    params = two_scalars.init_parameters(PRNGKey(0))
+    params = two_scalars.init_parameters(rng=PRNGKey(0))
 
     a, b = params
     assert np.zeros(()) == a
@@ -50,7 +50,7 @@ def test_parameter_with_multiple_arrays_submodule():
     def wrapper():
         return Parameter(lambda _: (np.zeros(()), np.zeros(())))()
 
-    params = wrapper.init_parameters(PRNGKey(0))
+    params = wrapper.init_parameters(rng=PRNGKey(0))
 
     a, b = params.parameter
     assert np.zeros(()) == a
@@ -75,7 +75,7 @@ def test_submodule_order():
 
         return np.concatenate([a, f]) + np.concatenate([b, e]) + np.concatenate([c, d]) + k
 
-    params = net.init_parameters(PRNGKey(0))
+    params = net.init_parameters(rng=PRNGKey(0))
 
     assert np.zeros((1,)) == params.parameter0
     out = net.apply(params)
@@ -90,7 +90,7 @@ def test_deep_nested_inline_submodule():
     Net4 = lambda: parametrized(lambda inputs: Net3()(inputs), name='net4')
 
     net = Net4()
-    params = net.init_parameters(PRNGKey(0), np.zeros(()))
+    params = net.init_parameters(np.zeros(()), rng=PRNGKey(0))
     out = net.apply(params, np.zeros(()))
     assert 0 == out
 
@@ -103,7 +103,7 @@ def test_external_submodule():
         return 2 * layer(inputs)
 
     inputs = random_inputs((2,))
-    params = net.init_parameters(PRNGKey(0), inputs)
+    params = net.init_parameters(inputs, rng=PRNGKey(0))
     out = net.apply(params, inputs)
     assert out.shape == (3,)
 
@@ -120,7 +120,7 @@ def test_default_argument_submodule():
         return 2 * layer(inputs)
 
     inputs = random_inputs((2,))
-    params = net.init_parameters(PRNGKey(0), inputs)
+    params = net.init_parameters(inputs, rng=PRNGKey(0))
     out = net.apply(params, inputs)
     assert out.shape == (3,)
 
@@ -138,7 +138,7 @@ def test_inline_submodule():
         return 2 * layer(inputs)
 
     inputs = random_inputs((2,))
-    params = net.init_parameters(PRNGKey(0), inputs)
+    params = net.init_parameters(inputs, rng=PRNGKey(0))
     out = net.apply(params, inputs)
     assert out.shape == (3,)
 
@@ -165,12 +165,12 @@ j4 = jit(lambda x: 2 * Dense(3)(x))
 def test_parametrized_jit(jitted_fun):
     net = parametrized(jitted_fun)
     inputs = random_inputs((2,))
-    params = net.init_parameters(PRNGKey(0), inputs)
+    params = net.init_parameters(inputs, rng=PRNGKey(0))
 
     assert 'fun' == type(params).__name__
     assert (3,) == params.dense.bias.shape
 
-    params_ = net.init_parameters(PRNGKey(0), inputs)
+    params_ = net.init_parameters(inputs, rng=PRNGKey(0))
     assert_parameters_equal(params, params_)
 
     out = net.apply(params, inputs)
@@ -200,7 +200,7 @@ def test_parametrized_jit(jitted_fun):
 def test_parametrized_jit_parameter_sharing():
     d = Dense(3)
     net = Sequential(d, jit(d))
-    params = net.init_parameters(PRNGKey(0), np.zeros((2, 3)))
+    params = net.init_parameters(np.zeros((2, 3)), rng=PRNGKey(0))
     assert len(params) == 1
     net.apply(params, np.zeros((2, 3)))
 
@@ -216,7 +216,7 @@ def test_inline_sequential_submodule():
         return inner(inner(inputs))
 
     inputs = np.zeros((1, 2))
-    params = outer.init_parameters(PRNGKey(0), inputs)
+    params = outer.init_parameters(inputs, rng=PRNGKey(0))
     assert (2,) == params.inner.sequential.dense.bias.shape
     out = outer.apply(params, inputs)
     assert (1, 2) == out.shape
@@ -231,7 +231,7 @@ def test_external_submodule2():
 
     inputs = np.zeros((1, 2))
 
-    params = net.init_parameters(PRNGKey(0), inputs)
+    params = net.init_parameters(inputs, rng=PRNGKey(0))
     assert_parameters_equal(((np.zeros((2, 2)), np.zeros(2)),), params)
 
     out = net.apply(params, inputs)
@@ -246,7 +246,7 @@ def test_external_sequential_submodule():
                        Sequential(Dense(2), relu))
     inputs = np.zeros((1, 5, 5, 2))
 
-    params = layer.init_parameters(PRNGKey(0), inputs)
+    params = layer.init_parameters(inputs, rng=PRNGKey(0))
     assert (4,) == params.conv.bias.shape
     assert (3,) == params.dense0.bias.shape
     assert (3, 2) == params.dense1.kernel.shape
@@ -266,7 +266,7 @@ def test_internal_param_sharing():
         return layer(layer(inputs))
 
     inputs = np.zeros((1, 2))
-    params = shared_net.init_parameters(PRNGKey(0), inputs)
+    params = shared_net.init_parameters(inputs, rng=PRNGKey(0))
     assert_parameters_equal(((np.zeros((2, 2)), np.zeros(2),),), params)
 
     out = shared_net.apply(params, inputs)
@@ -283,7 +283,7 @@ def test_internal_param_sharing2():
         return layer(inputs)
 
     inputs = np.zeros((1, 2))
-    params = shared_net.init_parameters(PRNGKey(0), inputs)
+    params = shared_net.init_parameters(inputs, rng=PRNGKey(0))
 
     assert_parameters_equal((((np.zeros((2, 2)), np.zeros(2)),),), params)
     out = shared_net.apply(params, inputs)
@@ -295,10 +295,10 @@ def test_no_reuse():
 
     layer = Dense(5)
     net1 = Sequential(layer, Dense(2))
-    p1 = net1.init_parameters(PRNGKey(0), inputs)
+    p1 = net1.init_parameters(inputs, rng=PRNGKey(0))
 
     net2 = Sequential(layer, Dense(3))
-    p2 = net2.init_parameters(PRNGKey(1), inputs)
+    p2 = net2.init_parameters(inputs, rng=PRNGKey(1))
 
     assert p1[0].kernel.shape == p2[0].kernel.shape
     assert p1[0].bias.shape == p2[0].bias.shape
@@ -311,7 +311,7 @@ def test_external_param_sharing():
     shared_net = Sequential(layer, layer)
 
     inputs = np.zeros((1, 2))
-    params = shared_net.init_parameters(PRNGKey(0), inputs)
+    params = shared_net.init_parameters(inputs, rng=PRNGKey(0))
     assert_parameters_equal(((np.zeros((2, 2)), np.zeros(2)),), params)
 
     out = shared_net.apply(params, inputs)
@@ -328,9 +328,9 @@ def test_submodule_reuse():
     net1 = Sequential(layer, Dense(2))
     net2 = Sequential(layer, Dense(3))
 
-    layer_params = layer.init_parameters(PRNGKey(0), inputs)
-    net1_params = net1.init_parameters(PRNGKey(1), inputs, reuse={layer: layer_params})
-    net2_params = net2.init_parameters(PRNGKey(2), inputs, reuse={layer: layer_params})
+    layer_params = layer.init_parameters(inputs, rng=PRNGKey(0))
+    net1_params = net1.init_parameters(inputs, rng=PRNGKey(1), reuse={layer: layer_params})
+    net2_params = net2.init_parameters(inputs, rng=PRNGKey(2), reuse={layer: layer_params})
 
     out1 = net1.apply(net1_params, inputs)
     assert out1.shape == (1, 2)
@@ -341,7 +341,7 @@ def test_submodule_reuse():
     assert_dense_parameters_equal(layer_params, net1_params[0])
     assert_dense_parameters_equal(layer_params, net2_params[0])
 
-    new_layer_params = layer.init_parameters(PRNGKey(3), inputs)
+    new_layer_params = layer.init_parameters(inputs, rng=PRNGKey(3))
     combined_params = net1.parameters_from({net1: net1_params, layer: new_layer_params}, inputs)
     assert_dense_parameters_equal(new_layer_params, combined_params.dense0)
     assert_dense_parameters_equal(net1_params.dense1, combined_params.dense1)
@@ -353,7 +353,7 @@ def test_no_params():
         return 2 * inputs
 
     inputs = np.zeros((1, 3))
-    params = double.init_parameters(PRNGKey(0), inputs)
+    params = double.init_parameters(inputs, rng=PRNGKey(0))
     assert_parameters_equal((), params)
 
     out = double.apply(params, inputs)
@@ -374,7 +374,7 @@ def test_scan_unparametrized_cell():
 
     inputs = np.zeros((3,))
 
-    params = rnn.init_parameters(PRNGKey(0), inputs)
+    params = rnn.init_parameters(inputs, rng=PRNGKey(0))
     outs = rnn.apply(params, inputs)
 
     assert (3, 2) == outs.shape
@@ -392,7 +392,7 @@ def test_scan_parametrized_cell_without_params():
 
     inputs = np.zeros((3,))
 
-    params = rnn.init_parameters(PRNGKey(0), inputs)
+    params = rnn.init_parameters(inputs, rng=PRNGKey(0))
     assert_parameters_equal(((),), params)
 
     outs = rnn.apply(params, inputs)
@@ -413,7 +413,7 @@ def test_scan_parametrized_cell():
 
     inputs = np.zeros((3,))
 
-    rnn_params = rnn.init_parameters(PRNGKey(0), inputs)
+    rnn_params = rnn.init_parameters(inputs, rng=PRNGKey(0))
     assert (2,) == rnn_params.cell.parameter.shape
     outs = rnn.apply(rnn_params, inputs)
 
@@ -433,7 +433,7 @@ def test_scan_parametrized_nonflat_cell():
 
     inputs = np.zeros((3,))
 
-    rnn_params = rnn.init_parameters(PRNGKey(0), inputs)
+    rnn_params = rnn.init_parameters(inputs, rng=PRNGKey(0))
     assert (2,) == rnn_params.cell.parameter.shape
     outs = rnn.apply(rnn_params, inputs)
 
@@ -446,7 +446,7 @@ def test_input_dependent_modules():
         return Dense(inputs.shape[0])(inputs)
 
     inputs = np.zeros((5, 3))
-    params = net.init_parameters(PRNGKey(0), inputs)
+    params = net.init_parameters(inputs, rng=PRNGKey(0))
 
     out = net.apply(params, inputs)
 
@@ -462,7 +462,7 @@ def test_input_dependent_nested_modules():
     net = Sequential(Dense(3), layer)
 
     inputs = np.zeros((5, 3))
-    params = net.init_parameters(PRNGKey(0), inputs)
+    params = net.init_parameters(inputs, rng=PRNGKey(0))
 
     out = net.apply(params, inputs)
     assert (5, 5) == out.shape
@@ -473,7 +473,7 @@ def test_submodule_without_inputs():
     def scalar():
         return Parameter(lambda rng: np.zeros(()))()
 
-    params = scalar.init_parameters(PRNGKey(0))
+    params = scalar.init_parameters(rng=PRNGKey(0))
     assert_parameters_equal((np.zeros(()),), params)
 
     out = scalar.apply(params)
@@ -486,7 +486,7 @@ def test_submodule_without_inputs():
 def test_nested_module_without_inputs():
     dense = Dense(2)
     inputs = np.zeros((1, 3))
-    params = dense.init_parameters(PRNGKey(0), inputs)
+    params = dense.init_parameters(inputs, rng=PRNGKey(0))
     assert (3, 2) == params.kernel.shape
     assert (2,) == params.bias.shape
     assert str(dense).startswith('dense')
@@ -510,7 +510,7 @@ def test_param_and_submodule_mixed():
 
     inputs = np.zeros((1, 3))
 
-    params = dense.init_parameters(PRNGKey(0), inputs)
+    params = dense.init_parameters(inputs, rng=PRNGKey(0))
     assert (2,) == params.bias.shape
     assert (3, 2) == params.linear_map.kernel.shape
 
@@ -530,7 +530,7 @@ def test_mixed_up_execution_order():
 
     inputs = np.zeros((1, 3))
 
-    params = dense.init_parameters(PRNGKey(0), inputs)
+    params = dense.init_parameters(inputs, rng=PRNGKey(0))
     assert (2,) == params.bias.shape
     assert (3, 2) == params.kernel.shape
 
@@ -544,10 +544,10 @@ def test_mixed_up_execution_order():
 def test_submodule_reuse_top_level():
     net = Dense(2)
     inputs = np.zeros((1, 3))
-    params = net.init_parameters(PRNGKey(0), inputs)
+    params = net.init_parameters(inputs, rng=PRNGKey(0))
     out = net.apply(params, inputs)
 
-    params_ = net.init_parameters(PRNGKey(1), inputs, reuse={net: params})
+    params_ = net.init_parameters(inputs, rng=PRNGKey(1), reuse={net: params})
     assert_dense_parameters_equal(params, params_)
 
     out_ = net.apply(params_, inputs)
@@ -558,7 +558,7 @@ def test_parameters_from():
     layer = Dense(2)
     net = Sequential(layer, relu)
     inputs = np.zeros((1, 3))
-    layer_params = layer.init_parameters(PRNGKey(0), inputs)
+    layer_params = layer.init_parameters(inputs, rng=PRNGKey(0))
 
     params_ = net.parameters_from({layer: layer_params}, inputs)
     assert_parameters_equal((layer_params,), params_)
@@ -577,10 +577,10 @@ def test_parameters_from_subsubmodule():
     sublayer = Sequential(subsublayer, relu)
     net = Sequential(sublayer, np.sum)
     inputs = np.zeros((1, 3))
-    params = net.init_parameters(PRNGKey(0), inputs)
+    params = net.init_parameters(inputs, rng=PRNGKey(0))
     out = net.apply(params, inputs)
 
-    subsublayer_params = subsublayer.init_parameters(PRNGKey(0), inputs)
+    subsublayer_params = subsublayer.init_parameters(inputs, rng=PRNGKey(0))
 
     params_ = net.parameters_from({subsublayer: subsublayer_params}, inputs)
     assert_dense_parameters_equal(subsublayer_params, params_[0][0])
@@ -597,7 +597,7 @@ def test_parameters_from_subsubmodule():
 def test_parameters_from_top_level():
     net = Dense(2)
     inputs = np.zeros((1, 3))
-    params = net.init_parameters(PRNGKey(0), inputs)
+    params = net.init_parameters(inputs, rng=PRNGKey(0))
     out = net.apply(params, inputs)
 
     params_ = net.parameters_from({net: params}, inputs)
@@ -622,7 +622,7 @@ def test_parameters_from_shared_submodules():
         return a(inputs) * b(inputs)
 
     inputs = np.zeros((1, 3))
-    a_params = a.init_parameters(PRNGKey(0), inputs)
+    a_params = a.init_parameters(inputs, rng=PRNGKey(0))
     out = a.apply(a_params, inputs)
 
     params = net.parameters_from({a: a_params}, inputs)
@@ -664,7 +664,7 @@ def test_parameters_from_sharing_between_multiple_parents():
         return a(inputs), b(inputs)
 
     inputs = np.zeros((1, 3))
-    a_params = a.init_parameters(PRNGKey(0), inputs)
+    a_params = a.init_parameters(inputs, rng=PRNGKey(0))
     out = a.apply(a_params, inputs)
 
     params = net.parameters_from({a: a_params}, inputs)
@@ -686,7 +686,7 @@ def test_parameter_sharing_between_multiple_parents():
     def net():
         return wrapped(), p()
 
-    params = net.init_parameters(PRNGKey(0))
+    params = net.init_parameters(rng=PRNGKey(0))
     assert 1 == len(params)
     assert np.array_equal(np.ones(()), params.wrapped.parameter)
     a, b = net.apply(params)
@@ -702,12 +702,12 @@ def test_collection_input(type):
         return inputs[0] * inputs[1] * parameter((), zeros)
 
     inputs = type((np.zeros(2), np.zeros(2)))
-    params = net.init_parameters(PRNGKey(0), inputs)
+    params = net.init_parameters(inputs, rng=PRNGKey(0))
     out = net.apply(params, inputs)
     assert np.array_equal(np.zeros(2), out)
 
     net = Sequential(net)
-    params = net.init_parameters(PRNGKey(0), inputs)
+    params = net.init_parameters(inputs, rng=PRNGKey(0))
     out = net.apply(params, inputs)
     assert np.array_equal(np.zeros(2), out)
 
@@ -718,7 +718,7 @@ def test_dict_input():
         return input_dict['a'] * input_dict['b'] * parameter((), zeros)
 
     inputs = {'a': np.zeros(2), 'b': np.zeros(2)}
-    params = net.init_parameters(PRNGKey(0), inputs)
+    params = net.init_parameters(inputs, rng=PRNGKey(0))
     out = net.apply(params, inputs)
     assert np.array_equal(np.zeros(2), out)
 
@@ -729,7 +729,7 @@ def test_tuple_output():
         return inputs, inputs * parameter((), zeros)
 
     inputs = np.zeros((1, 3))
-    params = net.init_parameters(PRNGKey(0), inputs)
+    params = net.init_parameters(inputs, rng=PRNGKey(0))
     out1, out2 = net.apply(params, inputs)
 
     assert (1, 3) == out1.shape
@@ -751,7 +751,7 @@ def test_tuple_output_nested():
     def outer(batch):
         return inner(batch)
 
-    outer.init_parameters(PRNGKey(0), np.zeros(()))
+    outer.init_parameters(np.zeros(()), rng=PRNGKey(0))
 
 
 def test_submodule_init_parameters_is_random():
@@ -762,7 +762,7 @@ def test_submodule_init_parameters_is_random():
 
         return a + b
 
-    params = dense.init_parameters(PRNGKey(0))
+    params = dense.init_parameters(rng=PRNGKey(0))
     assert not np.array_equal(params.a, params.b)
 
 
@@ -771,13 +771,13 @@ def test_rng_injection():
     def rand():
         return random.uniform(random_key())
 
-    p = rand.init_parameters(PRNGKey(0))
+    p = rand.init_parameters(rng=PRNGKey(0))
     out = rand.apply(p, rng=PRNGKey(0))
     assert () == out.shape
 
 
 def test_save_and_load_params():
-    params = Dense(2).init_parameters(PRNGKey(0), np.zeros((1, 2)))
+    params = Dense(2).init_parameters(np.zeros((1, 2)), rng=PRNGKey(0))
 
     from pathlib import Path
     path = Path('/') / 'tmp' / 'net.params'

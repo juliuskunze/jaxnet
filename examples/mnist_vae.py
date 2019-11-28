@@ -107,8 +107,8 @@ def main():
 
     example_rng = PRNGKey(0)
     example_batch = binarize_batch(example_rng, 0, images=train_images)
-    shaped_elbo = loss.shaped(example_rng, example_batch)
-    init_parameters = shaped_elbo.init_parameters(PRNGKey(2))
+    shaped_elbo = loss.shaped(example_batch, example_rng)
+    init_parameters = shaped_elbo.init_parameters(rng=PRNGKey(2))
     state = opt.init(init_parameters)
 
     for epoch in range(num_epochs):

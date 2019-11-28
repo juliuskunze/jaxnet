@@ -40,7 +40,7 @@ def elbo(rng, images):
     logits_x = decode(gaussian_sample(rng, mu_z, sigmasq_z))
     return bernoulli_logpdf(logits_x, images) - gaussian_kl(mu_z, sigmasq_z)
 
-params = loss.init_parameters(PRNGKey(2), example_rng, example_batch)
+params = loss.init_parameters(example_rng, example_batch, rng=PRNGKey(2))
 ```
 
 The equivalent from the [stax example](https://github.com/google/jax/blob/master/examples/mnist_vae.py):

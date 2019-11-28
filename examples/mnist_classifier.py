@@ -66,7 +66,7 @@ def main():
     batches = data_stream()
 
     opt = optimizers.Momentum(0.001, mass=0.9)
-    state = opt.init(loss.init_parameters(PRNGKey(0), *next(batches)))
+    state = opt.init(loss.init_parameters(*next(batches)), rng=PRNGKey(0))
 
     for epoch in range(num_epochs):
         start_time = time.time()

@@ -53,14 +53,14 @@ Notice how `Lambda` layers are not needed in JAXnet.
 Different from TensorFlow2/Keras, JAXnet has no global compute graph.
 Modules like `net` and `loss` do not contain mutable weights.
 Instead, weights are contained in separate, immutable objects.
-They are initialized with `init_parameters`, provided a random key and example inputs:
+They are initialized with `init_parameters`, provided example inputs and a random key:
 
 ```python
 from jax.random import PRNGKey
 
 def next_batch(): return np.zeros((3, 784)), np.zeros((3, 4))
 
-params = loss.init_parameters(PRNGKey(0), *next_batch())
+params = loss.init_parameters(*next_batch(), rng=PRNGKey(0))
 
 print(params.sequential.dense2.bias)  # [-0.01101029, -0.00749435, -0.00952365,  0.00493979]
 ```

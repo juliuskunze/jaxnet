@@ -2,6 +2,7 @@
 
 from jax import numpy as np, random
 from jax.nn import softmax
+from jax.random import PRNGKey
 
 from jaxnet import Sequential, Rnn, Dense, GRUCell, parametrized, optimizers
 
@@ -47,7 +48,7 @@ def main():
     opt = optimizers.RmsProp(0.003)
 
     batch = train.sample(batch_size)
-    state = opt.init(cross_entropy.init_parameters(random.PRNGKey(0), batch.data, batch.target))
+    state = opt.init(cross_entropy.init_parameters(batch.data, batch.target, rng=PRNGKey(0)))
     for epoch in range(10):
         params = opt.get_parameters(state)
         e = error.apply_from({cross_entropy: params}, test.data, test.target, jit=True)

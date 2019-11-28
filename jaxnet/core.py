@@ -19,7 +19,7 @@ from jax.util import split_list, split_dict, cache
 zip = safe_zip
 map = safe_map
 
-no_key = ()
+no_rng = ()
 
 
 @curry
@@ -110,11 +110,11 @@ class parametrized(Primitive):
         self._wrapped_example_outputs_fun = wrap_init(self._example_outputs)
         self._jitted_apply = jit(self._apply)
 
-    def init_parameters(self, rng, *example_inputs, reuse=None):
-        return self._init_parameters(rng, *example_inputs, reuse=reuse, reuse_only=False)
+    def init_parameters(self, *example_inputs, rng, reuse=None):
+        return self._init_parameters(*example_inputs, rng=rng, reuse=reuse, reuse_only=False)
 
     def parameters_from(self, reuse, *example_inputs):
-        return self._init_parameters(PRNGKey(0), *example_inputs, reuse=reuse, reuse_only=True)
+        return self._init_parameters(*example_inputs, rng=PRNGKey(0), reuse=reuse, reuse_only=True)
 
     def _apply(self, parameters, *inputs, rng):
         flat_inputs, in_tree = tree_flatten(inputs)
@@ -129,12 +129,12 @@ class parametrized(Primitive):
             del master
         return tree_unflatten(out_tree(), flat_outputs)
 
-    def apply(self, parameters, *inputs, rng=no_key, jit=False):
+    def apply(self, parameters, *inputs, rng=no_rng, jit=False):
         return (self._jitted_apply if jit else self._apply)(parameters, *inputs, rng=rng)
 
-    def apply_from(self, reuse, *example_inputs, jit=False):
+    def apply_from(self, reuse, *example_inputs, rng=no_rng, jit=False):
         parameters = self.parameters_from(reuse, *example_inputs)
-        return self.apply(parameters, *example_inputs, jit=jit)
+        return self.apply(parameters, *example_inputs, rng=rng, jit=jit)
 
     def __call__(self, *inputs):
         flat_inputs, in_tree = tree_flatten(inputs)
@@ -144,7 +144,7 @@ class parametrized(Primitive):
         return tree_unflatten(out_tree, flat_outs)
 
     def _example_outputs(self, *inputs):
-        _, outputs = self._init_and_apply_parameters_dict(PRNGKey(0), *inputs)
+        _, outputs = self._init_and_apply_parameters_dict(*inputs, key=PRNGKey(0))
         return outputs
 
     def abstract_eval(self, *avals, **kwargs):
@@ -157,8 +157,8 @@ class parametrized(Primitive):
         out_tree_container.append(out_tree_thunk())
         return flat_outs
 
-    def _init_parameters(self, rng, *example_inputs, reuse, reuse_only):
-        d, _ = self._init_and_apply_parameters_dict(rng, *example_inputs)
+    def _init_parameters(self, *example_inputs, rng, reuse, reuse_only):
+        d, _ = self._init_and_apply_parameters_dict(*example_inputs, key=rng)
 
         if reuse:
             flat_reuse_dicts = parametrized._flat_reuse_dicts(reuse, *example_inputs)
@@ -166,10 +166,10 @@ class parametrized(Primitive):
 
         return self._parameters_namedtuple(d)
 
-    def _init_and_apply_parameters_dict(self, rng, *example_inputs):
+    def _init_and_apply_parameters_dict(self, *example_inputs, key):
         flat_inputs, in_tree = tree_flatten(example_inputs)
         flat_fun, out_tree_thunk = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
-        flat_init_fun, get_parameters_thunk = _init_transform(flat_fun, rng)
+        flat_init_fun, get_parameters_thunk = _init_transform(flat_fun, key)
         flat_outputs = flat_init_fun.call_wrapped(*flat_inputs)
         outputs = tree_unflatten(out_tree_thunk(), flat_outputs)
         return get_parameters_thunk(), outputs
@@ -186,7 +186,7 @@ class parametrized(Primitive):
             if not isinstance(module, parametrized):
                 raise ValueError('Keys for reuse must be parametrized or ShapedParametrized.')
 
-            example_dict, _ = module._init_and_apply_parameters_dict(PRNGKey(0), *inputs)
+            example_dict, _ = module._init_and_apply_parameters_dict(*inputs, key=PRNGKey(0))
             params_dict = parametrized._parameters_dict(parameters, example_dict)
             r.update(module._flatten_dict(params_dict))
 
@@ -282,9 +282,9 @@ class Parameter(parametrized):
         assert len(inputs) == 0
         return parameters
 
-    def _init_and_apply_parameters_dict(self, rng, *example_inputs):
+    def _init_and_apply_parameters_dict(self, *example_inputs, key):
         assert len(example_inputs) == 0
-        parameter = self._init_parameter(rng)
+        parameter = self._init_parameter(key)
         return parameter, parameter
 
 
@@ -295,11 +295,11 @@ class ShapedParametrized:
         self.parametrized = parametrized
         self.example_inputs = example_inputs
 
-    def apply_from(self, reuse, jit=False):
-        return self.parametrized.apply_from(reuse, *self.example_inputs, jit=jit)
+    def apply_from(self, reuse, rng=no_rng, jit=False):
+        return self.parametrized.apply_from(reuse, *self.example_inputs, rng=rng, jit=jit)
 
     def init_parameters(self, rng):
-        return self.parametrized.init_parameters(rng, *self.example_inputs)
+        return self.parametrized.init_parameters(*self.example_inputs, rng=rng)
 
 
 def _abstractified(vals):
@@ -378,7 +378,7 @@ class RandomState:
         self._rng = rng
 
     def next_rng(self):
-        if self._rng is no_key:
+        if self._rng is no_rng:
             # Raise error:
             _random_key_impl()
 
@@ -504,7 +504,7 @@ class InitTrace(ParametrizedTrace):
 
         # TODO cleanup
         rng = self.state.random_state.next_rng() if isinstance(primitive, Parameter) else None
-        parameters_dict, outputs = primitive._init_and_apply_parameters_dict(rng, *inputs)
+        parameters_dict, outputs = primitive._init_and_apply_parameters_dict(*inputs, key=rng)
         self.state.set_parameters_dict_for(primitive, parameters_dict)
         return outputs
 

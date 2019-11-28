@@ -223,7 +223,7 @@ def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,
 def Regularized(loss_model, regularizer):
     @parametrized
     def regularized(*inputs):
-        params = Parameter(lambda rng: loss_model.init_parameters(rng, *inputs), 'model')()
+        params = Parameter(lambda rng: loss_model.init_parameters(*inputs, rng=rng), 'model')()
         regularization_loss = sum(
             map(lambda param: np.sum(regularizer(param)), tree_leaves(params)))
         return loss_model.apply(params, *inputs) + regularization_loss
@@ -238,7 +238,7 @@ def L2Regularized(loss_model, scale):
 def Reparametrized(model, reparametrization_factory, init_transform=lambda x: x):
     @parametrized
     def reparametrized(*inputs):
-        params = Parameter(lambda rng: init_transform(model.init_parameters(rng, *inputs)),
+        params = Parameter(lambda rng: init_transform(model.init_parameters(*inputs, rng=rng)),
                            'model')()
         transformed_params = tree_map(lambda param: reparametrization_factory()(param), params)
         return model.apply(transformed_params, *inputs)
@@ -250,7 +250,7 @@ def Batched(unbatched_model: parametrized, batch_dim=0):
     @parametrized
     def batched(*batched_args):
         args = tree_map(lambda x: x[0], batched_args)
-        params = Parameter(lambda rng: unbatched_model.init_parameters(rng, *args), 'model')()
+        params = Parameter(lambda rng: unbatched_model.init_parameters(*args, rng=rng), 'model')()
         batched_apply = vmap(partial(unbatched_model.apply, params), batch_dim)
         return batched_apply(*batched_args)
 

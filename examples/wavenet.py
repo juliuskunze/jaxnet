@@ -169,7 +169,7 @@ def main():
 
     opt = optimizers.Adam(optimizers.exponential_decay(1e-3, decay_steps=1, decay_rate=0.999995))
     print(f'Initializing parameters.')
-    state = opt.init(loss.init_parameters(PRNGKey(0), next(batches)))
+    state = opt.init(loss.init_parameters(next(batches), rng=PRNGKey(0)))
     for batch in batches:
         print(f'Training on batch {opt.get_step(state)}.')
         state, train_loss = opt.update_and_get_loss(loss.apply, state, batch, jit=True)
