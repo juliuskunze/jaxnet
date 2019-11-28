@@ -243,13 +243,12 @@ def test_wavenet():
 
 
 def test_pixelcnn():
-    loss = PixelCNNPP(nr_filters=1, nr_resnet=1)
+    loss, _ = PixelCNNPP(nr_filters=1, nr_resnet=1)
     images = np.zeros((2, 16, 16, 3), np.uint8)
-    key = PRNGKey(0)
     opt = optimizers.Adam()
-    state = opt.init(loss.init_parameters(images, key=key))
+    state = opt.init(loss.init_parameters(images, key=PRNGKey(0)))
     # take ~20s, disabled for faster tests:
-    # state, loss = opt.update_and_get_loss(loss.apply, state, images, key=key)
+    # state, loss = opt.update_and_get_loss(loss.apply, state, images, key=PRNGKey(0))
     # assert loss.shape == ()
 
 

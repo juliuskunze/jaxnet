@@ -162,8 +162,7 @@ def conditional_params_from_outputs(image, theta):
     return means, inv_scales, logit_probs
 
 
-def logprob_from_conditional_params(images, conditional_params):
-    means, inv_scales, logit_probs = conditional_params
+def logprob_from_conditional_params(images, means, inv_scales, logit_probs):
     images = np.expand_dims(images, 1)
     cdf = lambda offset: sigmoid((images - means + offset) * inv_scales)
     upper_cdf = np.where(images == 1, 1, cdf(1 / 255))
@@ -171,22 +170,6 @@ def logprob_from_conditional_params(images, conditional_params):
     all_logprobs = np.sum(np.log(np.maximum(upper_cdf - lower_cdf, 1e-12)), -1)
     log_mix_coeffs = logit_probs - logsumexp(logit_probs, -3, keepdims=True)
     return np.sum(logsumexp(log_mix_coeffs + all_logprobs, axis=-3), axis=(-2, -1))
-
-
-def sample_categorical(key, logits, axis=-1):
-    return np.argmax(random.gumbel(key, logits.shape, logits.dtype) + logits, axis=axis)
-
-
-def sample_from_conditional_params(key, conditional_params):
-    means, inv_scales, logits = conditional_params
-    _, h, w, c = means.shape
-    rng_mix, rng_logistic = random.split(key)
-    mix_idx = np.broadcast_to(sample_categorical(
-        rng_mix, logits, 0)[..., np.newaxis], (h, w, c))[np.newaxis]
-    means = np.take_along_axis(means, mix_idx, 0)[0]
-    inv_scales = np.take_along_axis(inv_scales, mix_idx, 0)[0]
-    return (means + random.logistic(rng_logistic, means.shape, means.dtype)
-            / inv_scales)
 
 
 def center(image):
@@ -263,20 +246,18 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
 
     @parametrized
     def pixel_cnn(images):
-        us, uls = up_pass(images)
-        return down_pass(us, uls)
+        images = center(images)
+        thetas = down_pass(*up_pass(images))
+        return conditional_params_from_outputs(images, thetas)
 
     @parametrized
     def loss(images):
-        images = center(images)
-        outputs = pixel_cnn(images)
-        conditional_params = conditional_params_from_outputs(images, outputs)
-        losses = -(logprob_from_conditional_params(images, conditional_params) *
-                   np.log2(np.e) / images[0].size)
+        losses = -(logprob_from_conditional_params(images, *pixel_cnn(images))
+                   * np.log2(np.e) / images[0].size)
         assert losses.shape == (images.shape[0],)
         return np.mean(losses)
 
-    return loss
+    return loss, pixel_cnn
 
 
 def dataset(batch_size):
@@ -296,7 +277,7 @@ def dataset(batch_size):
 
 
 def main(batch_size=32, nr_filters=8, epochs=10, step_size=.001, decay_rate=.999995):
-    loss = PixelCNNPP(nr_filters=nr_filters)
+    loss, _ = PixelCNNPP(nr_filters=nr_filters)
     get_train_batches, test_batches = dataset(batch_size)
     key, init_key = random.split(PRNGKey(0))
     opt = Adam(exponential_decay(step_size, 1, decay_rate))
