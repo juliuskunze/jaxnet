@@ -11,6 +11,8 @@ from jax.util import partial
 from jaxnet import parametrized, Parameter, Dropout, parameter
 from jaxnet.optimizers import Adam
 
+image_dtype = np.uint32  # is supported on TPU unlike np.uint8
+
 
 def _l2_normalize(arr, axis):
     return arr / np.sqrt(np.sum(arr ** 2, axis=axis, keepdims=True))
@@ -173,7 +175,7 @@ def logprob_from_conditional_params(images, means, inv_scales, logit_probs):
 
 
 def center(image):
-    assert image.dtype == np.uint8
+    assert image.dtype == image_dtype
     return image / 127.5 - 1
 
 
@@ -264,10 +266,10 @@ def dataset(batch_size):
     cifar = tfds.load('cifar10')
 
     def get_train_batches():
-        return tfds.as_numpy(cifar['train'].map(lambda el: el['image']).
+        return tfds.as_numpy(cifar['train'].map(lambda el: np.asarray(el['image'], image_dtype)).
                              shuffle(1000).batch(batch_size).prefetch(1))
 
-    test_batches = tfds.as_numpy(cifar['test'].map(lambda el: el['image']).
+    test_batches = tfds.as_numpy(cifar['test'].map(lambda el: np.asarray(el['image'], image_dtype)).
                                  repeat().shuffle(1000).batch(batch_size).prefetch(1))
     return get_train_batches, test_batches
 
