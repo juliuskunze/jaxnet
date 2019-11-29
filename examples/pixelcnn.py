@@ -283,7 +283,7 @@ def main(batch_size=32, nr_filters=8, epochs=10, step_size=.001, decay_rate=.999
     opt = Adam(exponential_decay(step_size, 1, decay_rate))
     state = opt.init(loss.init_parameters(next(test_batches), key=init_key))
 
-    for epoch in range(0):
+    for epoch in range(epochs):
         for batch in get_train_batches():
             key, update_key = random.split(key)
             i = opt.get_step(state)

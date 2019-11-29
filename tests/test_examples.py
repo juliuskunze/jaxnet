@@ -7,7 +7,7 @@ from jax.nn.initializers import normal, glorot_normal, zeros
 from jax.random import PRNGKey
 
 from examples.mnist_vae import gaussian_sample, bernoulli_logpdf, gaussian_kl
-from examples.pixelcnn import PixelCNNPP
+from examples.pixelcnn import PixelCNNPP, image_dtype
 from examples.wavenet import calculate_receptive_field, discretized_mix_logistic_loss, Wavenet
 from jaxnet import parametrized, Dense, Sequential, Conv, flatten, GRUCell, Rnn, \
     Parameter, parameter, Reparametrized, L2Regularized, optimizers
@@ -244,7 +244,7 @@ def test_wavenet():
 
 def test_pixelcnn():
     loss, _ = PixelCNNPP(nr_filters=1, nr_resnet=1)
-    images = np.zeros((2, 16, 16, 3), np.uint8)
+    images = np.zeros((2, 16, 16, 3), image_dtype)
     opt = optimizers.Adam()
     state = opt.init(loss.init_parameters(images, key=PRNGKey(0)))
     # take ~20s, disabled for faster tests:
