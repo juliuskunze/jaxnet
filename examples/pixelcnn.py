@@ -177,10 +177,6 @@ def center(image):
     return image / 127.5 - 1
 
 
-def uncenter(image):
-    return np.asarray(np.clip(127.5 * (image + 1), 0, 255), dtype='uint8')
-
-
 def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
     Resnet = partial(GatedResnet, dropout_p=dropout_p)
     ResnetDown = partial(Resnet, Conv=DownShiftedConv)

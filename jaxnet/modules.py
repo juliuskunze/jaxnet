@@ -181,13 +181,13 @@ def Rnn(cell, carry_init):
     return rnn
 
 
-def Dropout(rate, mode='train'):
+def Dropout(rate, test_mode=False):
     """Constructor for a dropout function with given rate."""
     rate = np.array(rate)
 
     @parametrized
     def dropout(inputs):
-        if mode != 'train':
+        if test_mode or rate == 0:
             return inputs
 
         keep = random.bernoulli(random_key(), rate, inputs.shape)

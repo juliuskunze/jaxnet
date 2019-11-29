@@ -103,9 +103,9 @@ def test_pool_shape(Pool):
     assert np.array_equal(np.zeros((1, 3, 3, 2)), out)
 
 
-@pytest.mark.parametrize('mode', ('train', 'test'))
-def test_Dropout_shape(mode, input_shape=(1, 2, 3)):
-    dropout = Dropout(.5, mode=mode)
+@pytest.mark.parametrize('test_mode', (True, False))
+def test_Dropout_shape(test_mode, input_shape=(1, 2, 3)):
+    dropout = Dropout(.5, test_mode)
     inputs = np.ones(input_shape)
     p = dropout.init_parameters(inputs, key=PRNGKey(0))
     out = dropout.apply(p, inputs, key=PRNGKey(0))
@@ -114,7 +114,10 @@ def test_Dropout_shape(mode, input_shape=(1, 2, 3)):
     out_ = dropout.apply(p, inputs, key=PRNGKey(0))
     assert np.array_equal(out, out_)
 
-    if mode == 'train':
+    if test_mode:
+        assert np.array_equal(inputs, dropout.apply(p, inputs))
+        assert np.array_equal(inputs, Dropout(0).apply(p, inputs))
+    else:
         out_ = dropout.apply(p, inputs, key=PRNGKey(1))
         assert not np.array_equal(out, out_)
 
@@ -124,8 +127,6 @@ def test_Dropout_shape(mode, input_shape=(1, 2, 3)):
         assert ("This parametrized function is randomized and therefore requires "
                 "a random key when applied, i. e. `apply(*inputs, key=PRNGKey(0))`."
                 == str(e_info.value))
-    else:
-        dropout.apply(p, inputs)
 
 
 def test_GRUCell_shape():
