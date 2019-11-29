@@ -4,7 +4,7 @@ import setuptools
 
 setuptools.setup(
     name='jaxnet',
-    version='0.2.4',
+    version='0.2.5',
     description='Neural Nets for JAX',
     url='http://github.com/JuliusKunze/jaxnet',
     long_description=pathlib.Path('README.md').read_text(),
