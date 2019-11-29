@@ -12,7 +12,7 @@ from jax.util import partial
 from jaxnet import parametrized, Parameter, Dropout, parameter, save
 from jaxnet.optimizers import Adam
 
-image_dtype = np.uint32  # is supported on TPU unlike np.uint8
+image_dtype = np.uint8
 
 
 def _l2_normalize(arr, axis):
@@ -299,7 +299,7 @@ def main(batch_size=32, nr_filters=8, epochs=10, step_size=.001, decay_rate=.999
                       f"train loss {train_loss:.3f}, "
                       f"test loss {test_loss:.3f} ")
 
-    save(opt.get_parameters(state), model_path)
+        save(opt.get_parameters(state), model_path)
 
 
 if __name__ == '__main__':
