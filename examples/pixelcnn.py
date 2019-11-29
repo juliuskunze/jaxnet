@@ -1,4 +1,5 @@
 # Run this example in your browser: https://colab.research.google.com/drive/1DMRbUPAxTlk0Awf3D_HR3Oz3P3MBahaJ
+from pathlib import Path
 
 from jax import np, lax, random, vmap
 from jax.experimental.optimizers import exponential_decay
@@ -8,7 +9,7 @@ from jax.random import PRNGKey
 from jax.scipy.special import logsumexp
 from jax.util import partial
 
-from jaxnet import parametrized, Parameter, Dropout, parameter
+from jaxnet import parametrized, Parameter, Dropout, parameter, save
 from jaxnet.optimizers import Adam
 
 image_dtype = np.uint32  # is supported on TPU unlike np.uint8
@@ -266,22 +267,23 @@ def dataset(batch_size):
     cifar = tfds.load('cifar10')
 
     def get_train_batches():
-        return tfds.as_numpy(cifar['train'].map(lambda el: np.asarray(el['image'], image_dtype)).
+        return tfds.as_numpy(cifar['train'].map(lambda el: tf.cast(el['image'], image_dtype)).
                              shuffle(1000).batch(batch_size).prefetch(1))
 
-    test_batches = tfds.as_numpy(cifar['test'].map(lambda el: np.asarray(el['image'], image_dtype)).
+    test_batches = tfds.as_numpy(cifar['test'].map(lambda el: tf.cast(el['image'], image_dtype)).
                                  repeat().shuffle(1000).batch(batch_size).prefetch(1))
     return get_train_batches, test_batches
 
 
-def main(batch_size=32, nr_filters=8, epochs=10, step_size=.001, decay_rate=.999995):
+def main(batch_size=32, nr_filters=8, epochs=10, step_size=.001, decay_rate=.999995,
+         model_path=Path('./pixelcnn.params')):
     loss, _ = PixelCNNPP(nr_filters=nr_filters)
     get_train_batches, test_batches = dataset(batch_size)
     key, init_key = random.split(PRNGKey(0))
     opt = Adam(exponential_decay(step_size, 1, decay_rate))
     state = opt.init(loss.init_parameters(next(test_batches), key=init_key))
 
-    for epoch in range(epochs):
+    for epoch in range(0):
         for batch in get_train_batches():
             key, update_key = random.split(key)
             i = opt.get_step(state)
@@ -296,6 +298,8 @@ def main(batch_size=32, nr_filters=8, epochs=10, step_size=.001, decay_rate=.999
                 print(f"Epoch {epoch}, iteration {i}, "
                       f"train loss {train_loss:.3f}, "
                       f"test loss {test_loss:.3f} ")
+
+    save(opt.get_parameters(state), model_path)
 
 
 if __name__ == '__main__':
