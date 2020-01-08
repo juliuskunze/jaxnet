@@ -71,8 +71,9 @@ def GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None, padding
 
         kernel = parameter(kernel_shape, kernel_init, 'kernel')
         bias = parameter(bias_shape, bias_init, 'bias')
-        return lax.conv_general_dilated(inputs, kernel, strides, padding, one, dilation,
-                                        dimension_numbers) + bias
+        return lax.conv_general_dilated(inputs, kernel, strides, padding,
+                                        lhs_dilation=one, rhs_dilation=dilation,
+                                        dimension_numbers=dimension_numbers) + bias
 
     return conv
 
@@ -105,7 +106,7 @@ def GeneralConvTranspose(dimension_numbers, out_chan, filter_shape,
         kernel = parameter(kernel_shape, kernel_init, 'kernel')
         bias = parameter(bias_shape, bias_init, 'bias')
         return lax.conv_transpose(inputs, kernel, strides, padding,
-                                  dimension_numbers) + bias
+                                  dimension_numbers=dimension_numbers) + bias
 
     return conv_transpose
 
