@@ -139,7 +139,7 @@ See JAXnet in action in your browser:
 [Policy Gradient RL](https://colab.research.google.com/drive/171timtUnCOOAsc-eKoC2TjHK9dQFrY7B).
 
 ## Installation [![PyPI](https://img.shields.io/pypi/v/jaxnet.svg)](https://pypi.python.org/pypi/jaxnet/#history)
-**This is a preview. Expect breaking changes!** Install with
+**This is a preview. Expect breaking changes!** Python 3.6 or higher is supported. Install with
 
 ```
 pip3 install jaxnet
