@@ -1,13 +1,13 @@
 import time
 from collections import namedtuple
 
-from jax import numpy as np, random
+from jax import numpy as np, random, shapecheck
 from jax.nn import relu, log_softmax, softplus, softmax
 from jax.nn.initializers import normal, glorot_normal, zeros
 from jax.random import PRNGKey
 
 from examples.mnist_vae import gaussian_sample, bernoulli_logpdf, gaussian_kl
-from examples.pixelcnn import PixelCNNPP, image_dtype
+from examples.pixelcnn import PixelCNNPP
 from examples.wavenet import calculate_receptive_field, discretized_mix_logistic_loss, Wavenet
 from jaxnet import parametrized, Dense, Sequential, Conv, flatten, GRUCell, Rnn, \
     Parameter, parameter, Reparametrized, L2Regularized, optimizers
@@ -243,14 +243,23 @@ def test_wavenet():
 
 
 def test_pixelcnn():
-    loss, _ = PixelCNNPP(nr_filters=1, nr_resnet=1)
-    images = np.zeros((2, 16, 16, 3), image_dtype)
-    opt = optimizers.Adam()
-    state = opt.init(loss.init_parameters(images, key=PRNGKey(0)))
-    # take ~20s, disabled for faster tests:
+    nr_logistic_mix = 10
+    loss, pixel_cnn = PixelCNNPP(nr_filters=1, nr_resnet=1, nr_logistic_mix=nr_logistic_mix)
+    images = np.zeros((2, 16, 16, 3))
+
+    params = pixel_cnn.init_parameters(images, key=PRNGKey(0))
+    means_shape = f'(b, {nr_logistic_mix}, 4*h, 4*w, 3)'
+    logits_shape = f'(b, {nr_logistic_mix}, 4*h, 4*w)'
+
+    @shapecheck(['(b, 4*h, 4*w, 3)'], (means_shape, means_shape, logits_shape))
+    def evaluate(images):
+        return pixel_cnn.apply(params, images, key=PRNGKey(0))
+
+    # disabled for faster tests:
+    # opt = optimizers.Adam()
+    # state = opt.init(loss.init_parameters(images, key=PRNGKey(0)))
     # state, loss = opt.update_and_get_loss(loss.apply, state, images, key=PRNGKey(0))
     # assert loss.shape == ()
-
 
 def test_reparametrized_submodule():
     net = Sequential(Conv(2, (3, 3)), relu, Conv(2, (3, 3)), relu, flatten,
