@@ -245,12 +245,12 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
 
     @parametrized
     def pixel_cnn(images):
-        images = center(images)
         thetas = down_pass(*up_pass(images))
         return conditional_params_from_outputs(images, thetas)
 
     @parametrized
     def loss(images):
+        images = center(images)
         losses = -(logprob_from_conditional_params(images, *pixel_cnn(images))
                    * np.log2(np.e) / images[0].size)
         assert losses.shape == (images.shape[0],)
