@@ -1,7 +1,7 @@
 # Run this example in your browser: https://colab.research.google.com/drive/1DMRbUPAxTlk0Awf3D_HR3Oz3P3MBahaJ
 from pathlib import Path
 
-from jax import np, lax, random, vmap
+from jax import np, onp, lax, random, vmap
 from jax.experimental.optimizers import exponential_decay
 from jax.nn import elu, sigmoid, softplus
 from jax.nn.initializers import normal
@@ -78,14 +78,12 @@ def GatedResnet(Conv=None, nonlinearity=concat_elu, dropout_p=0.):
 
 @vmap
 def down_shift(input):
-    _, w, c = input.shape
-    return np.concatenate((np.zeros((1, w, c)), input[:-1]), 0)
+    return np.pad(input[:-1], ((1, 0), (0, 0), (0, 0)))
 
 
 @vmap
 def right_shift(input):
-    h, _, c = input.shape
-    return np.concatenate((np.zeros((h, 1, c)), input[:, :-1]), 1)
+    return np.pad(input[:, :-1], ((0, 0), (1, 0), (0, 0)))
 
 
 def DownShiftedConv(out_chan, filter_shape=(2, 3), strides=None, **kwargs):
@@ -104,8 +102,8 @@ def DownShiftedConvTranspose(out_chan, filter_shape=(2, 3), strides=None, **kwar
 
     @parametrized
     def down_shifted_conv_transpose(inputs):
-        out_h, out_w = np.multiply(np.array(inputs.shape[-3:-1]),
-                                   np.array(strides or (1, 1)))
+        out_h, out_w = onp.multiply(onp.array(inputs.shape[-3:-1]),
+                                    onp.array(strides or (1, 1)))
         inputs = ConvTranspose(out_chan, filter_shape, strides, 'VALID', **kwargs)(inputs)
         return inputs[:, :out_h, (f_w - 1) // 2:out_w + (f_w - 1) // 2]
 
@@ -126,8 +124,8 @@ def DownRightShiftedConv(out_chan, filter_shape=(2, 2), strides=None, **kwargs):
 def DownRightShiftedConvTranspose(out_chan, filter_shape=(2, 2), strides=None, **kwargs):
     @parametrized
     def down_right_shifted_conv_transpose(inputs):
-        out_h, out_w = np.multiply(np.array(inputs.shape[-3:-1]),
-                                   np.array(strides or (1, 1)))
+        out_h, out_w = onp.multiply(onp.array(inputs.shape[-3:-1]),
+                                    onp.array(strides or (1, 1)))
         inputs = ConvTranspose(out_chan, filter_shape, strides, 'VALID', **kwargs)(inputs)
         return inputs[:, :out_h, :out_w]
 
@@ -151,7 +149,7 @@ def conditional_params_from_outputs(image, theta):
     nr_mix = 10
     logit_probs, theta = np.split(theta, [nr_mix], axis=-1)
     logit_probs = np.moveaxis(logit_probs, -1, 0)
-    theta = np.moveaxis(np.reshape(theta, image.shape + (-1,)), -1, 0)
+    theta = np.moveaxis(np.reshape(theta, image.shape + (3 * nr_mix,)), -1, 0)
     unconditioned_means, log_scales, coeffs = np.split(theta, 3)
     coeffs = np.tanh(coeffs)
 
@@ -176,7 +174,7 @@ def logprob_from_conditional_params(images, means, inv_scales, logit_probs):
 
 
 def center(image):
-    assert image.dtype == image_dtype
+    # TODO fix shapechecking with custom datatype: assert image.dtype == image_dtype
     return image / 127.5 - 1
 
 
@@ -220,7 +218,7 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
 
     @parametrized
     def up_pass(images):
-        images = np.concatenate((images, np.ones(images.shape[:-1] + (1,))), -1)
+        images = np.pad(images, ((0, 0), (0, 0), (0, 0), (0, 1)), constant_values=1)
         us = [down_shift(ConvDown(filter_shape=(2, 3))(images))]
         uls = [down_shift(ConvDown(filter_shape=(1, 3))(images)) +
                right_shift(ConvDownRight(filter_shape=(2, 1))(images))]
