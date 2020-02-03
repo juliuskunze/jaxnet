@@ -184,7 +184,8 @@ def Rnn(cell, carry_init):
 
 # TODO remove, temporary fix for shapecheck:
 def make_dependent(x, dependence):
-    return x + (0 * dependence.ravel()[0]).astype(x.dtype)
+    zero = (0 * dependence[[slice(0, 1) for _ in dependence.shape]].ravel()).astype(x.dtype)
+    return x + zero
 
 def Dropout(rate, test_mode=False):
     """Constructor for a dropout function with given rate."""

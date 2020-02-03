@@ -1,10 +1,13 @@
 import time
-from collections import namedtuple
+from collections import namedtuple, defaultdict
+from operator import sub
 
-from jax import numpy as np, random, shapecheck
+from jax import numpy as np, random, shapecheck, mask, eval_polymorphic_shape, partial, onp, \
+    safe_zip, safe_map
+from jax.api import _parse_shape_spec
 from jax.nn import relu, log_softmax, softplus, softmax
 from jax.nn.initializers import normal, glorot_normal, zeros
-from jax.random import PRNGKey
+from jax.random import PRNGKey, uniform
 
 from examples.mnist_vae import gaussian_sample, bernoulli_logpdf, gaussian_kl
 from examples.pixelcnn import PixelCNNPP
@@ -18,6 +21,8 @@ from tests.util import enable_checks
 
 enable_checks()
 
+zip = safe_zip
+map = safe_map
 
 def test_readme():
     net = Sequential(Dense(1024), relu, Dense(1024), relu, Dense(4), log_softmax)
@@ -242,18 +247,62 @@ def test_wavenet():
     assert () == train_loss.shape
 
 
+def check(fun, input_shapes, values_dict,
+          out_shape=None, pad_dict=None):
+    if out_shape is not None:
+        shapecheck(input_shapes, out_shape)(fun)
+
+    masked_fun = mask(fun, input_shapes, out_shape)
+
+    all_pad_dict = defaultdict(lambda: 3)
+    if pad_dict is not None:
+        all_pad_dict.update(pad_dict)
+
+    padded_values_dict = {k: values_dict[k] + all_pad_dict[k] for k in values_dict.keys()}
+
+    input_shapes = map(_parse_shape_spec, input_shapes)
+    concrete_shapes = map(
+        partial(eval_polymorphic_shape, values_dict=values_dict), input_shapes)
+    inputs = list(map(partial(uniform, PRNGKey(0)), concrete_shapes))
+
+    padded_input_shapes = map(partial(eval_polymorphic_shape,
+                                      values_dict=padded_values_dict), input_shapes)
+
+    pad_widths = map(sub, map(partial(onp.array, dtype=onp.int64), padded_input_shapes),
+                     concrete_shapes)
+    padded_inputs = [np.pad(input, tuple((0, w) for w in widths),
+                            constant_values=-1) if input.ndim > 0 else input
+                     for input, widths in zip(inputs, pad_widths)]
+    out_ = fun(*inputs)
+    padded_out = masked_fun(padded_inputs, values_dict)
+
+    assert type(out_) == type(padded_out)
+
+    def check_padded_output(out_, padded_out):
+        out = padded_out[tuple(slice(None, k) for k in out_.shape)]
+        onp.testing.assert_allclose(out_, out)
+
+    if type(out_) in (list, tuple):
+        map(check_padded_output, out_, padded_out)
+    else:
+        check_padded_output(out_, padded_out)
+
 def test_pixelcnn():
     nr_logistic_mix = 10
-    loss, pixel_cnn = PixelCNNPP(nr_filters=1, nr_resnet=1, nr_logistic_mix=nr_logistic_mix)
-    images = np.zeros((2, 16, 16, 3))
+    loss, pixel_cnn = PixelCNNPP(nr_filters=1, nr_resnet=0, nr_logistic_mix=nr_logistic_mix,
+                                 dropout_p=0)
+    images = uniform(PRNGKey(0), (2, 16, 16, 3))
 
     params = pixel_cnn.init_parameters(images, key=PRNGKey(0))
     means_shape = f'(b, {nr_logistic_mix}, 4*h, 4*w, 3)'
     logits_shape = f'(b, {nr_logistic_mix}, 4*h, 4*w)'
+    in_shapes = ['(b, 4*h, 4*w, 3)']
+    out_shapes = (means_shape, means_shape, logits_shape)
 
-    @shapecheck(['(b, 4*h, 4*w, 3)'], (means_shape, means_shape, logits_shape))
-    def evaluate(images):
+    def apply(images):
         return pixel_cnn.apply(params, images, key=PRNGKey(0))
+
+    check(apply, in_shapes, dict(b=2, h=4, w=4), out_shapes, pad_dict=dict(b=0, h=1, w=2))
 
     # disabled for faster tests:
     # opt = optimizers.Adam()
