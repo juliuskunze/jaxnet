@@ -1,9 +1,10 @@
 import time
-from collections import namedtuple, defaultdict
+from collections import namedtuple
+from itertools import chain
 from operator import sub
 
 from jax import numpy as np, random, shapecheck, mask, eval_polymorphic_shape, partial, onp, \
-    safe_zip, safe_map
+    safe_zip, safe_map, tree_flatten, tree_unflatten, vmap, unzip2, tree_map
 from jax.api import _parse_shape_spec
 from jax.nn import relu, log_softmax, softplus, softmax
 from jax.nn.initializers import normal, glorot_normal, zeros
@@ -248,47 +249,92 @@ def test_wavenet():
 
 
 def check(fun, input_shapes, values_dict,
-          out_shape=None, pad_dict=None):
-    if out_shape is not None:
+          out_shape=None, unpadded_vars=None, custom_inputs=None,
+          skip_shapecheck=False, check_output=None):
+    if out_shape is not None and not skip_shapecheck:
         shapecheck(input_shapes, out_shape)(fun)
 
     masked_fun = mask(fun, input_shapes, out_shape)
 
-    all_pad_dict = defaultdict(lambda: 3)
-    if pad_dict is not None:
-        all_pad_dict.update(pad_dict)
-
-    padded_values_dict = {k: values_dict[k] + all_pad_dict[k] for k in values_dict.keys()}
-
     input_shapes = map(_parse_shape_spec, input_shapes)
-    concrete_shapes = map(
-        partial(eval_polymorphic_shape, values_dict=values_dict), input_shapes)
-    inputs = list(map(partial(uniform, PRNGKey(0)), concrete_shapes))
 
+    def padded_value(var):
+        is_unpadded = unpadded_vars is not None and var in unpadded_vars
+        padded_sizes = values_dict[var]
+        assert not is_unpadded or onp.all(padded_sizes == onp.max(padded_sizes))
+        return onp.max(padded_sizes) + (0 if is_unpadded else 2)
+
+    padded_values_dict = {var: padded_value(var) for var in values_dict.keys()}
     padded_input_shapes = map(partial(eval_polymorphic_shape,
                                       values_dict=padded_values_dict), input_shapes)
+    concrete_dims, tree = tree_flatten(
+        [eval_polymorphic_shape(shape, values_dict=values_dict)
+         for shape in input_shapes])
+    batched_concrete_input_shapes = tree_unflatten(tree, onp.broadcast_arrays(*concrete_dims))
+    batch_size = max(map(lambda x: 1 if len(x.shape) == 0 else x.shape[0],
+                         chain(*batched_concrete_input_shapes)))
+    is_vectorized = batch_size > 1
+    concrete_input_shapes_list = (
+        [[[dim[i] for dim in shape] for shape in batched_concrete_input_shapes] for i in
+         range(batch_size)]
+        if is_vectorized else [batched_concrete_input_shapes])
 
-    pad_widths = map(sub, map(partial(onp.array, dtype=onp.int64), padded_input_shapes),
-                     concrete_shapes)
-    padded_inputs = [np.pad(input, tuple((0, w) for w in widths),
-                            constant_values=-1) if input.ndim > 0 else input
-                     for input, widths in zip(inputs, pad_widths)]
-    out_ = fun(*inputs)
-    padded_out = masked_fun(padded_inputs, values_dict)
+    def expected_outs_and_padded_inputs(concrete_input_shapes):
+        inputs = list(map(onp.random.random_sample, concrete_input_shapes))
 
-    assert type(out_) == type(padded_out)
+        if custom_inputs is not None:
+            for index, value in custom_inputs.items():
+                inputs[index] = value
+
+        pad_widths = map(sub, map(partial(onp.array, dtype=onp.int64), padded_input_shapes),
+                         concrete_input_shapes)
+        padded_inputs = [np.pad(input, tuple((0, w) for w in widths),
+                                constant_values=-1) if input.ndim > 0 else input
+                         for input, widths in zip(inputs, pad_widths)]
+
+        outs_ = fun(*inputs)
+        return outs_, padded_inputs
 
     def check_padded_output(out_, padded_out):
         out = padded_out[tuple(slice(None, k) for k in out_.shape)]
-        onp.testing.assert_allclose(out_, out)
 
-    if type(out_) in (list, tuple):
-        map(check_padded_output, out_, padded_out)
-    else:
-        check_padded_output(out_, padded_out)
+        if check_output:
+            check_output(out_, out)
+        else:
+            onp.testing.assert_allclose(out_, out)
+
+    def check_outputs(outs_, padded_outs):
+        outs_flat_, tree_ = tree_flatten(outs_)
+        padded_outs_flat, tree = tree_flatten(padded_outs)
+        assert tree_ == tree
+
+        map(check_padded_output, outs_flat_, padded_outs_flat)
+
+    expected_outs_and_padded_ins = [
+        expected_outs_and_padded_inputs(concrete_input_shapes=concrete_input_shapes)
+        for concrete_input_shapes in concrete_input_shapes_list]
+
+    if is_vectorized:
+        expected_outs_list, padded_inputs_list = unzip2(expected_outs_and_padded_ins)
+        v_masked_fun = vmap(masked_fun)
+        input_count = len(padded_inputs_list[0])
+        padded_v_inputs = [onp.array([padded_inputs[i] for padded_inputs in padded_inputs_list]) for
+                           i in range(input_count)]
+        padded_v_outs = v_masked_fun(padded_v_inputs, values_dict)
+        padded_outs_list = [tree_map(lambda x: x[i], padded_v_outs) for i in range(batch_size)]
+        for outs_, padded_outs in zip(expected_outs_list, padded_outs_list):
+            check_outputs(outs_, padded_outs)
+
+    outs_, padded_inputs = expected_outs_and_padded_ins[0]
+    if is_vectorized:
+        values, tree = tree_flatten(values_dict)
+        values_dict = tree_unflatten(tree, [x[0] for x in onp.broadcast_arrays(*values)])
+    padded_outs = masked_fun(padded_inputs, values_dict)
+    check_outputs(outs_, padded_outs)
 
 def test_pixelcnn():
     nr_logistic_mix = 10
+    # TODO reenable dropout once https://github.com/google/jax/issues/2155 is fixed:
     loss, pixel_cnn = PixelCNNPP(nr_filters=1, nr_resnet=0, nr_logistic_mix=nr_logistic_mix,
                                  dropout_p=0)
     images = uniform(PRNGKey(0), (2, 16, 16, 3))
@@ -302,7 +348,8 @@ def test_pixelcnn():
     def apply(images):
         return pixel_cnn.apply(params, images, key=PRNGKey(0))
 
-    check(apply, in_shapes, dict(b=2, h=4, w=4), out_shapes, pad_dict=dict(b=0, h=1, w=2))
+    check(apply, in_shapes, dict(b=np.array([2, 2]), h=np.array([1, 2]), w=np.array([2, 3])),
+          out_shapes, unpadded_vars=['b'])
 
     # disabled for faster tests:
     # opt = optimizers.Adam()
