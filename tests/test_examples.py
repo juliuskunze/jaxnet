@@ -4,7 +4,7 @@ from itertools import chain
 from operator import sub
 
 from jax import numpy as np, random, shapecheck, mask, eval_polymorphic_shape, partial, onp, \
-    safe_zip, safe_map, tree_flatten, tree_unflatten, vmap, unzip2, tree_map
+    safe_zip, safe_map, tree_flatten, tree_unflatten, vmap, unzip2, tree_map, jit
 from jax.api import _parse_shape_spec
 from jax.nn import relu, log_softmax, softplus, softmax
 from jax.nn.initializers import normal, glorot_normal, zeros
@@ -301,7 +301,7 @@ def check(fun, input_shapes, values_dict,
         if check_output:
             check_output(out_, out)
         else:
-            onp.testing.assert_allclose(out_, out)
+            onp.testing.assert_allclose(out_, out, atol=1e-5)
 
     def check_outputs(outs_, padded_outs):
         outs_flat_, tree_ = tree_flatten(outs_)
@@ -316,7 +316,7 @@ def check(fun, input_shapes, values_dict,
 
     if is_vectorized:
         expected_outs_list, padded_inputs_list = unzip2(expected_outs_and_padded_ins)
-        v_masked_fun = vmap(masked_fun)
+        v_masked_fun = jit(vmap(masked_fun))
         input_count = len(padded_inputs_list[0])
         padded_v_inputs = [onp.array([padded_inputs[i] for padded_inputs in padded_inputs_list]) for
                            i in range(input_count)]
@@ -340,16 +340,17 @@ def test_pixelcnn():
     images = uniform(PRNGKey(0), (2, 16, 16, 3))
 
     params = pixel_cnn.init_parameters(images, key=PRNGKey(0))
-    means_shape = f'(b, {nr_logistic_mix}, 4*h, 4*w, 3)'
-    logits_shape = f'(b, {nr_logistic_mix}, 4*h, 4*w)'
-    in_shapes = ['(b, 4*h, 4*w, 3)']
-    out_shapes = (means_shape, means_shape, logits_shape)
 
     def apply(images):
         return pixel_cnn.apply(params, images, key=PRNGKey(0))
 
-    check(apply, in_shapes, dict(b=np.array([2, 2]), h=np.array([1, 2]), w=np.array([2, 3])),
-          out_shapes, unpadded_vars=['b'])
+    means_shape = f'(b, {nr_logistic_mix}, 4*h, 4*w, 3)'
+    logits_shape = f'(b, {nr_logistic_mix}, 4*h, 4*w)'
+    check(apply, ['(b, 4*h, 4*w, 3)'],
+          dict(b=np.array([2, 2]), h=np.array([1, 2]), w=np.array([2, 3])),
+          (means_shape, means_shape, logits_shape), unpadded_vars=['b'])
+
+    # TODO: test grad
 
     # disabled for faster tests:
     # opt = optimizers.Adam()

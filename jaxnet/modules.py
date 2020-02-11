@@ -182,11 +182,6 @@ def Rnn(cell, carry_init):
     return rnn
 
 
-# TODO remove, temporary fix for shapecheck:
-def make_dependent(x, dependence):
-    zero = (0 * dependence[[slice(0, 1) for _ in dependence.shape]].ravel()).astype(x.dtype)
-    return x + zero
-
 def Dropout(rate, test_mode=False):
     """Constructor for a dropout function with given rate."""
     rate = np.array(rate)
@@ -196,7 +191,8 @@ def Dropout(rate, test_mode=False):
         if test_mode or rate == 0:
             return inputs
 
-        keep = random.bernoulli(make_dependent(random_key(), inputs), rate, inputs.shape)
+        # TODO remove tie_in:
+        keep = random.bernoulli(lax.tie_in(inputs, random_key()), rate, inputs.shape)
         return np.where(keep, inputs / rate, 0)
 
     return dropout
