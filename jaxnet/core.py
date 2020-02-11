@@ -10,7 +10,7 @@ from jax import lax, random, unzip2, safe_zip, safe_map, partial, raise_to_shape
 from jax.abstract_arrays import ShapedArray
 from jax.core import new_master, cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, \
     TypedJaxpr, MasterTrace, full_lower, valid_jaxtype, trace_state, find_top_trace
-from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal, closure_convert_jaxpr
+from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal, convert_constvars_jaxpr
 from jax.lax.lax_control_flow import _index_array, scan_p, _abstractify, _scan_impl
 from jax.linear_util import wrap_init, transformation, transformation_with_aux
 from jax.random import PRNGKey
@@ -333,7 +333,7 @@ def _top_trace(filter_type=Trace):
 def _flat_initial_style_jaxpr(fun, in_avals):
     """lax_control_flow._initial_style_jaxpr, but for flat arguments and results."""
     jaxpr, out_avals, consts = _instantiated_trace_to_jaxpr(fun, in_avals)
-    return TypedJaxpr(closure_convert_jaxpr(jaxpr), (),
+    return TypedJaxpr(convert_constvars_jaxpr(jaxpr), (),
                       in_avals=_abstractified(consts) + in_avals,
                       out_avals=map(raise_to_shaped, out_avals)), consts
 
