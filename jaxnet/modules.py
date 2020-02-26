@@ -191,8 +191,9 @@ def Dropout(rate, test_mode=False):
         if test_mode or rate == 0:
             return inputs
 
-        keep = random.bernoulli(random_key(), rate, inputs.shape)
-        return np.where(keep, inputs / rate, 0)
+        keep_rate = 1 - rate
+        keep = random.bernoulli(random_key(), keep_rate, inputs.shape)
+        return np.where(keep, inputs / keep_rate, 0)
 
     return dropout
 

@@ -104,8 +104,9 @@ def test_pool_shape(Pool):
 
 
 @pytest.mark.parametrize('test_mode', (True, False))
-def test_Dropout_shape(test_mode, input_shape=(1, 2, 3)):
-    dropout = Dropout(.5, test_mode)
+@pytest.mark.parametrize('rate', (0., 1e-6, .5, 1.))
+def test_Dropout_shape(rate, test_mode, input_shape=(1, 2, 3)):
+    dropout = Dropout(rate, test_mode)
     inputs = np.ones(input_shape)
     p = dropout.init_parameters(inputs, key=PRNGKey(0))
     out = dropout.apply(p, inputs, key=PRNGKey(0))
@@ -114,12 +115,18 @@ def test_Dropout_shape(test_mode, input_shape=(1, 2, 3)):
     out_ = dropout.apply(p, inputs, key=PRNGKey(0))
     assert np.array_equal(out, out_)
 
-    if test_mode:
+    if test_mode or rate == 0:
         assert np.array_equal(inputs, dropout.apply(p, inputs))
         assert np.array_equal(inputs, Dropout(0).apply(p, inputs))
     else:
         out_ = dropout.apply(p, inputs, key=PRNGKey(1))
-        assert not np.array_equal(out, out_)
+
+        if rate == 1:
+            assert np.array_equal(np.zeros_like(out_), out_)
+        elif rate < 1e-5:
+            assert np.array_equal(out, out_)
+        else:
+            assert not np.array_equal(out, out_)
 
         with raises(ValueError) as e_info:
             dropout.apply(p, inputs)
