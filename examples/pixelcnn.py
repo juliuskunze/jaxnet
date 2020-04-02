@@ -146,7 +146,8 @@ def conditional_params_from_outputs(image, theta):
     means.shape == inv_scales.shape == (nr_mix, h, w, c)
     logit_probs.shape == (nr_mix, h, w)
     """
-    nr_mix = 10
+    assert theta.shape[2] % 10 == 0
+    nr_mix = theta.shape[2] // 10
     logit_probs, theta = np.split(theta, [nr_mix], axis=-1)
     logit_probs = np.moveaxis(logit_probs, -1, 0)
     theta = np.moveaxis(np.reshape(theta, image.shape + (3 * nr_mix,)), -1, 0)
