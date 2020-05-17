@@ -1,7 +1,8 @@
 # Run this example in your browser: https://colab.research.google.com/drive/1DMRbUPAxTlk0Awf3D_HR3Oz3P3MBahaJ
 from pathlib import Path
 
-from jax import np, onp, lax, random, vmap
+import numpy as np
+from jax import numpy as jnp, lax, random, vmap
 from jax.experimental.optimizers import exponential_decay
 from jax.nn import elu, sigmoid, softplus
 from jax.nn.initializers import normal
@@ -12,11 +13,11 @@ from jax.util import partial
 from jaxnet import parametrized, Parameter, Dropout, parameter, save
 from jaxnet.optimizers import Adam
 
-image_dtype = np.uint8
+image_dtype = jnp.uint8
 
 
 def _l2_normalize(arr, axis):
-    return arr / np.sqrt(np.sum(arr ** 2, axis=axis, keepdims=True))
+    return arr / jnp.sqrt(jnp.sum(arr ** 2, axis=axis, keepdims=True))
 
 
 _conv = partial(lax.conv_general_dilated, dimension_numbers=('NHWC', 'HWIO', 'NHWC'))
@@ -34,12 +35,12 @@ def ConvOrConvTranspose(out_chan, filter_shape=(3, 3), strides=None, padding='SA
     def conv_or_conv_transpose(inputs):
         V = parameter(filter_shape + (inputs.shape[-1], out_chan), normal(.05), 'V')
 
-        example_out = apply(inputs, V=V, g=np.ones(out_chan), b=np.zeros(out_chan))
+        example_out = apply(inputs, V=V, g=jnp.ones(out_chan), b=jnp.zeros(out_chan))
 
         # TODO remove need for `.aval.val` when capturing variables in initializer function:
         g = Parameter(lambda key: init_scale /
-                                  np.sqrt(np.var(example_out.aval.val, (0, 1, 2)) + 1e-10), 'g')()
-        b = Parameter(lambda key: np.mean(example_out.aval.val, (0, 1, 2)) * g.aval.val, 'b')()
+                                  jnp.sqrt(jnp.var(example_out.aval.val, (0, 1, 2)) + 1e-10), 'g')()
+        b = Parameter(lambda key: jnp.mean(example_out.aval.val, (0, 1, 2)) * g.aval.val, 'b')()
 
         return apply(inputs, V, b, g)
 
@@ -55,7 +56,7 @@ def NIN(out_chan):
 
 
 def concat_elu(x, axis=-1):
-    return elu(np.concatenate((x, -x), axis))
+    return elu(jnp.concatenate((x, -x), axis))
 
 
 def GatedResnet(Conv=None, nonlinearity=concat_elu, dropout_p=0.):
@@ -69,7 +70,7 @@ def GatedResnet(Conv=None, nonlinearity=concat_elu, dropout_p=0.):
         if dropout_p > 0:
             c1 = Dropout(rate=dropout_p)(c1)
         c2 = Conv(2 * chan, init_scale=0.1)(c1)
-        a, b = np.split(c2, 2, axis=-1)
+        a, b = jnp.split(c2, 2, axis=-1)
         c3 = a * sigmoid(b)
         return inputs + c3
 
@@ -78,12 +79,12 @@ def GatedResnet(Conv=None, nonlinearity=concat_elu, dropout_p=0.):
 
 @vmap
 def down_shift(input):
-    return np.pad(input[:-1], ((1, 0), (0, 0), (0, 0)))
+    return jnp.pad(input[:-1], ((1, 0), (0, 0), (0, 0)))
 
 
 @vmap
 def right_shift(input):
-    return np.pad(input[:, :-1], ((0, 0), (1, 0), (0, 0)))
+    return jnp.pad(input[:, :-1], ((0, 0), (1, 0), (0, 0)))
 
 
 def DownShiftedConv(out_chan, filter_shape=(2, 3), strides=None, **kwargs):
@@ -91,7 +92,7 @@ def DownShiftedConv(out_chan, filter_shape=(2, 3), strides=None, **kwargs):
 
     @parametrized
     def down_shifted_conv(inputs):
-        padded = np.pad(inputs, ((0, 0), (f_h - 1, 0), ((f_w - 1) // 2, f_w // 2), (0, 0)))
+        padded = jnp.pad(inputs, ((0, 0), (f_h - 1, 0), ((f_w - 1) // 2, f_w // 2), (0, 0)))
         return Conv(out_chan, filter_shape, strides, 'VALID', **kwargs)(padded)
 
     return down_shifted_conv
@@ -102,8 +103,8 @@ def DownShiftedConvTranspose(out_chan, filter_shape=(2, 3), strides=None, **kwar
 
     @parametrized
     def down_shifted_conv_transpose(inputs):
-        out_h, out_w = onp.multiply(onp.array(inputs.shape[-3:-1]),
-                                    onp.array(strides or (1, 1)))
+        out_h, out_w = np.multiply(np.array(inputs.shape[-3:-1]),
+                                   np.array(strides or (1, 1)))
         inputs = ConvTranspose(out_chan, filter_shape, strides, 'VALID', **kwargs)(inputs)
         return inputs[:, :out_h, (f_w - 1) // 2:out_w + (f_w - 1) // 2]
 
@@ -115,7 +116,7 @@ def DownRightShiftedConv(out_chan, filter_shape=(2, 2), strides=None, **kwargs):
 
     @parametrized
     def down_right_shifted_conv(inputs):
-        padded = np.pad(inputs, ((0, 0), (f_h - 1, 0), (f_w - 1, 0), (0, 0)))
+        padded = jnp.pad(inputs, ((0, 0), (f_h - 1, 0), (f_w - 1, 0), (0, 0)))
         return Conv(out_chan, filter_shape, strides, 'VALID', **kwargs)(padded)
 
     return down_right_shifted_conv
@@ -124,8 +125,8 @@ def DownRightShiftedConv(out_chan, filter_shape=(2, 2), strides=None, **kwargs):
 def DownRightShiftedConvTranspose(out_chan, filter_shape=(2, 2), strides=None, **kwargs):
     @parametrized
     def down_right_shifted_conv_transpose(inputs):
-        out_h, out_w = onp.multiply(onp.array(inputs.shape[-3:-1]),
-                                    onp.array(strides or (1, 1)))
+        out_h, out_w = np.multiply(np.array(inputs.shape[-3:-1]),
+                                   np.array(strides or (1, 1)))
         inputs = ConvTranspose(out_chan, filter_shape, strides, 'VALID', **kwargs)(inputs)
         return inputs[:, :out_h, :out_w]
 
@@ -147,30 +148,30 @@ def conditional_params_from_outputs(image, theta):
     logit_probs.shape == (nr_mix, h, w)
     """
     nr_mix = 10
-    logit_probs, theta = np.split(theta, [nr_mix], axis=-1)
-    logit_probs = np.moveaxis(logit_probs, -1, 0)
-    theta = np.moveaxis(np.reshape(theta, image.shape + (3 * nr_mix,)), -1, 0)
-    unconditioned_means, log_scales, coeffs = np.split(theta, 3)
-    coeffs = np.tanh(coeffs)
+    logit_probs, theta = jnp.split(theta, [nr_mix], axis=-1)
+    logit_probs = jnp.moveaxis(logit_probs, -1, 0)
+    theta = jnp.moveaxis(jnp.reshape(theta, image.shape + (3 * nr_mix,)), -1, 0)
+    unconditioned_means, log_scales, coeffs = jnp.split(theta, 3)
+    coeffs = jnp.tanh(coeffs)
 
     # now condition the means for the last 2 channels
     mean_red = unconditioned_means[..., 0]
     mean_green = unconditioned_means[..., 1] + coeffs[..., 0] * image[..., 0]
     mean_blue = (unconditioned_means[..., 2] + coeffs[..., 1] * image[..., 0]
                  + coeffs[..., 2] * image[..., 1])
-    means = np.stack((mean_red, mean_green, mean_blue), axis=-1)
+    means = jnp.stack((mean_red, mean_green, mean_blue), axis=-1)
     inv_scales = softplus(log_scales)
     return means, inv_scales, logit_probs
 
 
 def logprob_from_conditional_params(images, means, inv_scales, logit_probs):
-    images = np.expand_dims(images, 1)
+    images = jnp.expand_dims(images, 1)
     cdf = lambda offset: sigmoid((images - means + offset) * inv_scales)
-    upper_cdf = np.where(images == 1, 1, cdf(1 / 255))
-    lower_cdf = np.where(images == -1, 0, cdf(-1 / 255))
-    all_logprobs = np.sum(np.log(np.maximum(upper_cdf - lower_cdf, 1e-12)), -1)
+    upper_cdf = jnp.where(images == 1, 1, cdf(1 / 255))
+    lower_cdf = jnp.where(images == -1, 0, cdf(-1 / 255))
+    all_logprobs = jnp.sum(jnp.log(jnp.maximum(upper_cdf - lower_cdf, 1e-12)), -1)
     log_mix_coeffs = logit_probs - logsumexp(logit_probs, -3, keepdims=True)
-    return np.sum(logsumexp(log_mix_coeffs + all_logprobs, axis=-3), axis=(-2, -1))
+    return jnp.sum(logsumexp(log_mix_coeffs + all_logprobs, axis=-3), axis=(-2, -1))
 
 
 def center(image):
@@ -210,7 +211,7 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
             uls = uls.copy()
             for _ in range(nr_resnet):
                 u = ResnetDown()(u, us.pop())
-                ul = ResnetDownRight()(ul, np.concatenate((u, uls.pop()), -1))
+                ul = ResnetDownRight()(ul, jnp.concatenate((u, uls.pop()), -1))
 
             return u, ul, us, uls
 
@@ -218,7 +219,7 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
 
     @parametrized
     def up_pass(images):
-        images = np.pad(images, ((0, 0), (0, 0), (0, 0), (0, 1)), constant_values=1)
+        images = jnp.pad(images, ((0, 0), (0, 0), (0, 0), (0, 1)), constant_values=1)
         us = [down_shift(ConvDown(filter_shape=(2, 3))(images))]
         uls = [down_shift(ConvDown(filter_shape=(1, 3))(images)) +
                right_shift(ConvDownRight(filter_shape=(2, 1))(images))]
@@ -250,9 +251,9 @@ def PixelCNNPP(nr_resnet=5, nr_filters=160, nr_logistic_mix=10, dropout_p=.5):
     def loss(images):
         images = center(images)
         losses = -(logprob_from_conditional_params(images, *pixel_cnn(images))
-                   * np.log2(np.e) / images[0].size)
+                   * jnp.log2(jnp.e) / images[0].size)
         assert losses.shape == (images.shape[0],)
-        return np.mean(losses)
+        return jnp.mean(losses)
 
     return loss, pixel_cnn
 

@@ -22,11 +22,11 @@ creates a neural net model from predefined modules.
 Define your own modules using `@parametrized` functions. You can reuse other modules:
 
 ```python
-from jax import numpy as np
+from jax import numpy as jnp
 
 @parametrized
 def loss(inputs, targets):
-    return -np.mean(net(inputs) * targets)
+    return -jnp.mean(net(inputs) * targets)
 ```
 
 All modules are composed in this way.
@@ -58,7 +58,7 @@ They are initialized with `init_parameters`, provided example inputs and a rando
 ```python
 from jax.random import PRNGKey
 
-def next_batch(): return np.zeros((3, 784)), np.zeros((3, 4))
+def next_batch(): return jnp.zeros((3, 784)), jnp.zeros((3, 4))
 
 params = loss.init_parameters(*next_batch(), key=PRNGKey(0))
 

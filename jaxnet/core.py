@@ -5,16 +5,16 @@ from typing import Iterable
 
 import dill
 import jax
-from jax import lax, random, unzip2, safe_zip, safe_map, partial, raise_to_shaped, tree_flatten, \
+from jax import lax, random, partial, tree_flatten, \
     tree_unflatten, flatten_fun_nokwargs, jit, curry
 from jax.abstract_arrays import ShapedArray
 from jax.core import new_master, cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, \
-    TypedJaxpr, MasterTrace, full_lower, valid_jaxtype, trace_state, find_top_trace
+    TypedJaxpr, MasterTrace, full_lower, valid_jaxtype, trace_state, find_top_trace, raise_to_shaped
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal, convert_constvars_jaxpr
 from jax.lax.lax_control_flow import _index_array, scan_p, _abstractify, _scan_impl
 from jax.linear_util import wrap_init, transformation, transformation_with_aux
 from jax.random import PRNGKey
-from jax.util import split_list, split_dict, cache
+from jax.util import split_list, split_dict, cache, safe_zip, safe_map, unzip2
 
 zip = safe_zip
 map = safe_map
@@ -341,8 +341,8 @@ def _flat_initial_style_jaxpr(fun, in_avals):
 def _custom_cell_scan_impl(flat_cell, *args, **kwargs):
     """lax_control_flow._scan_impl, but allowing for a custom cell function."""
 
-    forward, length, num_consts, num_carry, jaxpr, linear = split_dict(
-        kwargs, ["forward", "length", "num_consts", "num_carry", "jaxpr", "linear"])
+    reverse, length, num_consts, num_carry, jaxpr, linear = split_dict(
+        kwargs, ["reverse", "length", "num_consts", "num_carry", "jaxpr", "linear"])
 
     consts, init, xs = split_list(args, [num_consts, num_carry])
     _, _, x_avals = split_list(jaxpr.in_avals, [num_consts, num_carry])
