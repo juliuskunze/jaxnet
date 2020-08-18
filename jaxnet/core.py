@@ -9,7 +9,8 @@ from jax import lax, random, partial, tree_flatten, \
     tree_unflatten, flatten_fun_nokwargs, jit, curry
 from jax.abstract_arrays import ShapedArray
 from jax.core import new_master, cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, \
-    TypedJaxpr, MasterTrace, full_lower, valid_jaxtype, trace_state, find_top_trace, raise_to_shaped
+    TypedJaxpr, MasterTrace, full_lower, valid_jaxtype, thread_local_state, find_top_trace, \
+    raise_to_shaped
 from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal, convert_constvars_jaxpr
 from jax.lax.lax_control_flow import _index_array, scan_p, _abstractify, _scan_impl
 from jax.linear_util import wrap_init, transformation, transformation_with_aux
@@ -319,7 +320,7 @@ def _top_trace(filter_type=Trace):
     """Needed when parametrized function has no arguments provided,
     so it cannot retrieve the trace from its input tracers."""
 
-    traces = [trace for trace in trace_state.trace_stack.upward if
+    traces = [trace for trace in thread_local_state.trace_state.trace_stack.upward if
               issubclass(trace.trace_type, filter_type)]
 
     if len(traces) == 0:
@@ -341,8 +342,8 @@ def _flat_initial_style_jaxpr(fun, in_avals):
 def _custom_cell_scan_impl(flat_cell, *args, **kwargs):
     """lax_control_flow._scan_impl, but allowing for a custom cell function."""
 
-    reverse, length, num_consts, num_carry, jaxpr, linear = split_dict(
-        kwargs, ["reverse", "length", "num_consts", "num_carry", "jaxpr", "linear"])
+    reverse, length, num_consts, num_carry, jaxpr, linear, unroll = split_dict(
+        kwargs, ["reverse", "length", "num_consts", "num_carry", "jaxpr", "linear", "unroll"])
 
     consts, init, xs = split_list(args, [num_consts, num_carry])
     _, _, x_avals = split_list(jaxpr.in_avals, [num_consts, num_carry])

@@ -5,7 +5,7 @@ from jax import random, lax, numpy as np, tree_map, tree_leaves, vmap, partial
 from jax.nn import sigmoid
 from jax.nn.initializers import glorot_normal, normal, zeros, ones
 
-from jaxnet.core import parametrized, Parameter, random_key
+from .core import parametrized, Parameter, random_key
 
 
 def parameter(shape, init, name=None):
