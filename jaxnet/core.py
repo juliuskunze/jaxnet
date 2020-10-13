@@ -1,17 +1,16 @@
 from collections import namedtuple, Counter, defaultdict
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Callable
 
 import dill
 import jax
-from jax import lax, random, partial, tree_flatten, \
-    tree_unflatten, flatten_fun_nokwargs, jit, curry
+from jax import lax, random, partial, tree_flatten, tree_unflatten, flatten_fun_nokwargs, jit, curry
 from jax.abstract_arrays import ShapedArray
-from jax.core import new_master, cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, \
-    TypedJaxpr, MasterTrace, full_lower, valid_jaxtype, thread_local_state, find_top_trace, \
-    raise_to_shaped
-from jax.interpreters.partial_eval import trace_to_jaxpr, PartialVal, convert_constvars_jaxpr
+from jax.core import (
+    cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, full_lower, valid_jaxtype,
+    thread_local_state, find_top_trace, ClosedJaxpr, new_main, MainTrace)
+from jax.interpreters import partial_eval as pe, xla
 from jax.lax.lax_control_flow import _index_array, scan_p, _abstractify, _scan_impl
 from jax.linear_util import wrap_init, transformation, transformation_with_aux
 from jax.random import PRNGKey
@@ -30,9 +29,9 @@ def bind(self, *args, **kwargs):
                                        or valid_jaxtype(arg) for arg in args), args
 
     trace = _top_trace()
-
-    assert (jax.core.skip_checks or find_top_trace(args) is None or
-            find_top_trace(args).master is trace.master), args
+    main = find_top_trace(args).main
+    dynamic = thread_local_state.trace_state.trace_stack.dynamic
+    assert (jax.core.skip_checks or main is dynamic or main is trace.main), args
 
     tracers = map(trace.full_raise, args)
     out_tracer = trace.process_primitive(self, tracers, kwargs)
@@ -113,6 +112,12 @@ class parametrized(Primitive):
         self._wrapped_example_outputs_fun = wrap_init(self._example_outputs)
         self._jitted_apply = jit(self._apply)
 
+        def call_flattened(*flat_inputs, in_tree, out_tree_container):
+            flat_fun, _ = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
+            return flat_fun.call_wrapped(*flat_inputs)
+
+        xla.translations[self] = xla.lower_fun(call_flattened, multiple_results=True)
+
     def init_parameters(self, *example_inputs, key, reuse=None):
         return self._init_parameters(*example_inputs, key=key, reuse=reuse, reuse_only=False)
 
@@ -123,7 +128,7 @@ class parametrized(Primitive):
         flat_inputs, in_tree = tree_flatten(inputs)
         flat_fun, out_tree = flatten_fun_nokwargs(self._wrapped_fun, in_tree)
         apply_trace = _top_trace(filter_type=ApplyTrace)
-        with new_master(ApplyTrace) as master:
+        with new_main(ApplyTrace) as master:
             global_parameters_by_primitive = apply_trace.state.global_parameters_by_primitive \
                 if apply_trace else {}
             random_state = apply_trace.state.random_state if apply_trace else RandomState(key)
@@ -310,8 +315,8 @@ def _abstractified(vals):
 
 
 def _instantiated_trace_to_jaxpr(fun, avals):
-    pvals = map(lambda aval: PartialVal((aval, unit)), avals)
-    jaxpr, out_pvals, consts = trace_to_jaxpr(fun, pvals, instantiate=True)
+    pvals = map(lambda aval: pe.PartialVal((aval, unit)), avals)
+    jaxpr, out_pvals, consts = pe.trace_to_jaxpr(fun, pvals, instantiate=True)
     out_avals, _ = unzip2(out_pvals)
     return jaxpr, out_avals, consts
 
@@ -320,7 +325,7 @@ def _top_trace(filter_type=Trace):
     """Needed when parametrized function has no arguments provided,
     so it cannot retrieve the trace from its input tracers."""
 
-    traces = [trace for trace in thread_local_state.trace_state.trace_stack.upward if
+    traces = [trace for trace in thread_local_state.trace_state.trace_stack.stack if
               issubclass(trace.trace_type, filter_type)]
 
     if len(traces) == 0:
@@ -331,13 +336,11 @@ def _top_trace(filter_type=Trace):
 
 
 @cache()
-def _flat_initial_style_jaxpr(fun, in_avals):
+def _flat_initial_style_jaxpr(fun: Callable, in_avals):
     """lax_control_flow._initial_style_jaxpr, but for flat arguments and results."""
-    jaxpr, out_avals, consts = _instantiated_trace_to_jaxpr(fun, in_avals)
-    return TypedJaxpr(convert_constvars_jaxpr(jaxpr), (),
-                      in_avals=_abstractified(consts) + in_avals,
-                      out_avals=map(raise_to_shaped, out_avals)), consts
-
+    jaxpr, out_avals, consts = pe.trace_to_jaxpr_dynamic(fun, in_avals)
+    closed_jaxpr = ClosedJaxpr(pe.convert_constvars_jaxpr(jaxpr), ())
+    return closed_jaxpr, consts
 
 def _custom_cell_scan_impl(flat_cell, *args, **kwargs):
     """lax_control_flow._scan_impl, but allowing for a custom cell function."""
@@ -498,7 +501,7 @@ class InitTrace(ParametrizedTrace):
 
     @property
     def state(self) -> InitTraceState:
-        return self.master.state
+        return self.main.state
 
     def _process_parametrized_nonflat(self, primitive: parametrized, *inputs):
         parameters_dict = self.state.get_parameters_dict_for(primitive)
@@ -520,7 +523,7 @@ def _init_transform(key, *inputs):
     """Transforms a flattened `parametrized` function
     into its corresponding `init_parameters` function."""
     init_trace = _top_trace(filter_type=InitTrace)
-    with new_master(InitTrace) as master:
+    with new_main(InitTrace) as master:
         global_parameters_dict = init_trace.state.global_parameters_dict if init_trace else {}
         random_state = init_trace.state.random_state if init_trace else RandomState(key)
         master.state = InitTraceState(random_state, global_parameters_dict)
@@ -533,7 +536,7 @@ def _init_transform(key, *inputs):
 
 
 @transformation
-def _apply_transform(master: MasterTrace, *inputs):
+def _apply_transform(master: MainTrace, *inputs):
     """Transforms a flattened `parametrized` function into its corresponding `apply` function."""
     trace = ApplyTrace(master, cur_sublevel())
     outs = yield map(trace.full_raise, inputs), {}
@@ -567,13 +570,13 @@ class ApplyTrace(ParametrizedTrace):
 
     @property
     def state(self) -> ApplyTraceState:
-        return self.master.state
+        return self.main.state
 
     def _process_parametrized_nonflat(self, primitive: parametrized, *inputs):
         return primitive.apply(self.state.next_parameters_for(primitive), *inputs)
 
     def _process_jitted(self, primitive, f, inputs, kwargs):
-        fun = _apply_transform(f, self.master)
+        fun = _apply_transform(f, self.main)
         return primitive.bind(fun, *inputs, **kwargs)
 
 
