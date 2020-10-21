@@ -6,12 +6,12 @@ from typing import Iterable, Callable
 import dill
 import jax
 from jax import lax, random, partial, tree_flatten, tree_unflatten, flatten_fun_nokwargs, jit, curry
+from jax._src.lax.control_flow import _index_array, scan_p, _abstractify, _scan_impl
 from jax.abstract_arrays import ShapedArray
 from jax.core import (
     cur_sublevel, Tracer, Trace, Primitive, get_aval, unit, full_lower, valid_jaxtype,
     thread_local_state, find_top_trace, ClosedJaxpr, new_main, MainTrace)
 from jax.interpreters import partial_eval as pe, xla
-from jax.lax.lax_control_flow import _index_array, scan_p, _abstractify, _scan_impl
 from jax.linear_util import wrap_init, transformation, transformation_with_aux
 from jax.random import PRNGKey
 from jax.util import split_list, split_dict, cache, safe_zip, safe_map, unzip2
@@ -517,6 +517,12 @@ class InitTrace(ParametrizedTrace):
     def _process_jitted(self, primitive, f, inputs, kwargs):
         return f.call_wrapped(*inputs)
 
+    def process_custom_jvp_call(self, primitive, fun, jvp, tracers):
+        return fun.call_wrapped(*tracers)  # TODO
+
+    def process_custom_vjp_call(self, primitive, fun, fwd, bwd, tracers, out_trees):
+        return fun.call_wrapped(*tracers)  # TODO
+
 
 @transformation_with_aux
 def _init_transform(key, *inputs):
@@ -578,6 +584,12 @@ class ApplyTrace(ParametrizedTrace):
     def _process_jitted(self, primitive, f, inputs, kwargs):
         fun = _apply_transform(f, self.main)
         return primitive.bind(fun, *inputs, **kwargs)
+
+    def process_custom_jvp_call(self, primitive, fun, jvp, tracers):
+        return fun.call_wrapped(*tracers)  # TODO
+
+    def process_custom_vjp_call(self, primitive, fun, fwd, bwd, tracers, out_trees):
+        return fun.call_wrapped(*tracers)  # TODO
 
 
 def _get_name_for(fun):
